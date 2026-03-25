@@ -102,13 +102,6 @@ export default function App() {
     <div className="app-shell">
       <aside className="side-panel">
         <div className="side-panel-header">
-          <div>
-            <p className="brand-kicker">Shepherd Hub</p>
-            <p className="brand-copy">
-              Workspace for congregation support and visitation planning.
-            </p>
-          </div>
-
           <button
             type="button"
             className={`menu-toggle${isMobileMenuOpen ? " open" : ""}`}
@@ -121,6 +114,10 @@ export default function App() {
             <span />
             <span />
           </button>
+
+          <div>
+            <p className="brand-kicker">Shepherd Hub</p>
+          </div>
         </div>
 
         <nav
