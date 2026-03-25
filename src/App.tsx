@@ -122,6 +122,7 @@ const parseMemberData = (value: string): StoredMemberData | null => {
 };
 
 export default function App() {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
   const [challengeResponse, setChallengeResponse] = useState("");
   const [authStatus, setAuthStatus] = useState<"checking" | "signed-in" | "signed-out">(
@@ -187,6 +188,18 @@ export default function App() {
       setIsBackendLoading(false);
     }
   };
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem("shepherd-hub-theme");
+
+    if (savedTheme === "light" || savedTheme === "dark") {
+      setTheme(savedTheme);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("shepherd-hub-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     void checkAuthSession();
@@ -363,6 +376,10 @@ export default function App() {
     setBackendError(null);
   };
 
+  const toggleTheme = () => {
+    setTheme((current) => (current === "light" ? "dark" : "light"));
+  };
+
   const applyVisitationAction = (
     memberKey: string,
     action: keyof VisitationActionState,
@@ -431,7 +448,7 @@ export default function App() {
               : "Challenge response";
 
     return (
-      <div className="auth-shell">
+      <div className="auth-shell" data-theme={theme}>
         <form
           className="auth-card"
           onSubmit={pendingSignInStep ? handleConfirmSignIn : handleSignIn}
@@ -511,7 +528,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={theme}>
       <aside className="side-panel">
         <div className="side-panel-header">
           <button
@@ -571,6 +588,13 @@ export default function App() {
           <div className="nav-section">
             <p className="nav-section-label">Session</p>
             <div className="nav-section-items">
+              <button
+                type="button"
+                className="nav-item theme-toggle-button"
+                onClick={toggleTheme}
+              >
+                {theme === "light" ? "Dark Mode" : "Light Mode"}
+              </button>
               <button
                 type="button"
                 className="nav-item sign-out-button"
