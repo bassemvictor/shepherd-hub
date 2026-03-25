@@ -67,6 +67,10 @@ type MemberFormState = {
   notes: string;
 };
 
+type StoredMemberData = Partial<MemberFormState> & {
+  createdAt?: string;
+};
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
   firstName: "",
@@ -77,6 +81,14 @@ const initialMemberForm: MemberFormState = {
   status: "",
   address: "",
   notes: "",
+};
+
+const parseMemberData = (value: string): StoredMemberData | null => {
+  try {
+    return JSON.parse(value) as StoredMemberData;
+  } catch {
+    return null;
+  }
 };
 
 export default function App() {
@@ -242,14 +254,32 @@ export default function App() {
 
               {!isBackendLoading && !backendError && backendMessage ? (
                 <div className="api-data-list">
-                  {backendMessage.items.map((item) => (
-                    <article className="api-data-item" key={`${item.pk}-${item.sk}`}>
-                      <p className="api-data-key">
-                        {item.pk} / {item.sk}
-                      </p>
-                      <p className="api-data-value">{item.data}</p>
-                    </article>
-                  ))}
+                  {backendMessage.items.map((item) => {
+                    const memberData = parseMemberData(item.data);
+                    const fullName = [memberData?.firstName, memberData?.lastName]
+                      .filter(Boolean)
+                      .join(" ");
+
+                    return (
+                      <article className="api-data-item" key={`${item.pk}-${item.sk}`}>
+                        <p className="api-data-key">
+                          {item.pk} / {item.sk}
+                        </p>
+
+                        {memberData ? (
+                          <div className="api-data-details">
+                            <p className="api-data-name">{fullName || "Unnamed member"}</p>
+                            <div className="api-data-meta">
+                              <span>{memberData.role || "No role"}</span>
+                              <span>{memberData.status || "No status"}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="api-data-value">{item.data}</p>
+                        )}
+                      </article>
+                    );
+                  })}
                 </div>
               ) : null}
             </div>

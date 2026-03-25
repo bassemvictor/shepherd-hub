@@ -211,6 +211,35 @@ button {
   color: rgba(248, 250, 252, 0.72);
 }
 
+.api-data-details {
+  margin-top: 0.45rem;
+}
+
+.api-data-name {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.api-data-meta {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.55rem;
+}
+
+.api-data-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(244, 196, 48, 0.16);
+  color: #f8fafc;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .api-data-value {
   margin-top: 0.35rem;
 }
