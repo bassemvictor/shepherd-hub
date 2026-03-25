@@ -1,0 +1,113 @@
+0 verbose cli /opt/homebrew/Cellar/node/23.7.0/bin/node /opt/homebrew/bin/npm
+1 info using npm@10.9.2
+2 info using node@v23.7.0
+3 silly config load:file:/opt/homebrew/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/sallysamuel/workspace/shepherd-hub/.npmrc
+5 silly config load:file:/Users/sallysamuel/.npmrc
+6 silly config load:file:/opt/homebrew/etc/npmrc
+7 verbose title npm ci
+8 verbose argv "ci" "--cache" ".npm" "--prefer-offline"
+9 verbose logfile logs-max:10 dir:/Users/sallysamuel/workspace/shepherd-hub/.npm/_logs/2026-03-25T16_10_20_906Z-
+10 verbose logfile /Users/sallysamuel/workspace/shepherd-hub/.npm/_logs/2026-03-25T16_10_20_906Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+13 silly idealTree buildDeps
+14 silly fetch manifest zod@3.25.17
+15 silly packumentCache full:https://registry.npmjs.org/zod cache-miss
+16 http cache https://registry.npmjs.org/zod 34ms (cache hit)
+17 silly packumentCache full:https://registry.npmjs.org/zod set size:3489329 disposed:false
+18 silly placeDep ROOT zod@3.25.17 KEEP for: @aws-amplify/backend-output-schemas@1.8.0 want: 3.25.17
+19 warn ERESOLVE overriding peer dependency {
+19 warn ERESOLVE   code: 'ERESOLVE',
+19 warn ERESOLVE   edge: {
+19 warn ERESOLVE     type: 'peer',
+19 warn ERESOLVE     name: 'zod',
+19 warn ERESOLVE     spec: '3.25.17',
+19 warn ERESOLVE     error: 'PEER LOCAL',
+19 warn ERESOLVE     from: {
+19 warn ERESOLVE       name: '@aws-amplify/backend-output-schemas',
+19 warn ERESOLVE       version: '1.8.0',
+19 warn ERESOLVE       location: 'node_modules/@aws-amplify/data-construct/node_modules/@aws-amplify/backend-output-schemas',
+19 warn ERESOLVE       isWorkspace: false,
+19 warn ERESOLVE       dependents: [Array]
+19 warn ERESOLVE     }
+19 warn ERESOLVE   },
+19 warn ERESOLVE   dep: {
+19 warn ERESOLVE     name: 'zod',
+19 warn ERESOLVE     version: '3.25.17',
+19 warn ERESOLVE     whileInstalling: {
+19 warn ERESOLVE       name: '@aws-amplify/backend-output-schemas',
+19 warn ERESOLVE       version: '1.8.0',
+19 warn ERESOLVE       path: '/Users/sallysamuel/workspace/shepherd-hub/node_modules/@aws-amplify/data-construct/node_modules/@aws-amplify/backend-output-schemas'
+19 warn ERESOLVE     },
+19 warn ERESOLVE     location: 'node_modules/zod',
+19 warn ERESOLVE     isWorkspace: false,
+19 warn ERESOLVE     dependents: [ [Object] ]
+19 warn ERESOLVE   },
+19 warn ERESOLVE   force: false,
+19 warn ERESOLVE   isMine: false,
+19 warn ERESOLVE   strictPeerDeps: false,
+19 warn ERESOLVE   current: {
+19 warn ERESOLVE     name: 'zod',
+19 warn ERESOLVE     version: '3.25.17',
+19 warn ERESOLVE     location: 'node_modules/@aws-amplify/data-construct/node_modules/@aws-amplify/backend-output-schemas/node_modules/zod',
+19 warn ERESOLVE     isWorkspace: false,
+19 warn ERESOLVE     dependents: []
+19 warn ERESOLVE   }
+19 warn ERESOLVE }
+20 silly placeDep ROOT zod@3.25.17 KEEP for: @aws-amplify/backend-output-schemas@1.8.0 want: 3.25.17
+21 warn ERESOLVE overriding peer dependency {
+21 warn ERESOLVE   code: 'ERESOLVE',
+21 warn ERESOLVE   edge: {
+21 warn ERESOLVE     type: 'peer',
+21 warn ERESOLVE     name: 'zod',
+21 warn ERESOLVE     spec: '3.25.17',
+21 warn ERESOLVE     error: 'PEER LOCAL',
+21 warn ERESOLVE     from: {
+21 warn ERESOLVE       name: '@aws-amplify/backend-output-schemas',
+21 warn ERESOLVE       version: '1.8.0',
+21 warn ERESOLVE       location: 'node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/backend-output-schemas',
+21 warn ERESOLVE       isWorkspace: false,
+21 warn ERESOLVE       dependents: [Array]
+21 warn ERESOLVE     }
+21 warn ERESOLVE   },
+21 warn ERESOLVE   dep: {
+21 warn ERESOLVE     name: 'zod',
+21 warn ERESOLVE     version: '3.25.17',
+21 warn ERESOLVE     whileInstalling: {
+21 warn ERESOLVE       name: '@aws-amplify/backend-output-schemas',
+21 warn ERESOLVE       version: '1.8.0',
+21 warn ERESOLVE       path: '/Users/sallysamuel/workspace/shepherd-hub/node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/backend-output-schemas'
+21 warn ERESOLVE     },
+21 warn ERESOLVE     location: 'node_modules/zod',
+21 warn ERESOLVE     isWorkspace: false,
+21 warn ERESOLVE     dependents: [ [Object] ]
+21 warn ERESOLVE   },
+21 warn ERESOLVE   force: false,
+21 warn ERESOLVE   isMine: false,
+21 warn ERESOLVE   strictPeerDeps: false,
+21 warn ERESOLVE   current: {
+21 warn ERESOLVE     name: 'zod',
+21 warn ERESOLVE     version: '3.25.17',
+21 warn ERESOLVE     location: 'node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/backend-output-schemas/node_modules/zod',
+21 warn ERESOLVE     isWorkspace: false,
+21 warn ERESOLVE     dependents: []
+21 warn ERESOLVE   }
+21 warn ERESOLVE }
+22 silly reify moves {}
+23 http cache @aws-cdk/cx-api@https://registry.npmjs.org/@aws-cdk/cx-api/-/cx-api-2.244.0.tgz 0ms (cache hit)
+24 http cache @aws-cdk/cloud-assembly-api@https://registry.npmjs.org/@aws-cdk/cloud-assembly-api/-/cloud-assembly-api-2.1.1.tgz 0ms (cache hit)
+25 http cache aws-cdk-lib@https://registry.npmjs.org/aws-cdk-lib/-/aws-cdk-lib-2.244.0.tgz 0ms (cache hit)
+26 http cache @aws-amplify/graphql-api-construct@https://registry.npmjs.org/@aws-amplify/graphql-api-construct/-/graphql-api-construct-1.21.1.tgz 0ms (cache hit)
+27 http cache @aws-amplify/data-construct@https://registry.npmjs.org/@aws-amplify/data-construct/-/data-construct-1.17.1.tgz 0ms (cache hit)
+28 http cache @aws-cdk/cloud-assembly-schema@https://registry.npmjs.org/@aws-cdk/cloud-assembly-schema/-/cloud-assembly-schema-53.7.0.tgz 0ms (cache hit)
+29 silly tarball no local data for @aws-cdk/cx-api@https://registry.npmjs.org/@aws-cdk/cx-api/-/cx-api-2.244.0.tgz. Extracting by manifest.
+30 silly tarball no local data for @aws-cdk/cloud-assembly-api@https://registry.npmjs.org/@aws-cdk/cloud-assembly-api/-/cloud-assembly-api-2.1.1.tgz. Extracting by manifest.
+31 silly tarball no local data for aws-cdk-lib@https://registry.npmjs.org/aws-cdk-lib/-/aws-cdk-lib-2.244.0.tgz. Extracting by manifest.
+32 silly tarball no local data for @aws-amplify/graphql-api-construct@https://registry.npmjs.org/@aws-amplify/graphql-api-construct/-/graphql-api-construct-1.21.1.tgz. Extracting by manifest.
+33 silly tarball no local data for @aws-amplify/data-construct@https://registry.npmjs.org/@aws-amplify/data-construct/-/data-construct-1.17.1.tgz. Extracting by manifest.
+34 silly tarball no local data for @aws-cdk/cloud-assembly-schema@https://registry.npmjs.org/@aws-cdk/cloud-assembly-schema/-/cloud-assembly-schema-53.7.0.tgz. Extracting by manifest.
+35 http fetch GET 200 https://registry.npmjs.org/@aws-cdk/cloud-assembly-schema/-/cloud-assembly-schema-53.7.0.tgz 323ms (cache miss)
+36 http fetch GET 200 https://registry.npmjs.org/@aws-cdk/cloud-assembly-api/-/cloud-assembly-api-2.1.1.tgz 573ms (cache miss)
+37 http fetch GET 200 https://registry.npmjs.org/@aws-cdk/cx-api/-/cx-api-2.244.0.tgz 626ms (cache miss)
+38 http fetch GET 200 https://registry.npmjs.org/aws-cdk-lib/-/aws-cdk-lib-2.244.0.tgz 9107ms (cache miss)

@@ -1,0 +1,222 @@
+0 verbose cli /opt/homebrew/Cellar/node/23.7.0/bin/node /opt/homebrew/bin/npm
+1 info using npm@10.9.2
+2 info using node@v23.7.0
+3 silly config load:file:/opt/homebrew/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/sallysamuel/workspace/shepherd-hub/.npmrc
+5 silly config load:file:/Users/sallysamuel/.npmrc
+6 silly config load:file:/opt/homebrew/etc/npmrc
+7 verbose title npm ci
+8 verbose argv "ci" "--cache" ".npm" "--prefer-offline" "--loglevel" "verbose"
+9 verbose logfile logs-max:10 dir:/Users/sallysamuel/workspace/shepherd-hub/.npm/_logs/2026-03-25T16_09_12_876Z-
+10 verbose logfile /Users/sallysamuel/workspace/shepherd-hub/.npm/_logs/2026-03-25T16_09_12_876Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+13 silly idealTree buildDeps
+14 silly fetch manifest zod@3.25.17
+15 silly packumentCache full:https://registry.npmjs.org/zod cache-miss
+16 http fetch GET 200 https://registry.npmjs.org/zod 203ms (cache miss)
+17 silly packumentCache full:https://registry.npmjs.org/zod set size:undefined disposed:false
+18 silly placeDep ROOT zod@3.25.17 KEEP for: @aws-amplify/backend-output-schemas@1.8.0 want: 3.25.17
+19 warn ERESOLVE overriding peer dependency {
+19 warn ERESOLVE   code: 'ERESOLVE',
+19 warn ERESOLVE   edge: {
+19 warn ERESOLVE     type: 'peer',
+19 warn ERESOLVE     name: 'zod',
+19 warn ERESOLVE     spec: '3.25.17',
+19 warn ERESOLVE     error: 'PEER LOCAL',
+19 warn ERESOLVE     from: {
+19 warn ERESOLVE       name: '@aws-amplify/backend-output-schemas',
+19 warn ERESOLVE       version: '1.8.0',
+19 warn ERESOLVE       location: 'node_modules/@aws-amplify/data-construct/node_modules/@aws-amplify/backend-output-schemas',
+19 warn ERESOLVE       isWorkspace: false,
+19 warn ERESOLVE       dependents: [Array]
+19 warn ERESOLVE     }
+19 warn ERESOLVE   },
+19 warn ERESOLVE   dep: {
+19 warn ERESOLVE     name: 'zod',
+19 warn ERESOLVE     version: '3.25.17',
+19 warn ERESOLVE     whileInstalling: {
+19 warn ERESOLVE       name: '@aws-amplify/backend-output-schemas',
+19 warn ERESOLVE       version: '1.8.0',
+19 warn ERESOLVE       path: '/Users/sallysamuel/workspace/shepherd-hub/node_modules/@aws-amplify/data-construct/node_modules/@aws-amplify/backend-output-schemas'
+19 warn ERESOLVE     },
+19 warn ERESOLVE     location: 'node_modules/zod',
+19 warn ERESOLVE     isWorkspace: false,
+19 warn ERESOLVE     dependents: [ [Object] ]
+19 warn ERESOLVE   },
+19 warn ERESOLVE   force: false,
+19 warn ERESOLVE   isMine: false,
+19 warn ERESOLVE   strictPeerDeps: false,
+19 warn ERESOLVE   current: {
+19 warn ERESOLVE     name: 'zod',
+19 warn ERESOLVE     version: '3.25.17',
+19 warn ERESOLVE     location: 'node_modules/@aws-amplify/data-construct/node_modules/@aws-amplify/backend-output-schemas/node_modules/zod',
+19 warn ERESOLVE     isWorkspace: false,
+19 warn ERESOLVE     dependents: []
+19 warn ERESOLVE   }
+19 warn ERESOLVE }
+20 silly fetch manifest fast-xml-parser@4.4.1
+21 silly packumentCache full:https://registry.npmjs.org/fast-xml-parser cache-miss
+22 http fetch GET 200 https://registry.npmjs.org/fast-xml-parser 107ms (cache miss)
+23 silly packumentCache full:https://registry.npmjs.org/fast-xml-parser set size:undefined disposed:false
+24 silly placeDep node_modules/@aws-amplify/data-construct/node_modules/@aws-sdk/core fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.635.0 want: 4.4.1
+25 silly placeDep ROOT zod@3.25.17 KEEP for: @aws-amplify/backend-output-schemas@1.8.0 want: 3.25.17
+26 warn ERESOLVE overriding peer dependency {
+26 warn ERESOLVE   code: 'ERESOLVE',
+26 warn ERESOLVE   edge: {
+26 warn ERESOLVE     type: 'peer',
+26 warn ERESOLVE     name: 'zod',
+26 warn ERESOLVE     spec: '3.25.17',
+26 warn ERESOLVE     error: 'PEER LOCAL',
+26 warn ERESOLVE     from: {
+26 warn ERESOLVE       name: '@aws-amplify/backend-output-schemas',
+26 warn ERESOLVE       version: '1.8.0',
+26 warn ERESOLVE       location: 'node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/backend-output-schemas',
+26 warn ERESOLVE       isWorkspace: false,
+26 warn ERESOLVE       dependents: [Array]
+26 warn ERESOLVE     }
+26 warn ERESOLVE   },
+26 warn ERESOLVE   dep: {
+26 warn ERESOLVE     name: 'zod',
+26 warn ERESOLVE     version: '3.25.17',
+26 warn ERESOLVE     whileInstalling: {
+26 warn ERESOLVE       name: '@aws-amplify/backend-output-schemas',
+26 warn ERESOLVE       version: '1.8.0',
+26 warn ERESOLVE       path: '/Users/sallysamuel/workspace/shepherd-hub/node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/backend-output-schemas'
+26 warn ERESOLVE     },
+26 warn ERESOLVE     location: 'node_modules/zod',
+26 warn ERESOLVE     isWorkspace: false,
+26 warn ERESOLVE     dependents: [ [Object] ]
+26 warn ERESOLVE   },
+26 warn ERESOLVE   force: false,
+26 warn ERESOLVE   isMine: false,
+26 warn ERESOLVE   strictPeerDeps: false,
+26 warn ERESOLVE   current: {
+26 warn ERESOLVE     name: 'zod',
+26 warn ERESOLVE     version: '3.25.17',
+26 warn ERESOLVE     location: 'node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/backend-output-schemas/node_modules/zod',
+26 warn ERESOLVE     isWorkspace: false,
+26 warn ERESOLVE     dependents: []
+26 warn ERESOLVE   }
+26 warn ERESOLVE }
+27 silly placeDep node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-sdk/core fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.635.0 want: 4.4.1
+28 silly placeDep node_modules/@aws-amplify/data-construct/node_modules/@aws-amplify/ai-constructs fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.622.0 want: 4.4.1
+29 silly fetch manifest fast-xml-parser@5.4.1
+30 silly packumentCache full:https://registry.npmjs.org/fast-xml-parser cache-miss
+31 http cache https://registry.npmjs.org/fast-xml-parser 6ms (cache hit)
+32 silly packumentCache full:https://registry.npmjs.org/fast-xml-parser set size:568268 disposed:false
+33 silly placeDep node_modules/@aws-amplify/data-construct/node_modules/@aws-amplify/platform-core fast-xml-parser@5.4.1 OK for: @aws-sdk/xml-builder@3.972.11 want: 5.4.1
+34 silly fetch manifest strnum@^2.1.2
+35 silly packumentCache full:https://registry.npmjs.org/strnum cache-miss
+36 http fetch GET 200 https://registry.npmjs.org/strnum 116ms (cache miss)
+37 silly packumentCache full:https://registry.npmjs.org/strnum set size:undefined disposed:false
+38 silly placeDep node_modules/@aws-amplify/data-construct/node_modules/@aws-amplify/platform-core strnum@2.2.2 OK for: fast-xml-parser@5.4.1 want: ^2.1.2
+39 silly placeDep node_modules/@aws-amplify/data-construct/node_modules/@aws-sdk/client-bedrock-runtime fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.826.0 want: 4.4.1
+40 silly placeDep node_modules/@aws-amplify/data-construct/node_modules/@aws-sdk/client-sts fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.775.0 want: 4.4.1
+41 silly fetch manifest fast-xml-parser@5.2.5
+42 silly packumentCache full:https://registry.npmjs.org/fast-xml-parser cache-hit
+43 silly placeDep node_modules/@aws-amplify/data-construct/node_modules/@aws-sdk/credential-provider-login fast-xml-parser@5.2.5 OK for: @aws-sdk/xml-builder@3.953.0 want: 5.2.5
+44 silly fetch manifest strnum@^2.1.0
+45 silly packumentCache full:https://registry.npmjs.org/strnum cache-miss
+46 http cache https://registry.npmjs.org/strnum 2ms (cache hit)
+47 silly packumentCache full:https://registry.npmjs.org/strnum set size:39747 disposed:false
+48 silly placeDep node_modules/@aws-amplify/data-construct/node_modules/@aws-sdk/credential-provider-login strnum@2.2.2 OK for: fast-xml-parser@5.2.5 want: ^2.1.0
+49 silly placeDep node_modules/@aws-amplify/data-construct/node_modules/@aws-sdk/nested-clients fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.775.0 want: 4.4.1
+50 silly placeDep node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/ai-constructs fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.622.0 want: 4.4.1
+51 silly placeDep node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/platform-core fast-xml-parser@5.4.1 OK for: @aws-sdk/xml-builder@3.972.11 want: 5.4.1
+52 silly placeDep node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/platform-core strnum@2.2.2 OK for: fast-xml-parser@5.4.1 want: ^2.1.2
+53 silly placeDep node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-sdk/client-bedrock-runtime fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.826.0 want: 4.4.1
+54 silly placeDep node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-sdk/client-sts fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.775.0 want: 4.4.1
+55 silly placeDep node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-sdk/credential-provider-login fast-xml-parser@5.2.5 OK for: @aws-sdk/xml-builder@3.953.0 want: 5.2.5
+56 silly placeDep node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-sdk/credential-provider-login strnum@2.2.2 OK for: fast-xml-parser@5.2.5 want: ^2.1.0
+57 silly placeDep node_modules/@aws-amplify/graphql-api-construct/node_modules/@aws-sdk/nested-clients fast-xml-parser@4.4.1 OK for: @aws-sdk/core@3.775.0 want: 4.4.1
+58 verbose stack Error: 
+58 verbose stack `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+58 verbose stack
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack Missing: fast-xml-parser@5.4.1 from lock file
+58 verbose stack Missing: strnum@2.2.2 from lock file
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack Missing: fast-xml-parser@5.2.5 from lock file
+58 verbose stack Missing: strnum@2.2.2 from lock file
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack Missing: fast-xml-parser@5.4.1 from lock file
+58 verbose stack Missing: strnum@2.2.2 from lock file
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack Missing: fast-xml-parser@5.2.5 from lock file
+58 verbose stack Missing: strnum@2.2.2 from lock file
+58 verbose stack Missing: fast-xml-parser@4.4.1 from lock file
+58 verbose stack
+58 verbose stack Clean install a project
+58 verbose stack
+58 verbose stack Usage:
+58 verbose stack npm ci
+58 verbose stack
+58 verbose stack Options:
+58 verbose stack [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+58 verbose stack [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+58 verbose stack [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+58 verbose stack [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts] [--no-audit]
+58 verbose stack [--no-bin-links] [--no-fund] [--dry-run]
+58 verbose stack [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+58 verbose stack [-ws|--workspaces] [--include-workspace-root] [--install-links]
+58 verbose stack
+58 verbose stack aliases: clean-install, ic, install-clean, isntall-clean
+58 verbose stack
+58 verbose stack Run "npm help ci" for more info
+58 verbose stack     at CI.usageError (/opt/homebrew/lib/node_modules/npm/lib/base-cmd.js:111:26)
+58 verbose stack     at CI.exec (/opt/homebrew/lib/node_modules/npm/lib/commands/ci.js:70:18)
+58 verbose stack     at async Npm.exec (/opt/homebrew/lib/node_modules/npm/lib/npm.js:207:9)
+58 verbose stack     at async module.exports (/opt/homebrew/lib/node_modules/npm/lib/cli/entry.js:74:5)
+59 error code EUSAGE
+60 error
+60 error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+60 error
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error Missing: fast-xml-parser@5.4.1 from lock file
+60 error Missing: strnum@2.2.2 from lock file
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error Missing: fast-xml-parser@5.2.5 from lock file
+60 error Missing: strnum@2.2.2 from lock file
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error Missing: fast-xml-parser@5.4.1 from lock file
+60 error Missing: strnum@2.2.2 from lock file
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error Missing: fast-xml-parser@5.2.5 from lock file
+60 error Missing: strnum@2.2.2 from lock file
+60 error Missing: fast-xml-parser@4.4.1 from lock file
+60 error
+60 error Clean install a project
+60 error
+60 error Usage:
+60 error npm ci
+60 error
+60 error Options:
+60 error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+60 error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+60 error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+60 error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts] [--no-audit]
+60 error [--no-bin-links] [--no-fund] [--dry-run]
+60 error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+60 error [-ws|--workspaces] [--include-workspace-root] [--install-links]
+60 error
+60 error aliases: clean-install, ic, install-clean, isntall-clean
+60 error
+60 error Run "npm help ci" for more info
+61 verbose cwd /Users/sallysamuel/workspace/shepherd-hub
+62 verbose os Darwin 24.6.0
+63 verbose node v23.7.0
+64 verbose npm  v10.9.2
+65 verbose exit 1
+66 verbose code 1
+67 error A complete log of this run can be found in: /Users/sallysamuel/workspace/shepherd-hub/.npm/_logs/2026-03-25T16_09_12_876Z-debug-0.log
