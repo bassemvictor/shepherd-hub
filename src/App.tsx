@@ -38,6 +38,11 @@ const navItems: { key: PageKey; label: string }[] = [
 type BackendMessage = {
   message: string;
   time: string;
+  items: Array<{
+    pk: string;
+    sk: string;
+    data: string;
+  }>;
 };
 
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
@@ -156,6 +161,19 @@ export default function App() {
                   ? "Loading message from Lambda..."
                   : backendError ?? backendMessage?.message}
               </p>
+
+              {!isBackendLoading && !backendError && backendMessage ? (
+                <div className="api-data-list">
+                  {backendMessage.items.map((item) => (
+                    <article className="api-data-item" key={`${item.pk}-${item.sk}`}>
+                      <p className="api-data-key">
+                        {item.pk} / {item.sk}
+                      </p>
+                      <p className="api-data-value">{item.data}</p>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </section>
