@@ -127,9 +127,20 @@ button {
 .side-panel-header {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 1rem;
+}
+
+.side-panel-brand {
+  flex: 1;
   text-align: center;
+}
+
+.side-panel-logo {
+  width: 3rem;
+  height: 3rem;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .brand-kicker,
@@ -445,43 +456,115 @@ button {
   font-weight: 700;
 }
 
-.visitation-member-tags {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.visitation-member-tags span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 2rem;
-  padding: 0.35rem 0.7rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
 .visitation-actions {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.55rem;
   margin-top: 1rem;
+  flex-wrap: nowrap;
 }
 
 .visitation-action-button {
-  width: 3rem;
-  height: 3rem;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
-  color: #f8fafc;
+  color: #e2e8f0;
   cursor: pointer;
+  padding: 0.5rem 0.7rem;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .visitation-action-button.active {
-  background: linear-gradient(135deg, #f4c430, #f59e0b);
-  color: #111827;
-  border-color: transparent;
+  color: #0f172a;
+}
+
+.visitation-action-schedule {
+  background: rgba(59, 130, 246, 0.16);
+  color: #bfdbfe;
+  border-color: rgba(96, 165, 250, 0.28);
+}
+
+.visitation-action-schedule.active {
+  background: #93c5fd;
+}
+
+.visitation-action-note {
+  background: rgba(244, 196, 48, 0.16);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.visitation-action-note.active {
+  background: #fcd34d;
+}
+
+.visitation-action-complete {
+  background: rgba(34, 197, 94, 0.16);
+  color: #bbf7d0;
+  border-color: rgba(74, 222, 128, 0.28);
+}
+
+.visitation-action-complete.active {
+  background: #86efac;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(6px);
+  z-index: 40;
+}
+
+.modal-card {
+  width: min(100%, 32rem);
+  padding: 1.5rem;
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.96);
+  color: #f8fafc;
+  box-shadow: 0 30px 70px rgba(15, 23, 42, 0.3);
+}
+
+.modal-title {
+  margin: 0;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+}
+
+.modal-form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.modal-copy {
+  margin: 0;
+  color: rgba(248, 250, 252, 0.76);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.modal-secondary-button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+  font-weight: 700;
+  padding: 0.9rem 1.2rem;
+  cursor: pointer;
 }
 
 .sign-out-button {
@@ -565,6 +648,9 @@ button {
   .side-panel-header {
     align-items: center;
     justify-content: flex-start;
+  }
+
+  .side-panel-brand {
     text-align: left;
   }
 

@@ -78,6 +78,12 @@ type VisitationActionState = {
   completed?: boolean;
 };
 
+type VisitationModalState = {
+  action: "schedule" | "note" | "complete";
+  memberKey: string;
+  memberName: string;
+} | null;
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
   firstName: "",
@@ -122,6 +128,9 @@ export default function App() {
   const [visitationActions, setVisitationActions] = useState<
     Record<string, VisitationActionState>
   >({});
+  const [visitationModal, setVisitationModal] = useState<VisitationModalState>(null);
+  const [visitationSchedule, setVisitationSchedule] = useState("");
+  const [visitationNote, setVisitationNote] = useState("");
   const currentPage = pageContent[activePage];
 
   const checkAuthSession = async () => {
@@ -291,7 +300,7 @@ export default function App() {
     setBackendError(null);
   };
 
-  const toggleVisitationAction = (
+  const applyVisitationAction = (
     memberKey: string,
     action: keyof VisitationActionState,
   ) => {
@@ -299,9 +308,51 @@ export default function App() {
       ...current,
       [memberKey]: {
         ...current[memberKey],
-        [action]: !current[memberKey]?.[action],
+        [action]: true,
       },
     }));
+  };
+
+  const openVisitationModal = (
+    action: NonNullable<VisitationModalState>["action"],
+    memberKey: string,
+    memberName: string,
+  ) => {
+    setVisitationModal({
+      action,
+      memberKey,
+      memberName,
+    });
+    setVisitationSchedule("");
+    setVisitationNote("");
+  };
+
+  const closeVisitationModal = () => {
+    setVisitationModal(null);
+    setVisitationSchedule("");
+    setVisitationNote("");
+  };
+
+  const handleVisitationModalSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!visitationModal) {
+      return;
+    }
+
+    if (visitationModal.action === "schedule") {
+      applyVisitationAction(visitationModal.memberKey, "scheduled");
+    }
+
+    if (visitationModal.action === "note") {
+      applyVisitationAction(visitationModal.memberKey, "noted");
+    }
+
+    if (visitationModal.action === "complete") {
+      applyVisitationAction(visitationModal.memberKey, "completed");
+    }
+
+    closeVisitationModal();
   };
 
   if (authStatus !== "signed-in") {
@@ -413,10 +464,12 @@ export default function App() {
             <span />
           </button>
 
-          <div>
+          <div className="side-panel-brand">
             <p className="brand-kicker">Shepherd Hub</p>
             <p className="signed-in-user">{currentUserLabel}</p>
           </div>
+
+          <img className="side-panel-logo" src="/logo.png" alt="Shepherd Hub logo" />
         </div>
 
         <nav
@@ -520,11 +573,6 @@ export default function App() {
                           {fullName || "Unnamed member"}
                         </p>
                       </div>
-
-                      <div className="visitation-member-tags">
-                        <span>{memberData?.role || "No role"}</span>
-                        <span>{memberData?.status || "No status"}</span>
-                      </div>
                     </div>
 
                     <div className="visitation-actions">
@@ -532,33 +580,48 @@ export default function App() {
                         type="button"
                         className={`visitation-action-button${
                           actionState.scheduled ? " active" : ""
-                        }`}
-                        aria-label="Schedule visitation"
-                        onClick={() => toggleVisitationAction(memberKey, "scheduled")}
+                        } visitation-action-schedule`}
+                        onClick={() =>
+                          openVisitationModal(
+                            "schedule",
+                            memberKey,
+                            fullName || "Unnamed member",
+                          )
+                        }
                       >
-                        📅
+                        <span>Schedule</span>
                       </button>
 
                       <button
                         type="button"
                         className={`visitation-action-button${
                           actionState.noted ? " active" : ""
-                        }`}
-                        aria-label="Add visitation note"
-                        onClick={() => toggleVisitationAction(memberKey, "noted")}
+                        } visitation-action-note`}
+                        onClick={() =>
+                          openVisitationModal(
+                            "note",
+                            memberKey,
+                            fullName || "Unnamed member",
+                          )
+                        }
                       >
-                        📝
+                        <span>Add Note</span>
                       </button>
 
                       <button
                         type="button"
                         className={`visitation-action-button${
                           actionState.completed ? " active" : ""
-                        }`}
-                        aria-label="Mark visitation done"
-                        onClick={() => toggleVisitationAction(memberKey, "completed")}
+                        } visitation-action-complete`}
+                        onClick={() =>
+                          openVisitationModal(
+                            "complete",
+                            memberKey,
+                            fullName || "Unnamed member",
+                          )
+                        }
                       >
-                        ✓
+                        <span>Mark Done</span>
                       </button>
                     </div>
                   </article>
@@ -701,6 +764,70 @@ export default function App() {
           ))}
         </section>
       </main>
+
+      {visitationModal ? (
+        <div className="modal-overlay" role="presentation" onClick={closeVisitationModal}>
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Visitation action"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="eyebrow">{visitationModal.memberName}</p>
+            <h2 className="modal-title">
+              {visitationModal.action === "schedule"
+                ? "Schedule visitation"
+                : visitationModal.action === "note"
+                  ? "Add visitation note"
+                  : "Mark visitation done"}
+            </h2>
+
+            <form className="modal-form" onSubmit={handleVisitationModalSubmit}>
+              {visitationModal.action === "schedule" ? (
+                <label className="member-field">
+                  <span>Visitation date</span>
+                  <input
+                    type="datetime-local"
+                    value={visitationSchedule}
+                    onChange={(event) => setVisitationSchedule(event.target.value)}
+                    required
+                  />
+                </label>
+              ) : null}
+
+              {visitationModal.action === "note" ? (
+                <label className="member-field">
+                  <span>Visitation note</span>
+                  <textarea
+                    rows={5}
+                    value={visitationNote}
+                    onChange={(event) => setVisitationNote(event.target.value)}
+                    placeholder="Add a summary of the visit or planned follow-up"
+                    required
+                  />
+                </label>
+              ) : null}
+
+              {visitationModal.action === "complete" ? (
+                <p className="modal-copy">
+                  Confirm that the visitation for {visitationModal.memberName} has been
+                  completed.
+                </p>
+              ) : null}
+
+              <div className="modal-actions">
+                <button type="button" className="modal-secondary-button" onClick={closeVisitationModal}>
+                  Cancel
+                </button>
+                <button type="submit" className="member-submit-button">
+                  {visitationModal.action === "complete" ? "Confirm" : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
