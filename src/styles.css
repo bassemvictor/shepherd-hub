@@ -408,6 +408,82 @@ button {
   cursor: wait;
 }
 
+.visitation-board {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.visitation-card {
+  padding: 1rem 1.1rem;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+}
+
+.visitation-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.visitation-member-key,
+.visitation-member-name {
+  margin: 0;
+}
+
+.visitation-member-key {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: rgba(248, 250, 252, 0.68);
+}
+
+.visitation-member-name {
+  margin-top: 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.visitation-member-tags {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.visitation-member-tags span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.visitation-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.visitation-action-button {
+  width: 3rem;
+  height: 3rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.visitation-action-button.active {
+  background: linear-gradient(135deg, #f4c430, #f59e0b);
+  color: #111827;
+  border-color: transparent;
+}
+
 .sign-out-button {
   width: 100%;
   margin-top: 0.25rem;
@@ -466,6 +542,10 @@ button {
 
   .member-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .visitation-card-top {
+    flex-direction: column;
   }
 }
 

@@ -72,6 +72,12 @@ type StoredMemberData = Partial<MemberFormState> & {
   createdAt?: string;
 };
 
+type VisitationActionState = {
+  scheduled?: boolean;
+  noted?: boolean;
+  completed?: boolean;
+};
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
   firstName: "",
@@ -113,6 +119,9 @@ export default function App() {
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
+  const [visitationActions, setVisitationActions] = useState<
+    Record<string, VisitationActionState>
+  >({});
   const currentPage = pageContent[activePage];
 
   const checkAuthSession = async () => {
@@ -280,6 +289,19 @@ export default function App() {
     setCurrentUserLabel("");
     setBackendMessage(null);
     setBackendError(null);
+  };
+
+  const toggleVisitationAction = (
+    memberKey: string,
+    action: keyof VisitationActionState,
+  ) => {
+    setVisitationActions((current) => ({
+      ...current,
+      [memberKey]: {
+        ...current[memberKey],
+        [action]: !current[memberKey]?.[action],
+      },
+    }));
   };
 
   if (authStatus !== "signed-in") {
@@ -474,6 +496,74 @@ export default function App() {
                   })}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+
+          {activePage === "visitation" ? (
+            <div className="visitation-board">
+              {backendMessage?.items.map((item) => {
+                const memberData = parseMemberData(item.data);
+                const memberKey = `${item.pk}-${item.sk}`;
+                const fullName = [memberData?.firstName, memberData?.lastName]
+                  .filter(Boolean)
+                  .join(" ");
+                const actionState = visitationActions[memberKey] ?? {};
+
+                return (
+                  <article className="visitation-card" key={memberKey}>
+                    <div className="visitation-card-top">
+                      <div>
+                        <p className="visitation-member-key">
+                          {item.pk} / {item.sk}
+                        </p>
+                        <p className="visitation-member-name">
+                          {fullName || "Unnamed member"}
+                        </p>
+                      </div>
+
+                      <div className="visitation-member-tags">
+                        <span>{memberData?.role || "No role"}</span>
+                        <span>{memberData?.status || "No status"}</span>
+                      </div>
+                    </div>
+
+                    <div className="visitation-actions">
+                      <button
+                        type="button"
+                        className={`visitation-action-button${
+                          actionState.scheduled ? " active" : ""
+                        }`}
+                        aria-label="Schedule visitation"
+                        onClick={() => toggleVisitationAction(memberKey, "scheduled")}
+                      >
+                        📅
+                      </button>
+
+                      <button
+                        type="button"
+                        className={`visitation-action-button${
+                          actionState.noted ? " active" : ""
+                        }`}
+                        aria-label="Add visitation note"
+                        onClick={() => toggleVisitationAction(memberKey, "noted")}
+                      >
+                        📝
+                      </button>
+
+                      <button
+                        type="button"
+                        className={`visitation-action-button${
+                          actionState.completed ? " active" : ""
+                        }`}
+                        aria-label="Mark visitation done"
+                        onClick={() => toggleVisitationAction(memberKey, "completed")}
+                      >
+                        ✓
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           ) : null}
 

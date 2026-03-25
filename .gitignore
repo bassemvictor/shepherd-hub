@@ -5,3 +5,4 @@ npm-debug.log*
 .DS_Store
 .npm
 aws_creds.txt
+dist/assets
