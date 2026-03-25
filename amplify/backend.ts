@@ -44,7 +44,7 @@ const congregationApi = new HttpApi(apiStack, "CongregationApi", {
   corsPreflight: {
     allowOrigins: ["*"],
     allowHeaders: ["*"],
-    allowMethods: [CorsHttpMethod.GET],
+    allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST],
   },
   createDefaultStage: true,
 });
