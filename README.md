@@ -24,23 +24,23 @@ Workspace for congregation support and visitation planning.
 
    Open the local URL printed by Vite, usually `http://localhost:5173`.
 
-3. Build and preview the production bundle locally if needed:
-
-   ```bash
-   npm run build
-   npm run preview
-   ```
-
-4. Start a sandbox backend:
+3. Start the Amplify sandbox backend in a separate terminal:
 
    ```bash
    npm run ampx:sandbox
    ```
 
-5. Generate outputs when needed:
+4. Generate Amplify outputs after backend changes so the frontend can discover the API:
 
    ```bash
    npm run ampx:generate-outputs
+   ```
+
+5. Build and preview the production bundle locally if needed:
+
+   ```bash
+   npm run build
+   npm run preview
    ```
 
 6. Connect the repo in Amplify Hosting when you are ready for CI/CD.

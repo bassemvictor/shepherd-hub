@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { get } from "aws-amplify/api";
+import outputs from "../amplify_outputs.json";
 
 type PageKey = "congregation" | "visitation";
 
@@ -33,10 +35,63 @@ const navItems: { key: PageKey; label: string }[] = [
   { key: "visitation", label: "Visitation" },
 ];
 
+type BackendMessage = {
+  message: string;
+  time: string;
+};
+
+const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
+
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>("congregation");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
+  const [backendError, setBackendError] = useState<string | null>(null);
+  const [isBackendLoading, setIsBackendLoading] = useState(false);
   const currentPage = pageContent[activePage];
+
+  useEffect(() => {
+    if (!congregationApiName) {
+      setBackendError(
+        "Backend API is not configured yet. Run the Amplify sandbox and generate outputs.",
+      );
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadBackendMessage = async () => {
+      setIsBackendLoading(true);
+      setBackendError(null);
+
+      try {
+        const restOperation = get({
+          apiName: congregationApiName,
+          path: "/congregation/message",
+        });
+        const { body } = await restOperation.response;
+        const response = (await body.json()) as BackendMessage;
+
+        if (isMounted) {
+          setBackendMessage(response);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setBackendError("Unable to load the congregation backend message.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsBackendLoading(false);
+        }
+      }
+    };
+
+    void loadBackendMessage();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
     <div className="app-shell">
@@ -92,6 +147,17 @@ export default function App() {
         <section className="hero-card">
           <p className="eyebrow">{currentPage.eyebrow}</p>
           <p className="description">{currentPage.description}</p>
+
+          {activePage === "congregation" ? (
+            <div className="api-message-card">
+              <p className="api-message-label">Backend message</p>
+              <p className="api-message-text">
+                {isBackendLoading
+                  ? "Loading message from Lambda..."
+                  : backendError ?? backendMessage?.message}
+              </p>
+            </div>
+          ) : null}
         </section>
 
         <section className="details-grid">
