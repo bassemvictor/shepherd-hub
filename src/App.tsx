@@ -340,10 +340,6 @@ export default function App() {
             </>
           ) : (
             <>
-              <p className="auth-copy">
-                Cognito requires one more step: `{pendingSignInStep}`.
-              </p>
-
               <label className="auth-field">
                 <span>{challengeLabel}</span>
                 <input
