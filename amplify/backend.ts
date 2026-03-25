@@ -67,6 +67,15 @@ congregationApi.addRoutes({
   ),
 });
 
+congregationApi.addRoutes({
+  path: "/congregation/member/remove",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "CongregationMemberRemoveIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
 backend.addOutput({
   custom: {
     API: {

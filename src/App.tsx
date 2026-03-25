@@ -54,7 +54,7 @@ const navSections: Array<{
   },
   {
     label: "Manage",
-    items: [{ key: "new-member", label: "Add Member" }],
+    items: [],
   },
 ];
 
@@ -136,6 +136,7 @@ export default function App() {
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
+  const [deletingMemberKey, setDeletingMemberKey] = useState<string | null>(null);
   const [visitationActions, setVisitationActions] = useState<
     Record<string, VisitationActionState>
   >({});
@@ -248,6 +249,29 @@ export default function App() {
       setMemberSubmitState("Unable to save member.");
     } finally {
       setIsMemberSubmitting(false);
+    }
+  };
+
+  const handleDeleteMember = async (pk: string, sk: string) => {
+    if (!congregationApiName) {
+      return;
+    }
+
+    const memberKey = `${pk}-${sk}`;
+    setDeletingMemberKey(memberKey);
+
+    try {
+      const restOperation = post({
+        apiName: congregationApiName,
+        path: "/congregation/member/remove",
+        options: {
+          body: { pk, sk },
+        },
+      });
+      await restOperation.response;
+      await loadBackendMessage();
+    } finally {
+      setDeletingMemberKey(null);
     }
   };
 
@@ -488,31 +512,33 @@ export default function App() {
           className={`nav-list${isMobileMenuOpen ? " open" : ""}`}
           aria-label="Home sections"
         >
-          {navSections.map((section) => (
-            <div className="nav-section" key={section.label}>
-              <p className="nav-section-label">{section.label}</p>
+          {navSections
+            .filter((section) => section.items.length > 0)
+            .map((section) => (
+              <div className="nav-section" key={section.label}>
+                <p className="nav-section-label">{section.label}</p>
 
-              <div className="nav-section-items">
-                {section.items.map((item) => {
-                  const isActive = item.key === activePage;
+                <div className="nav-section-items">
+                  {section.items.map((item) => {
+                    const isActive = item.key === activePage;
 
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`nav-item${isActive ? " active" : ""}`}
-                      onClick={() => {
-                        setActivePage(item.key);
-                        setIsMobileMenuOpen(false);
-                      }}
-                    >
-                      {item.label}
-                    </button>
-                  );
-                })}
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`nav-item${isActive ? " active" : ""}`}
+                        onClick={() => {
+                          setActivePage(item.key);
+                          setIsMobileMenuOpen(false);
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
 
           <div className="nav-section">
             <p className="nav-section-label">Session</p>
@@ -531,8 +557,22 @@ export default function App() {
 
       <main className="content-panel">
         <section className="hero-card">
-          <p className="eyebrow">{currentPage.eyebrow}</p>
-          <p className="description">{currentPage.description}</p>
+          <div className="hero-header">
+            <div>
+              <p className="eyebrow">{currentPage.eyebrow}</p>
+              <p className="description">{currentPage.description}</p>
+            </div>
+
+            {activePage === "congregation" ? (
+              <button
+                type="button"
+                className="hero-action-button"
+                onClick={() => setActivePage("new-member")}
+              >
+                Add Member
+              </button>
+            ) : null}
+          </div>
 
           {activePage === "congregation" ? (
             <div className="api-message-card">
@@ -553,9 +593,22 @@ export default function App() {
 
                     return (
                       <article className="api-data-item" key={`${item.pk}-${item.sk}`}>
-                        <p className="api-data-key">
-                          {item.pk} / {item.sk}
-                        </p>
+                        <div className="api-data-row">
+                          <p className="api-data-key">
+                            {item.pk} / {item.sk}
+                          </p>
+
+                          <button
+                            type="button"
+                            className="api-delete-button"
+                            onClick={() => handleDeleteMember(item.pk, item.sk)}
+                            disabled={deletingMemberKey === `${item.pk}-${item.sk}`}
+                          >
+                            {deletingMemberKey === `${item.pk}-${item.sk}`
+                              ? "Deleting..."
+                              : "Delete"}
+                          </button>
+                        </div>
 
                         {memberData ? (
                           <div className="api-data-details">

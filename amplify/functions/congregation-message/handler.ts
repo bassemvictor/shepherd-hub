@@ -1,5 +1,6 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
+  DeleteCommand,
   DynamoDBDocumentClient,
   PutCommand,
   ScanCommand,
@@ -21,6 +22,11 @@ type CreateMemberPayload = {
   status: string;
   address: string;
   notes: string;
+};
+
+type DeleteMemberPayload = {
+  pk: string;
+  sk: string;
 };
 
 const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -48,6 +54,40 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   }
 
   if (event.requestContext.http.method === "POST") {
+    if (event.requestContext.http.path.endsWith("/congregation/member/remove")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<DeleteMemberPayload>;
+
+      if (!payload.pk || !payload.sk) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "pk and sk are required.",
+            time,
+          }),
+        };
+      }
+
+      await dynamoClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            pk: payload.pk,
+            sk: payload.sk,
+          },
+        }),
+      );
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Congregation member deleted.",
+          time,
+        }),
+      };
+    }
+
     const payload = JSON.parse(event.body ?? "{}") as Partial<CreateMemberPayload>;
 
     if (!payload.firstName || !payload.lastName) {
