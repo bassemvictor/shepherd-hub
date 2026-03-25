@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
-import { get } from "aws-amplify/api";
+import { useEffect, useState, type FormEvent } from "react";
+import { get, post } from "aws-amplify/api";
 import outputs from "../amplify_outputs.json";
 
-type PageKey = "congregation" | "visitation";
+type PageKey = "congregation" | "visitation" | "new-member";
 
 const pageContent: Record<
   PageKey,
@@ -28,11 +28,22 @@ const pageContent: Record<
       "See who may need another visit soon",
     ],
   },
+  "new-member": {
+    eyebrow: "New Member",
+    description:
+      "Capture the basic details for a congregation member before wiring the form to backend storage.",
+    highlights: [
+      "Collect identity and contact details in one place",
+      "Leave room for role and assignment notes",
+      "Prepare a clean UI for later backend integration",
+    ],
+  },
 };
 
 const navItems: { key: PageKey; label: string }[] = [
   { key: "congregation", label: "Congregation" },
   { key: "visitation", label: "Visitation" },
+  { key: "new-member", label: "Add Member" },
 ];
 
 type BackendMessage = {
@@ -45,7 +56,28 @@ type BackendMessage = {
   }>;
 };
 
+type MemberFormState = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  role: string;
+  status: string;
+  address: string;
+  notes: string;
+};
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
+const initialMemberForm: MemberFormState = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  role: "",
+  status: "",
+  address: "",
+  notes: "",
+};
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>("congregation");
@@ -53,7 +85,36 @@ export default function App() {
   const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isBackendLoading, setIsBackendLoading] = useState(false);
+  const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
+  const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
+  const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
   const currentPage = pageContent[activePage];
+
+  const loadBackendMessage = async () => {
+    if (!congregationApiName) {
+      setBackendError(
+        "Backend API is not configured yet. Run the Amplify sandbox and generate outputs.",
+      );
+      return;
+    }
+
+    setIsBackendLoading(true);
+    setBackendError(null);
+
+    try {
+      const restOperation = get({
+        apiName: congregationApiName,
+        path: "/congregation/message",
+      });
+      const { body } = await restOperation.response;
+      const response = (await body.json()) as BackendMessage;
+      setBackendMessage(response);
+    } catch (error) {
+      setBackendError("Unable to load the congregation backend message.");
+    } finally {
+      setIsBackendLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!congregationApiName) {
@@ -65,38 +126,58 @@ export default function App() {
 
     let isMounted = true;
 
-    const loadBackendMessage = async () => {
-      setIsBackendLoading(true);
-      setBackendError(null);
-
-      try {
-        const restOperation = get({
-          apiName: congregationApiName,
-          path: "/congregation/message",
-        });
-        const { body } = await restOperation.response;
-        const response = (await body.json()) as BackendMessage;
-
-        if (isMounted) {
-          setBackendMessage(response);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setBackendError("Unable to load the congregation backend message.");
-        }
-      } finally {
-        if (isMounted) {
-          setIsBackendLoading(false);
-        }
+    void (async () => {
+      await loadBackendMessage();
+      if (!isMounted) {
+        return;
       }
-    };
-
-    void loadBackendMessage();
+    })();
 
     return () => {
       isMounted = false;
     };
   }, []);
+
+  const updateMemberForm = (
+    field: keyof MemberFormState,
+    value: MemberFormState[keyof MemberFormState],
+  ) => {
+    setMemberForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const handleMemberSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!congregationApiName) {
+      setMemberSubmitState("Backend API is not configured yet.");
+      return;
+    }
+
+    setIsMemberSubmitting(true);
+    setMemberSubmitState(null);
+
+    try {
+      const restOperation = post({
+        apiName: congregationApiName,
+        path: "/congregation/member",
+        options: {
+          body: memberForm,
+        },
+      });
+      await restOperation.response;
+      setMemberSubmitState("Member saved.");
+      setMemberForm(initialMemberForm);
+      await loadBackendMessage();
+      setActivePage("congregation");
+    } catch (error) {
+      setMemberSubmitState("Unable to save member.");
+    } finally {
+      setIsMemberSubmitting(false);
+    }
+  };
 
   return (
     <div className="app-shell">
@@ -172,6 +253,130 @@ export default function App() {
                 </div>
               ) : null}
             </div>
+          ) : null}
+
+          {activePage === "new-member" ? (
+            <form className="member-form-card" onSubmit={handleMemberSubmit}>
+              <div className="member-form-grid">
+                <label className="member-field">
+                  <span>First name</span>
+                  <input
+                    type="text"
+                    placeholder="John"
+                    value={memberForm.firstName}
+                    onChange={(event) =>
+                      updateMemberForm("firstName", event.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="member-field">
+                  <span>Last name</span>
+                  <input
+                    type="text"
+                    placeholder="Smith"
+                    value={memberForm.lastName}
+                    onChange={(event) =>
+                      updateMemberForm("lastName", event.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="member-field">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    placeholder="john@example.com"
+                    value={memberForm.email}
+                    onChange={(event) =>
+                      updateMemberForm("email", event.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="member-field">
+                  <span>Phone</span>
+                  <input
+                    type="tel"
+                    placeholder="+1 (555) 555-5555"
+                    value={memberForm.phone}
+                    onChange={(event) =>
+                      updateMemberForm("phone", event.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="member-field">
+                  <span>Role</span>
+                  <select
+                    value={memberForm.role}
+                    onChange={(event) => updateMemberForm("role", event.target.value)}
+                  >
+                    <option value="" disabled>
+                      Select a role
+                    </option>
+                    <option>Elder</option>
+                    <option>Ministerial Servant</option>
+                    <option>Publisher</option>
+                    <option>Pioneer</option>
+                  </select>
+                </label>
+
+                <label className="member-field">
+                  <span>Status</span>
+                  <select
+                    value={memberForm.status}
+                    onChange={(event) =>
+                      updateMemberForm("status", event.target.value)
+                    }
+                  >
+                    <option value="" disabled>
+                      Select a status
+                    </option>
+                    <option>Active</option>
+                    <option>Needs Follow-up</option>
+                    <option>Inactive</option>
+                  </select>
+                </label>
+
+                <label className="member-field member-field-full">
+                  <span>Address</span>
+                  <input
+                    type="text"
+                    placeholder="123 Main Street"
+                    value={memberForm.address}
+                    onChange={(event) =>
+                      updateMemberForm("address", event.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="member-field member-field-full">
+                  <span>Notes</span>
+                  <textarea
+                    rows={4}
+                    placeholder="Assignment notes, visitation reminders, or special circumstances"
+                    value={memberForm.notes}
+                    onChange={(event) =>
+                      updateMemberForm("notes", event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+
+              <div className="member-form-actions">
+                {memberSubmitState ? (
+                  <p className="member-submit-message">{memberSubmitState}</p>
+                ) : null}
+                <button
+                  type="submit"
+                  className="member-submit-button"
+                  disabled={isMemberSubmitting}
+                >
+                  {isMemberSubmitting ? "Saving..." : "Save Member"}
+                </button>
+              </div>
+            </form>
           ) : null}
         </section>
 

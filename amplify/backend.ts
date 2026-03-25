@@ -11,11 +11,6 @@ import {
   BillingMode,
   Table,
 } from "aws-cdk-lib/aws-dynamodb";
-import {
-  AwsCustomResource,
-  AwsCustomResourcePolicy,
-  PhysicalResourceId,
-} from "aws-cdk-lib/custom-resources";
 
 import { auth } from "./auth/resource.js";
 import { congregationMessage } from "./functions/congregation-message/resource.js";
@@ -42,50 +37,7 @@ const testTable = new Table(storageStack, "TestTable", {
 });
 
 backend.congregationMessage.addEnvironment("TEST_TABLE_NAME", testTable.tableName);
-testTable.grantReadData(backend.congregationMessage.resources.lambda);
-
-const seedItems = [
-  {
-    pk: { S: "CONGREGATION" },
-    sk: { S: "MEMBER#1" },
-    data: { S: "Elder coordination update" },
-  },
-  {
-    pk: { S: "CONGREGATION" },
-    sk: { S: "MEMBER#2" },
-    data: { S: "Visitation follow-up scheduled" },
-  },
-];
-
-seedItems.forEach((item, index) => {
-  new AwsCustomResource(storageStack, `SeedTestTableItem${index + 1}`, {
-    onCreate: {
-      service: "DynamoDB",
-      action: "putItem",
-      parameters: {
-        TableName: testTable.tableName,
-        Item: item,
-      },
-      physicalResourceId: PhysicalResourceId.of(
-        `test-table-seed-create-${index + 1}`,
-      ),
-    },
-    onUpdate: {
-      service: "DynamoDB",
-      action: "putItem",
-      parameters: {
-        TableName: testTable.tableName,
-        Item: item,
-      },
-      physicalResourceId: PhysicalResourceId.of(
-        `test-table-seed-update-${index + 1}`,
-      ),
-    },
-    policy: AwsCustomResourcePolicy.fromSdkCalls({
-      resources: [testTable.tableArn],
-    }),
-  });
-});
+testTable.grantReadWriteData(backend.congregationMessage.resources.lambda);
 
 const congregationApi = new HttpApi(apiStack, "CongregationApi", {
   apiName: "congregationApi",
@@ -102,6 +54,15 @@ congregationApi.addRoutes({
   methods: [HttpMethod.GET],
   integration: new HttpLambdaIntegration(
     "CongregationMessageIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
+  path: "/congregation/member",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "CongregationMemberIntegration",
     backend.congregationMessage.resources.lambda,
   ),
 });
