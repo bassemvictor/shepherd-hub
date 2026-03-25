@@ -25,9 +25,10 @@ const backend = defineBackend({
   congregationMessage,
 });
 
+const storageStack = backend.createStack("congregation-storage");
 const apiStack = backend.createStack("congregation-api");
 
-const testTable = new Table(apiStack, "TestTable", {
+const testTable = new Table(storageStack, "TestTable", {
   tableName: "test_table",
   partitionKey: {
     name: "pk",
@@ -57,7 +58,7 @@ const seedItems = [
 ];
 
 seedItems.forEach((item, index) => {
-  new AwsCustomResource(apiStack, `SeedTestTableItem${index + 1}`, {
+  new AwsCustomResource(storageStack, `SeedTestTableItem${index + 1}`, {
     onCreate: {
       service: "DynamoDB",
       action: "putItem",
