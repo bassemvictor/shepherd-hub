@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { get, post } from "aws-amplify/api";
-import { getCurrentUser, signIn, signOut } from "aws-amplify/auth";
+import { confirmSignIn, getCurrentUser, signIn, signOut } from "aws-amplify/auth";
 import outputs from "../amplify_outputs.json";
 
 type PageKey = "congregation" | "visitation" | "new-member";
@@ -93,6 +93,8 @@ const parseMemberData = (value: string): StoredMemberData | null => {
 };
 
 export default function App() {
+  const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
+  const [challengeResponse, setChallengeResponse] = useState("");
   const [authStatus, setAuthStatus] = useState<"checking" | "signed-in" | "signed-out">(
     "checking",
   );
@@ -232,14 +234,41 @@ export default function App() {
       });
 
       if (result.nextStep.signInStep !== "DONE") {
-        setAuthError("Additional sign-in steps are required for this user.");
-        setIsSigningIn(false);
+        setPendingSignInStep(result.nextStep.signInStep);
         return;
       }
 
+      setPendingSignInStep(null);
+      setChallengeResponse("");
       await checkAuthSession();
     } catch {
       setAuthError("Unable to sign in with those credentials.");
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleConfirmSignIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSigningIn(true);
+    setAuthError(null);
+
+    try {
+      const result = await confirmSignIn({
+        challengeResponse,
+      });
+
+      if (result.nextStep.signInStep !== "DONE") {
+        setPendingSignInStep(result.nextStep.signInStep);
+        setAuthError(`Another sign-in step is required: ${result.nextStep.signInStep}.`);
+        return;
+      }
+
+      setPendingSignInStep(null);
+      setChallengeResponse("");
+      await checkAuthSession();
+    } catch {
+      setAuthError("Unable to complete the sign-in challenge.");
     } finally {
       setIsSigningIn(false);
     }
@@ -254,44 +283,82 @@ export default function App() {
   };
 
   if (authStatus !== "signed-in") {
+    const challengeLabel =
+      pendingSignInStep === "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED"
+        ? "New password"
+        : pendingSignInStep === "CONFIRM_SIGN_IN_WITH_EMAIL_CODE"
+          ? "Email verification code"
+          : pendingSignInStep === "CONFIRM_SIGN_IN_WITH_SMS_CODE"
+            ? "SMS verification code"
+            : pendingSignInStep === "CONFIRM_SIGN_IN_WITH_TOTP_CODE"
+              ? "Authenticator code"
+              : "Challenge response";
+
     return (
       <div className="auth-shell">
-        <form className="auth-card" onSubmit={handleSignIn}>
+        <form
+          className="auth-card"
+          onSubmit={pendingSignInStep ? handleConfirmSignIn : handleSignIn}
+        >
           <p className="eyebrow">Shepherd Hub</p>
           <h1 className="auth-title">Sign in to continue</h1>
           <p className="auth-copy">
             Use your Cognito username and password to access Shephed Hub.
           </p>
 
-          <label className="auth-field">
-            <span>Username</span>
-            <input
-              type="text"
-              value={authForm.username}
-              onChange={(event) =>
-                setAuthForm((current) => ({
-                  ...current,
-                  username: event.target.value,
-                }))
-              }
-              placeholder="Enter your username"
-            />
-          </label>
+          {!pendingSignInStep ? (
+            <>
+              <label className="auth-field">
+                <span>Username</span>
+                <input
+                  type="text"
+                  value={authForm.username}
+                  onChange={(event) =>
+                    setAuthForm((current) => ({
+                      ...current,
+                      username: event.target.value,
+                    }))
+                  }
+                  placeholder="Enter your username"
+                />
+              </label>
 
-          <label className="auth-field">
-            <span>Password</span>
-            <input
-              type="password"
-              value={authForm.password}
-              onChange={(event) =>
-                setAuthForm((current) => ({
-                  ...current,
-                  password: event.target.value,
-                }))
-              }
-              placeholder="Enter your password"
-            />
-          </label>
+              <label className="auth-field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={authForm.password}
+                  onChange={(event) =>
+                    setAuthForm((current) => ({
+                      ...current,
+                      password: event.target.value,
+                    }))
+                  }
+                  placeholder="Enter your password"
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <p className="auth-copy">
+                Cognito requires one more step: `{pendingSignInStep}`.
+              </p>
+
+              <label className="auth-field">
+                <span>{challengeLabel}</span>
+                <input
+                  type={
+                    pendingSignInStep === "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED"
+                      ? "password"
+                      : "text"
+                  }
+                  value={challengeResponse}
+                  onChange={(event) => setChallengeResponse(event.target.value)}
+                  placeholder={`Enter ${challengeLabel.toLowerCase()}`}
+                />
+              </label>
+            </>
+          )}
 
           {authError ? <p className="auth-error">{authError}</p> : null}
 
@@ -300,7 +367,11 @@ export default function App() {
             className="auth-submit-button"
             disabled={isSigningIn || authStatus === "checking"}
           >
-            {authStatus === "checking" || isSigningIn ? "Signing in..." : "Sign In"}
+            {authStatus === "checking" || isSigningIn
+              ? "Signing in..."
+              : pendingSignInStep
+                ? "Continue Sign In"
+                : "Sign In"}
           </button>
         </form>
       </div>
