@@ -7,37 +7,22 @@ type PageKey = "congregation" | "visitation" | "new-member";
 
 const pageContent: Record<
   PageKey,
-  { eyebrow: string; description: string; highlights: string[] }
+  { eyebrow: string; description: string }
 > = {
   congregation: {
     eyebrow: "Congregation",
     description:
       "Track members, responsibilities, and updates from a single dashboard built for day-to-day congregation work.",
-    highlights: [
-      "Shared view of assignments and follow-ups",
-      "Quick access to member notes and important updates",
-      "Simple layout for weekly coordination",
-    ],
   },
   visitation: {
     eyebrow: "Visitation",
     description:
       "Organize upcoming visits, remember special circumstances, and keep a clear history of care and encouragement.",
-    highlights: [
-      "Prepare upcoming visits with relevant context",
-      "Capture notes right after each conversation",
-      "See who may need another visit soon",
-    ],
   },
   "new-member": {
     eyebrow: "New Member",
     description:
-      "Capture the basic details for a congregation member before wiring the form to backend storage.",
-    highlights: [
-      "Collect identity and contact details in one place",
-      "Leave room for role and assignment notes",
-      "Prepare a clean UI for later backend integration",
-    ],
+      "Capture the basic details for a congregation member.",
   },
 };
 
@@ -915,15 +900,6 @@ export default function App() {
               </div>
             </form>
           ) : null}
-        </section>
-
-        <section className="details-grid">
-          {currentPage.highlights.map((highlight) => (
-            <article className="detail-card" key={highlight}>
-              <span className="detail-index">•</span>
-              <p>{highlight}</p>
-            </article>
-          ))}
         </section>
       </main>
 
