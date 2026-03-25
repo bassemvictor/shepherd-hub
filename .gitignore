@@ -4,3 +4,4 @@ amplify_outputs.json
 npm-debug.log*
 .DS_Store
 .npm
+aws_creds.txt
