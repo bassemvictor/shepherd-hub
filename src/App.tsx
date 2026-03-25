@@ -419,11 +419,15 @@ export default function App() {
               </button>
             );
           })}
-        </nav>
 
-        <button type="button" className="sign-out-button" onClick={handleSignOut}>
-          Sign Out
-        </button>
+          <button
+            type="button"
+            className="nav-item sign-out-button"
+            onClick={handleSignOut}
+          >
+            Sign Out
+          </button>
+        </nav>
       </aside>
 
       <main className="content-panel">
