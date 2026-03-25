@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { get, post } from "aws-amplify/api";
 import { confirmSignIn, getCurrentUser, signIn, signOut } from "aws-amplify/auth";
 import outputs from "../amplify_outputs.json";
@@ -122,6 +122,7 @@ const parseMemberData = (value: string): StoredMemberData | null => {
 };
 
 export default function App() {
+  const sidePanelRef = useRef<HTMLElement | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
   const [challengeResponse, setChallengeResponse] = useState("");
@@ -230,6 +231,32 @@ export default function App() {
       isMounted = false;
     };
   }, [authStatus]);
+
+  useEffect(() => {
+    if (!isMobileMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!sidePanelRef.current) {
+        return;
+      }
+
+      const target = event.target;
+
+      if (target instanceof Node && !sidePanelRef.current.contains(target)) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+    };
+  }, [isMobileMenuOpen]);
 
   const updateMemberForm = (
     field: keyof MemberFormState,
@@ -529,7 +556,7 @@ export default function App() {
 
   return (
     <div className="app-shell" data-theme={theme}>
-      <aside className="side-panel">
+      <aside className="side-panel" ref={sidePanelRef}>
         <div className="side-panel-header">
           <button
             type="button"

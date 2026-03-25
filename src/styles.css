@@ -205,6 +205,13 @@ button {
   letter-spacing: 0.16em;
   font-size: 0.9rem;
   font-weight: 700;
+}
+
+.brand-kicker {
+  color: var(--panel-text);
+}
+
+.eyebrow {
   color: var(--heading-text);
 }
 
