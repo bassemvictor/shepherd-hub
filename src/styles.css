@@ -760,7 +760,7 @@ button {
   }
 
   .content-panel {
-    padding: 1rem;
+    padding: 0.5rem;
     gap: 1rem;
   }
 
@@ -770,7 +770,7 @@ button {
   }
 
   .hero-card {
-    padding: 1.25rem;
+    padding: 0.75rem;
   }
 
   .content-panel h2 {
