@@ -95,6 +95,12 @@ type VisitationModalState = {
   memberName: string;
 } | null;
 
+type DeleteModalState = {
+  pk: string;
+  sk: string;
+  memberName: string;
+} | null;
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
   firstName: "",
@@ -143,6 +149,7 @@ export default function App() {
   const [visitationModal, setVisitationModal] = useState<VisitationModalState>(null);
   const [visitationSchedule, setVisitationSchedule] = useState("");
   const [visitationNote, setVisitationNote] = useState("");
+  const [deleteModal, setDeleteModal] = useState<DeleteModalState>(null);
   const currentPage = pageContent[activePage];
 
   const checkAuthSession = async () => {
@@ -273,6 +280,27 @@ export default function App() {
     } finally {
       setDeletingMemberKey(null);
     }
+  };
+
+  const openDeleteModal = (pk: string, sk: string, memberName: string) => {
+    setDeleteModal({
+      pk,
+      sk,
+      memberName,
+    });
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteModal(null);
+  };
+
+  const confirmDeleteMember = async () => {
+    if (!deleteModal) {
+      return;
+    }
+
+    await handleDeleteMember(deleteModal.pk, deleteModal.sk);
+    closeDeleteModal();
   };
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
@@ -601,7 +629,13 @@ export default function App() {
                           <button
                             type="button"
                             className="api-delete-button"
-                            onClick={() => handleDeleteMember(item.pk, item.sk)}
+                            onClick={() =>
+                              openDeleteModal(
+                                item.pk,
+                                item.sk,
+                                fullName || `${item.pk} / ${item.sk}`,
+                              )
+                            }
                             disabled={deletingMemberKey === `${item.pk}-${item.sk}`}
                           >
                             {deletingMemberKey === `${item.pk}-${item.sk}`
@@ -902,6 +936,45 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteModal ? (
+        <div className="modal-overlay" role="presentation" onClick={closeDeleteModal}>
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Delete member confirmation"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="eyebrow">Delete Member</p>
+            <h2 className="modal-title">{deleteModal.memberName}</h2>
+            <p className="modal-copy">
+              Remove this member from the congregation list? This action cannot be
+              undone.
+            </p>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-secondary-button"
+                onClick={closeDeleteModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="modal-danger-button"
+                onClick={confirmDeleteMember}
+                disabled={deletingMemberKey === `${deleteModal.pk}-${deleteModal.sk}`}
+              >
+                {deletingMemberKey === `${deleteModal.pk}-${deleteModal.sk}`
+                  ? "Deleting..."
+                  : "Delete"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
