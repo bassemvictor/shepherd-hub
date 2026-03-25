@@ -1,0 +1,30 @@
+{
+  "name": "shepherd-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.app.json && vite build",
+    "preview": "vite preview",
+    "ampx:sandbox": "ampx sandbox",
+    "ampx:deploy": "ampx pipeline-deploy --branch main",
+    "ampx:generate-outputs": "ampx generate outputs"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@aws-amplify/backend": "1.21.1",
+    "@aws-amplify/backend-cli": "1.8.2",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "typescript": "5.8.2",
+    "vite": "5.4.19"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
