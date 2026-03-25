@@ -114,6 +114,8 @@ backend.addOutput({
         region: Stack.of(congregationApi).region,
         apiName: congregationApi.httpApiName,
       },
+    },
+    storage: {
       testTable: {
         tableName: testTable.tableName,
         region: Stack.of(testTable).region,
