@@ -41,10 +41,21 @@ const pageContent: Record<
   },
 };
 
-const navItems: { key: PageKey; label: string }[] = [
-  { key: "congregation", label: "Congregation" },
-  { key: "visitation", label: "Visitation" },
-  { key: "new-member", label: "Add Member" },
+const navSections: Array<{
+  label: string;
+  items: Array<{ key: PageKey; label: string }>;
+}> = [
+  {
+    label: "Workspace",
+    items: [
+      { key: "congregation", label: "Congregation" },
+      { key: "visitation", label: "Visitation" },
+    ],
+  },
+  {
+    label: "Manage",
+    items: [{ key: "new-member", label: "Add Member" }],
+  },
 ];
 
 type BackendMessage = {
@@ -477,31 +488,44 @@ export default function App() {
           className={`nav-list${isMobileMenuOpen ? " open" : ""}`}
           aria-label="Home sections"
         >
-          {navItems.map((item) => {
-            const isActive = item.key === activePage;
+          {navSections.map((section) => (
+            <div className="nav-section" key={section.label}>
+              <p className="nav-section-label">{section.label}</p>
 
-            return (
+              <div className="nav-section-items">
+                {section.items.map((item) => {
+                  const isActive = item.key === activePage;
+
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`nav-item${isActive ? " active" : ""}`}
+                      onClick={() => {
+                        setActivePage(item.key);
+                        setIsMobileMenuOpen(false);
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          <div className="nav-section">
+            <p className="nav-section-label">Session</p>
+            <div className="nav-section-items">
               <button
-                key={item.key}
                 type="button"
-                className={`nav-item${isActive ? " active" : ""}`}
-                onClick={() => {
-                  setActivePage(item.key);
-                  setIsMobileMenuOpen(false);
-                }}
+                className="nav-item sign-out-button"
+                onClick={handleSignOut}
               >
-                {item.label}
+                Sign Out
               </button>
-            );
-          })}
-
-          <button
-            type="button"
-            className="nav-item sign-out-button"
-            onClick={handleSignOut}
-          >
-            Sign Out
-          </button>
+            </div>
+          </div>
         </nav>
       </aside>
 
