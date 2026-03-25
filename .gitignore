@@ -3,3 +3,4 @@ node_modules
 amplify_outputs.json
 npm-debug.log*
 .DS_Store
+.npm
