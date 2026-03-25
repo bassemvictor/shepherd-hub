@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { get, post } from "aws-amplify/api";
+import { getCurrentUser, signIn, signOut } from "aws-amplify/auth";
 import outputs from "../amplify_outputs.json";
 
 type PageKey = "congregation" | "visitation" | "new-member";
@@ -92,6 +93,16 @@ const parseMemberData = (value: string): StoredMemberData | null => {
 };
 
 export default function App() {
+  const [authStatus, setAuthStatus] = useState<"checking" | "signed-in" | "signed-out">(
+    "checking",
+  );
+  const [authForm, setAuthForm] = useState({
+    username: "",
+    password: "",
+  });
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [currentUserLabel, setCurrentUserLabel] = useState<string>("");
   const [activePage, setActivePage] = useState<PageKey>("congregation");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
@@ -101,6 +112,16 @@ export default function App() {
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
   const currentPage = pageContent[activePage];
+
+  const checkAuthSession = async () => {
+    try {
+      const user = await getCurrentUser();
+      setCurrentUserLabel(user.signInDetails?.loginId ?? user.username);
+      setAuthStatus("signed-in");
+    } catch {
+      setAuthStatus("signed-out");
+    }
+  };
 
   const loadBackendMessage = async () => {
     if (!congregationApiName) {
@@ -129,6 +150,14 @@ export default function App() {
   };
 
   useEffect(() => {
+    void checkAuthSession();
+  }, []);
+
+  useEffect(() => {
+    if (authStatus !== "signed-in") {
+      return;
+    }
+
     if (!congregationApiName) {
       setBackendError(
         "Backend API is not configured yet. Run the Amplify sandbox and generate outputs.",
@@ -148,7 +177,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [authStatus]);
 
   const updateMemberForm = (
     field: keyof MemberFormState,
@@ -191,6 +220,93 @@ export default function App() {
     }
   };
 
+  const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSigningIn(true);
+    setAuthError(null);
+
+    try {
+      const result = await signIn({
+        username: authForm.username,
+        password: authForm.password,
+      });
+
+      if (result.nextStep.signInStep !== "DONE") {
+        setAuthError("Additional sign-in steps are required for this user.");
+        setIsSigningIn(false);
+        return;
+      }
+
+      await checkAuthSession();
+    } catch {
+      setAuthError("Unable to sign in with those credentials.");
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    setAuthStatus("signed-out");
+    setCurrentUserLabel("");
+    setBackendMessage(null);
+    setBackendError(null);
+  };
+
+  if (authStatus !== "signed-in") {
+    return (
+      <div className="auth-shell">
+        <form className="auth-card" onSubmit={handleSignIn}>
+          <p className="eyebrow">Shepherd Hub</p>
+          <h1 className="auth-title">Sign in to continue</h1>
+          <p className="auth-copy">
+            Use your Cognito username and password to access Shephed Hub.
+          </p>
+
+          <label className="auth-field">
+            <span>Username</span>
+            <input
+              type="text"
+              value={authForm.username}
+              onChange={(event) =>
+                setAuthForm((current) => ({
+                  ...current,
+                  username: event.target.value,
+                }))
+              }
+              placeholder="Enter your username"
+            />
+          </label>
+
+          <label className="auth-field">
+            <span>Password</span>
+            <input
+              type="password"
+              value={authForm.password}
+              onChange={(event) =>
+                setAuthForm((current) => ({
+                  ...current,
+                  password: event.target.value,
+                }))
+              }
+              placeholder="Enter your password"
+            />
+          </label>
+
+          {authError ? <p className="auth-error">{authError}</p> : null}
+
+          <button
+            type="submit"
+            className="auth-submit-button"
+            disabled={isSigningIn || authStatus === "checking"}
+          >
+            {authStatus === "checking" || isSigningIn ? "Signing in..." : "Sign In"}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className="side-panel">
@@ -210,6 +326,7 @@ export default function App() {
 
           <div>
             <p className="brand-kicker">Shepherd Hub</p>
+            <p className="signed-in-user">{currentUserLabel}</p>
           </div>
         </div>
 
@@ -236,6 +353,10 @@ export default function App() {
             );
           })}
         </nav>
+
+        <button type="button" className="sign-out-button" onClick={handleSignOut}>
+          Sign Out
+        </button>
       </aside>
 
       <main className="content-panel">
