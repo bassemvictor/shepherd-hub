@@ -9,6 +9,12 @@ Workspace for congregation support and visitation planning.
 - HTTP API backed by a Lambda function
 - Basic `ampx` scripts
 
+## Architecture
+
+The application uses a React frontend with Amplify-managed authentication and API routing, backed by a Lambda function and DynamoDB for congregation data.
+
+![Architecture Diagram](public/architecture.png)
+
 ## AWS Setup
 
 1. Install the AWS CLI.
