@@ -126,6 +126,7 @@ export default function App() {
   const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isBackendLoading, setIsBackendLoading] = useState(false);
+  const [memberSearch, setMemberSearch] = useState("");
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
@@ -138,6 +139,33 @@ export default function App() {
   const [visitationNote, setVisitationNote] = useState("");
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>(null);
   const currentPage = pageContent[activePage];
+  const normalizedMemberSearch = memberSearch.trim().toLowerCase();
+  const filteredCongregationItems =
+    backendMessage?.items.filter((item) => {
+      if (!normalizedMemberSearch) {
+        return true;
+      }
+
+      const memberData = parseMemberData(item.data);
+      const haystack = [
+        item.pk,
+        item.sk,
+        item.data,
+        memberData?.firstName,
+        memberData?.lastName,
+        memberData?.email,
+        memberData?.phone,
+        memberData?.role,
+        memberData?.status,
+        memberData?.address,
+        memberData?.notes,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(normalizedMemberSearch);
+    }) ?? [];
 
   const checkAuthSession = async () => {
     try {
@@ -648,53 +676,75 @@ export default function App() {
               </p>
 
               {!isBackendLoading && !backendError && backendMessage ? (
-                <div className="api-data-list">
-                  {backendMessage.items.map((item) => {
-                    const memberData = parseMemberData(item.data);
-                    const fullName = [memberData?.firstName, memberData?.lastName]
-                      .filter(Boolean)
-                      .join(" ");
+                <>
+                  <div className="congregation-search-row">
+                    <input
+                      type="search"
+                      className="congregation-search-input"
+                      placeholder="Search members"
+                      value={memberSearch}
+                      onChange={(event) => setMemberSearch(event.target.value)}
+                    />
+                    <p className="congregation-search-count">
+                      {filteredCongregationItems.length} member
+                      {filteredCongregationItems.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
 
-                    return (
-                      <article className="api-data-item" key={`${item.pk}-${item.sk}`}>
-                        <div className="api-data-row">
-                          <p className="api-data-key">
-                            {item.pk} / {item.sk}
-                          </p>
+                  <div className="api-data-list">
+                    {filteredCongregationItems.map((item) => {
+                      const memberData = parseMemberData(item.data);
+                      const fullName = [memberData?.firstName, memberData?.lastName]
+                        .filter(Boolean)
+                        .join(" ");
 
-                          <button
-                            type="button"
-                            className="api-delete-button"
-                            onClick={() =>
-                              openDeleteModal(
-                                item.pk,
-                                item.sk,
-                                fullName || `${item.pk} / ${item.sk}`,
-                              )
-                            }
-                            disabled={deletingMemberKey === `${item.pk}-${item.sk}`}
-                          >
-                            {deletingMemberKey === `${item.pk}-${item.sk}`
-                              ? "Deleting..."
-                              : "Delete"}
-                          </button>
-                        </div>
+                      return (
+                        <article className="api-data-item" key={`${item.pk}-${item.sk}`}>
+                          <div className="api-data-row">
+                            <p className="api-data-key">
+                              {item.pk} / {item.sk}
+                            </p>
 
-                        {memberData ? (
-                          <div className="api-data-details">
-                            <p className="api-data-name">{fullName || "Unnamed member"}</p>
-                            <div className="api-data-meta">
-                              <span>{memberData.role || "No role"}</span>
-                              <span>{memberData.status || "No status"}</span>
-                            </div>
+                            <button
+                              type="button"
+                              className="api-delete-button"
+                              onClick={() =>
+                                openDeleteModal(
+                                  item.pk,
+                                  item.sk,
+                                  fullName || `${item.pk} / ${item.sk}`,
+                                )
+                              }
+                              disabled={deletingMemberKey === `${item.pk}-${item.sk}`}
+                            >
+                              {deletingMemberKey === `${item.pk}-${item.sk}`
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
                           </div>
-                        ) : (
-                          <p className="api-data-value">{item.data}</p>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
+
+                          {memberData ? (
+                            <div className="api-data-details">
+                              <p className="api-data-name">{fullName || "Unnamed member"}</p>
+                              <div className="api-data-meta">
+                                <span>{memberData.role || "No role"}</span>
+                                <span>{memberData.status || "No status"}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="api-data-value">{item.data}</p>
+                          )}
+                        </article>
+                      );
+                    })}
+
+                    {filteredCongregationItems.length === 0 ? (
+                      <p className="congregation-empty-state">
+                        No members match your search.
+                      </p>
+                    ) : null}
+                  </div>
+                </>
               ) : null}
             </div>
           ) : null}
