@@ -449,17 +449,34 @@ button {
   gap: 1rem;
 }
 
+.api-data-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.api-edit-button,
 .api-delete-button {
-  border: 1px solid var(--danger-border);
   border-radius: 999px;
-  background: var(--danger-bg);
-  color: var(--danger-text);
   font-size: 0.76rem;
   font-weight: 700;
   padding: 0.42rem 0.72rem;
   cursor: pointer;
 }
 
+.api-edit-button {
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
+}
+
+.api-delete-button {
+  border: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.api-edit-button:disabled,
 .api-delete-button:disabled {
   opacity: 0.7;
   cursor: wait;
@@ -504,6 +521,19 @@ button {
   border-radius: 20px;
   background: var(--dark-card-bg);
   color: var(--dark-card-text);
+}
+
+.member-form-header {
+  margin-bottom: 1rem;
+}
+
+.member-form-mode {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-light);
 }
 
 .member-field input,
@@ -564,23 +594,34 @@ button {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .member-submit-message {
-  margin: 0;
+  margin: 0 auto 0 0;
   color: var(--muted-light);
   font-size: 0.92rem;
 }
 
+.member-cancel-button,
+.member-submit-button {
+  border-radius: 999px;
+  font-weight: 700;
+  padding: 0.9rem 1.15rem;
+  cursor: pointer;
+}
+
+.member-cancel-button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--dark-card-text);
+}
+
 .member-submit-button {
   border: 0;
-  border-radius: 999px;
   background: linear-gradient(135deg, #f4c430, #f59e0b);
   color: #111827;
-  font-weight: 700;
-  padding: 0.9rem 1.4rem;
-  cursor: pointer;
 }
 
 .member-submit-button:disabled {

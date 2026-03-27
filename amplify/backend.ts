@@ -76,6 +76,15 @@ congregationApi.addRoutes({
   ),
 });
 
+congregationApi.addRoutes({
+  path: "/congregation/member/update",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "CongregationMemberUpdateIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
 backend.addOutput({
   custom: {
     API: {

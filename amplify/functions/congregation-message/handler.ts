@@ -24,6 +24,12 @@ type CreateMemberPayload = {
   notes: string;
 };
 
+type UpdateMemberPayload = CreateMemberPayload & {
+  pk: string;
+  sk: string;
+  createdAt?: string;
+};
+
 type DeleteMemberPayload = {
   pk: string;
   sk: string;
@@ -54,6 +60,54 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   }
 
   if (event.requestContext.http.method === "POST") {
+    if (event.requestContext.http.path.endsWith("/congregation/member/update")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<UpdateMemberPayload>;
+
+      if (!payload.pk || !payload.sk || !payload.firstName || !payload.lastName) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "pk, sk, first name, and last name are required.",
+            time,
+          }),
+        };
+      }
+
+      const data = JSON.stringify({
+        firstName: payload.firstName ?? "",
+        lastName: payload.lastName ?? "",
+        email: payload.email ?? "",
+        phone: payload.phone ?? "",
+        role: payload.role ?? "",
+        status: payload.status ?? "",
+        address: payload.address ?? "",
+        notes: payload.notes ?? "",
+        createdAt: payload.createdAt ?? time,
+        updatedAt: time,
+      });
+
+      await dynamoClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            pk: payload.pk,
+            sk: payload.sk,
+            data,
+          },
+        }),
+      );
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Congregation member updated.",
+          time,
+        }),
+      };
+    }
+
     if (event.requestContext.http.path.endsWith("/congregation/member/remove")) {
       const payload = JSON.parse(event.body ?? "{}") as Partial<DeleteMemberPayload>;
 

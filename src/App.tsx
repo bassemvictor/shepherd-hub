@@ -86,6 +86,12 @@ type DeleteModalState = {
   memberName: string;
 } | null;
 
+type EditingMemberState = {
+  pk: string;
+  sk: string;
+  createdAt?: string;
+} | null;
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
   firstName: "",
@@ -128,6 +134,7 @@ export default function App() {
   const [isBackendLoading, setIsBackendLoading] = useState(false);
   const [memberSearch, setMemberSearch] = useState("");
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
+  const [editingMember, setEditingMember] = useState<EditingMemberState>(null);
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
   const [deletingMemberKey, setDeletingMemberKey] = useState<string | null>(null);
@@ -139,6 +146,7 @@ export default function App() {
   const [visitationNote, setVisitationNote] = useState("");
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>(null);
   const currentPage = pageContent[activePage];
+  const isEditingMember = editingMember !== null;
   const normalizedMemberSearch = memberSearch.trim().toLowerCase();
   const filteredCongregationItems =
     backendMessage?.items.filter((item) => {
@@ -293,23 +301,77 @@ export default function App() {
     setMemberSubmitState(null);
 
     try {
+      const requestBody = editingMember
+        ? {
+            ...memberForm,
+            pk: editingMember.pk,
+            sk: editingMember.sk,
+            ...(editingMember.createdAt
+              ? { createdAt: editingMember.createdAt }
+              : {}),
+          }
+        : memberForm;
+
       const restOperation = post({
         apiName: congregationApiName,
-        path: "/congregation/member",
+        path: editingMember
+          ? "/congregation/member/update"
+          : "/congregation/member",
         options: {
-          body: memberForm,
+          body: requestBody,
         },
       });
       await restOperation.response;
-      setMemberSubmitState("Member saved.");
+      setMemberSubmitState(editingMember ? "Member updated." : "Member saved.");
       setMemberForm(initialMemberForm);
+      setEditingMember(null);
       await loadBackendMessage();
       setActivePage("congregation");
     } catch (error) {
-      setMemberSubmitState("Unable to save member.");
+      setMemberSubmitState(
+        editingMember ? "Unable to update member." : "Unable to save member.",
+      );
     } finally {
       setIsMemberSubmitting(false);
     }
+  };
+
+  const openNewMemberPage = () => {
+    setEditingMember(null);
+    setMemberForm(initialMemberForm);
+    setMemberSubmitState(null);
+    setActivePage("new-member");
+  };
+
+  const openEditMemberPage = (
+    pk: string,
+    sk: string,
+    memberData: StoredMemberData | null,
+  ) => {
+    setEditingMember({
+      pk,
+      sk,
+      createdAt: memberData?.createdAt,
+    });
+    setMemberForm({
+      firstName: memberData?.firstName ?? "",
+      lastName: memberData?.lastName ?? "",
+      email: memberData?.email ?? "",
+      phone: memberData?.phone ?? "",
+      role: memberData?.role ?? "",
+      status: memberData?.status ?? "",
+      address: memberData?.address ?? "",
+      notes: memberData?.notes ?? "",
+    });
+    setMemberSubmitState(null);
+    setActivePage("new-member");
+  };
+
+  const handleCancelMemberForm = () => {
+    setEditingMember(null);
+    setMemberForm(initialMemberForm);
+    setMemberSubmitState(null);
+    setActivePage("congregation");
   };
 
   const handleDeleteMember = async (pk: string, sk: string) => {
@@ -659,7 +721,7 @@ export default function App() {
               <button
                 type="button"
                 className="hero-action-button"
-                onClick={() => setActivePage("new-member")}
+                onClick={openNewMemberPage}
               >
                 Add Member
               </button>
@@ -700,10 +762,21 @@ export default function App() {
 
                       return (
                         <article className="api-data-item" key={`${item.pk}-${item.sk}`}>
-                          <div className="api-data-row">
-                            <p className="api-data-key">
-                              {item.pk} / {item.sk}
-                            </p>
+                        <div className="api-data-row">
+                          <p className="api-data-key">
+                            {item.pk} / {item.sk}
+                          </p>
+
+                          <div className="api-data-actions">
+                            <button
+                              type="button"
+                              className="api-edit-button"
+                              onClick={() =>
+                                openEditMemberPage(item.pk, item.sk, memberData)
+                              }
+                            >
+                              Edit
+                            </button>
 
                             <button
                               type="button"
@@ -722,6 +795,7 @@ export default function App() {
                                 : "Delete"}
                             </button>
                           </div>
+                        </div>
 
                           {memberData ? (
                             <div className="api-data-details">
@@ -829,6 +903,12 @@ export default function App() {
 
           {activePage === "new-member" ? (
             <form className="member-form-card" onSubmit={handleMemberSubmit}>
+              <div className="member-form-header">
+                <p className="member-form-mode">
+                  {isEditingMember ? "Edit Member" : "Add Member"}
+                </p>
+              </div>
+
               <div className="member-form-grid">
                 <label className="member-field">
                   <span>First name</span>
@@ -941,11 +1021,24 @@ export default function App() {
                   <p className="member-submit-message">{memberSubmitState}</p>
                 ) : null}
                 <button
+                  type="button"
+                  className="member-cancel-button"
+                  onClick={handleCancelMemberForm}
+                >
+                  Cancel
+                </button>
+                <button
                   type="submit"
                   className="member-submit-button"
                   disabled={isMemberSubmitting}
                 >
-                  {isMemberSubmitting ? "Saving..." : "Save Member"}
+                  {isMemberSubmitting
+                    ? isEditingMember
+                      ? "Updating..."
+                      : "Saving..."
+                    : isEditingMember
+                      ? "Update Member"
+                      : "Save Member"}
                 </button>
               </div>
             </form>
