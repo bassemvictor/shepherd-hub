@@ -188,6 +188,9 @@ type AnnouncementWeekFormState = {
   items: string[];
 };
 
+type AnnouncementSortOrder = "latest" | "oldest";
+type MemberSortOrder = "name-asc" | "name-desc";
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
   firstName: "",
@@ -281,6 +284,8 @@ export default function App() {
   const [announcements, setAnnouncements] = useState<AnnouncementResponse | null>(null);
   const [announcementsError, setAnnouncementsError] = useState<string | null>(null);
   const [isAnnouncementsLoading, setIsAnnouncementsLoading] = useState(false);
+  const [announcementSortOrder, setAnnouncementSortOrder] =
+    useState<AnnouncementSortOrder>("latest");
   const [announcementWeekForm, setAnnouncementWeekForm] =
     useState<AnnouncementWeekFormState>(initialAnnouncementWeekForm);
   const [announcementSubmitState, setAnnouncementSubmitState] = useState<string | null>(
@@ -293,6 +298,7 @@ export default function App() {
   const [announcementItemDeleteModal, setAnnouncementItemDeleteModal] =
     useState<AnnouncementItemDeleteModalState>(null);
   const [memberSearch, setMemberSearch] = useState("");
+  const [memberSortOrder, setMemberSortOrder] = useState<MemberSortOrder>("name-asc");
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
   const [editingMember, setEditingMember] = useState<EditingMemberState>(null);
   const [selectedMember, setSelectedMember] = useState<SelectedMemberState>(null);
@@ -364,6 +370,20 @@ export default function App() {
 
       return haystack.includes(normalizedMemberSearch);
     }) ?? [];
+  const sortedCongregationItems = filteredCongregationItems.slice().sort((left, right) => {
+    const leftData = parseMemberData(left.data);
+    const rightData = parseMemberData(right.data);
+    const leftName =
+      [leftData?.firstName, leftData?.lastName].filter(Boolean).join(" ") ||
+      `${left.pk} ${left.sk}`;
+    const rightName =
+      [rightData?.firstName, rightData?.lastName].filter(Boolean).join(" ") ||
+      `${right.pk} ${right.sk}`;
+
+    return memberSortOrder === "name-asc"
+      ? leftName.localeCompare(rightName, undefined, { sensitivity: "base" })
+      : rightName.localeCompare(leftName, undefined, { sensitivity: "base" });
+  });
   const visitationItems = visitationFocus
     ? (backendMessage?.items.filter(
         (item) => item.pk === visitationFocus.pk && item.sk === visitationFocus.sk,
@@ -372,7 +392,11 @@ export default function App() {
   const announcementWeeks =
     announcements?.items
       .slice()
-      .sort((left, right) => right.sk.localeCompare(left.sk))
+      .sort((left, right) =>
+        announcementSortOrder === "latest"
+          ? right.sk.localeCompare(left.sk)
+          : left.sk.localeCompare(right.sk),
+      )
       .map((item) => ({
         ...item,
         parsed: parseAnnouncementWeekData(item.data),
@@ -1166,12 +1190,7 @@ export default function App() {
 
           {activePage === "congregation" ? (
             <div className="api-message-card">
-              <p className="api-message-label">Backend message</p>
-              <p className="api-message-text">
-                {isBackendLoading
-                  ? "Loading message from Lambda..."
-                  : backendError ?? backendMessage?.message}
-              </p>
+              <p className="api-message-label">Congregation</p>
 
               {!isBackendLoading && !backendError && backendMessage ? (
                 <>
@@ -1183,14 +1202,28 @@ export default function App() {
                       value={memberSearch}
                       onChange={(event) => setMemberSearch(event.target.value)}
                     />
-                    <p className="congregation-search-count">
-                      {filteredCongregationItems.length} member
-                      {filteredCongregationItems.length === 1 ? "" : "s"}
-                    </p>
+                    <div className="congregation-search-tools">
+                      <label className="congregation-sort-control">
+                        <span>Sort by name</span>
+                        <select
+                          value={memberSortOrder}
+                          onChange={(event) =>
+                            setMemberSortOrder(event.target.value as MemberSortOrder)
+                          }
+                        >
+                          <option value="name-asc">A-Z</option>
+                          <option value="name-desc">Z-A</option>
+                        </select>
+                      </label>
+                      <p className="congregation-search-count">
+                        {filteredCongregationItems.length} member
+                        {filteredCongregationItems.length === 1 ? "" : "s"}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="api-data-list">
-                    {filteredCongregationItems.map((item) => {
+                    {sortedCongregationItems.map((item) => {
                       const memberData = parseMemberData(item.data);
                       const fullName = [memberData?.firstName, memberData?.lastName]
                         .filter(Boolean)
@@ -1676,7 +1709,23 @@ export default function App() {
               </form>
 
               <div className="announcements-list-card">
-                <p className="api-message-label">Weekly Announcements</p>
+                <div className="announcement-list-toolbar">
+                  <p className="api-message-label">Weekly Announcements</p>
+                  <label className="announcement-sort-control">
+                    <span>Sort by date</span>
+                    <select
+                      value={announcementSortOrder}
+                      onChange={(event) =>
+                        setAnnouncementSortOrder(
+                          event.target.value as AnnouncementSortOrder,
+                        )
+                      }
+                    >
+                      <option value="latest">Latest first</option>
+                      <option value="oldest">Oldest first</option>
+                    </select>
+                  </label>
+                </div>
                 {isAnnouncementsLoading ? (
                   <p className="api-message-text">Loading announcement weeks...</p>
                 ) : announcementsError ? (
