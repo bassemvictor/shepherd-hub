@@ -77,20 +77,21 @@ type StoredMemberData = Partial<MemberFormState> & {
     action: string;
     message: string;
   }>;
-  visitation?: {
+  visitations?: Array<{
+    id: string;
     scheduledAt?: string;
     note?: string;
     completedAt?: string;
     updatedAt?: string;
-  };
+  }>;
 };
 
 type VisitationModalState = {
   action: "schedule" | "note" | "complete";
   pk: string;
   sk: string;
-  memberKey: string;
   memberName: string;
+  visitationId?: string;
 } | null;
 
 type DeleteModalState = {
@@ -537,19 +538,22 @@ export default function App() {
     action: NonNullable<VisitationModalState>["action"],
     pk: string,
     sk: string,
-    memberKey: string,
     memberName: string,
-    memberData: StoredMemberData | null,
+    options?: {
+      visitationId?: string;
+      schedule?: string;
+      note?: string;
+    },
   ) => {
     setVisitationModal({
       action,
       pk,
       sk,
-      memberKey,
       memberName,
+      visitationId: options?.visitationId,
     });
-    setVisitationSchedule(memberData?.visitation?.scheduledAt ?? "");
-    setVisitationNote(memberData?.visitation?.note ?? "");
+    setVisitationSchedule(options?.schedule ?? "");
+    setVisitationNote(options?.note ?? "");
     setVisitationSubmitState(null);
   };
 
@@ -576,6 +580,10 @@ export default function App() {
         sk: visitationModal.sk,
         action: visitationModal.action,
       };
+
+      if (visitationModal.visitationId) {
+        body.visitationId = visitationModal.visitationId;
+      }
 
       if (visitationModal.action === "schedule") {
         body.schedule = visitationSchedule;
@@ -898,18 +906,13 @@ export default function App() {
             <div className="visitation-board">
               {backendMessage?.items.map((item) => {
                 const memberData = parseMemberData(item.data);
-                const memberKey = `${item.pk}-${item.sk}`;
                 const fullName = [memberData?.firstName, memberData?.lastName]
                   .filter(Boolean)
                   .join(" ");
-                const actionState = {
-                  scheduled: Boolean(memberData?.visitation?.scheduledAt),
-                  noted: Boolean(memberData?.visitation?.note),
-                  completed: Boolean(memberData?.visitation?.completedAt),
-                };
+                const visits = memberData?.visitations ?? [];
 
                 return (
-                  <article className="visitation-card" key={memberKey}>
+                  <article className="visitation-card" key={`${item.pk}-${item.sk}`}>
                     <div className="visitation-card-top">
                       <div>
                         <p className="visitation-member-key">
@@ -924,83 +927,90 @@ export default function App() {
                     <div className="visitation-actions">
                       <button
                         type="button"
-                        className={`visitation-action-button${
-                          actionState.scheduled ? " active" : ""
-                        } visitation-action-schedule`}
+                        className="visitation-action-button visitation-action-schedule"
                         onClick={() =>
                           openVisitationModal(
                             "schedule",
                             item.pk,
                             item.sk,
-                            memberKey,
                             fullName || "Unnamed member",
-                            memberData,
                           )
                         }
                       >
                         <span>Schedule</span>
                       </button>
-
-                      <button
-                        type="button"
-                        className={`visitation-action-button${
-                          actionState.noted ? " active" : ""
-                        } visitation-action-note`}
-                        onClick={() =>
-                          openVisitationModal(
-                            "note",
-                            item.pk,
-                            item.sk,
-                            memberKey,
-                            fullName || "Unnamed member",
-                            memberData,
-                          )
-                        }
-                      >
-                        <span>Add Note</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className={`visitation-action-button${
-                          actionState.completed ? " active" : ""
-                        } visitation-action-complete`}
-                        onClick={() =>
-                          openVisitationModal(
-                            "complete",
-                            item.pk,
-                            item.sk,
-                            memberKey,
-                            fullName || "Unnamed member",
-                            memberData,
-                          )
-                        }
-                      >
-                        <span>Mark Done</span>
-                      </button>
                     </div>
 
-                    {memberData?.visitation ? (
+                    {visits.length > 0 ? (
                       <div className="visitation-summary">
-                        {memberData.visitation.scheduledAt ? (
-                          <p className="visitation-summary-item">
-                            Scheduled:{" "}
-                            {new Date(memberData.visitation.scheduledAt).toLocaleString()}
-                          </p>
-                        ) : null}
-                        {memberData.visitation.note ? (
-                          <p className="visitation-summary-item">
-                            Note: {memberData.visitation.note}
-                          </p>
-                        ) : null}
-                        {memberData.visitation.completedAt ? (
-                          <p className="visitation-summary-item">
-                            Completed:{" "}
-                            {new Date(memberData.visitation.completedAt).toLocaleString()}
-                          </p>
-                        ) : null}
+                        {visits.map((visit, index) => (
+                          <div className="visit-entry" key={visit.id}>
+                            <div className="visit-entry-top">
+                              <p className="visit-entry-label">Visit {visits.length - index}</p>
+                              <p className="visit-entry-time">
+                                {visit.scheduledAt
+                                  ? new Date(visit.scheduledAt).toLocaleString()
+                                  : "No schedule"}
+                              </p>
+                            </div>
+
+                            <div className="visit-entry-meta">
+                              <p className="visitation-summary-item">
+                                Status: {visit.completedAt ? "Completed" : "Pending"}
+                              </p>
+                              <p className="visitation-summary-item">
+                                Note: {visit.note || "No note yet"}
+                              </p>
+                            </div>
+
+                            <div className="visit-entry-actions">
+                              <button
+                                type="button"
+                                className={`visitation-action-button visitation-action-note${
+                                  visit.note ? " active" : ""
+                                }`}
+                                onClick={() =>
+                                  openVisitationModal(
+                                    "note",
+                                    item.pk,
+                                    item.sk,
+                                    fullName || "Unnamed member",
+                                    {
+                                      visitationId: visit.id,
+                                      note: visit.note,
+                                    },
+                                  )
+                                }
+                              >
+                                <span>{visit.note ? "Edit Note" : "Add Note"}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className={`visitation-action-button visitation-action-complete${
+                                  visit.completedAt ? " active" : ""
+                                }`}
+                                onClick={() =>
+                                  openVisitationModal(
+                                    "complete",
+                                    item.pk,
+                                    item.sk,
+                                    fullName || "Unnamed member",
+                                    {
+                                      visitationId: visit.id,
+                                    },
+                                  )
+                                }
+                              >
+                                <span>{visit.completedAt ? "Completed" : "Mark Done"}</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ) : null}
+                    ) : (
+                      <p className="visitation-empty">No visitations scheduled yet.</p>
+                    )}
                   </article>
                 );
               })}
@@ -1258,34 +1268,46 @@ export default function App() {
 
                   <div className="member-detail-visit-card">
                     <p className="member-detail-subtitle">Visitation</p>
-                    <div className="member-detail-grid">
-                      <div className="member-detail-section">
-                        <p className="member-detail-label">Scheduled</p>
-                        <p className="member-detail-value">
-                          {selectedMemberData.visitation?.scheduledAt
-                            ? new Date(
-                                selectedMemberData.visitation.scheduledAt,
-                              ).toLocaleString()
-                            : "Not scheduled"}
-                        </p>
+                    {selectedMemberData.visitations && selectedMemberData.visitations.length > 0 ? (
+                      <div className="member-visit-list">
+                        {selectedMemberData.visitations.map((visit, index) => (
+                          <div className="member-visit-item" key={visit.id}>
+                            <div className="member-visit-top">
+                              <p className="member-detail-label">Visit {selectedMemberData.visitations!.length - index}</p>
+                              <p className="member-history-time">
+                                {visit.scheduledAt
+                                  ? new Date(visit.scheduledAt).toLocaleString()
+                                  : "No schedule"}
+                              </p>
+                            </div>
+                            <div className="member-detail-grid">
+                              <div className="member-detail-section">
+                                <p className="member-detail-label">Status</p>
+                                <p className="member-detail-value">
+                                  {visit.completedAt ? "Completed" : "Pending"}
+                                </p>
+                              </div>
+                              <div className="member-detail-section">
+                                <p className="member-detail-label">Completed At</p>
+                                <p className="member-detail-value">
+                                  {visit.completedAt
+                                    ? new Date(visit.completedAt).toLocaleString()
+                                    : "Not completed"}
+                                </p>
+                              </div>
+                              <div className="member-detail-section member-detail-section-full">
+                                <p className="member-detail-label">Note</p>
+                                <p className="member-detail-value">
+                                  {visit.note || "No note yet"}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="member-detail-section">
-                        <p className="member-detail-label">Completed</p>
-                        <p className="member-detail-value">
-                          {selectedMemberData.visitation?.completedAt
-                            ? new Date(
-                                selectedMemberData.visitation.completedAt,
-                              ).toLocaleString()
-                            : "Not completed"}
-                        </p>
-                      </div>
-                      <div className="member-detail-section member-detail-section-full">
-                        <p className="member-detail-label">Last note</p>
-                        <p className="member-detail-value">
-                          {selectedMemberData.visitation?.note || "No visitation note yet"}
-                        </p>
-                      </div>
-                    </div>
+                    ) : (
+                      <p className="member-detail-value">No visitations scheduled yet.</p>
+                    )}
                   </div>
                 </>
               ) : (

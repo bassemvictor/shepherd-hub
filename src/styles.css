@@ -723,6 +723,27 @@ button {
   margin-top: 1rem;
 }
 
+.member-visit-list {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 0.85rem;
+}
+
+.member-visit-item {
+  padding: 0.9rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.member-visit-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .member-detail-history-card {
   margin-top: 1rem;
   padding: 0.95rem 1rem;
@@ -842,13 +863,63 @@ button {
 
 .visitation-summary {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.75rem;
   margin-top: 0.85rem;
 }
 
 .visitation-summary-item {
   margin: 0;
   font-size: 0.84rem;
+  color: var(--muted-light);
+}
+
+.visit-entry {
+  padding: 0.85rem 0.9rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.visit-entry-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.visit-entry-label,
+.visit-entry-time {
+  margin: 0;
+}
+
+.visit-entry-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-light);
+}
+
+.visit-entry-time {
+  color: var(--dark-card-text);
+  font-weight: 700;
+}
+
+.visit-entry-meta {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.55rem;
+}
+
+.visit-entry-actions {
+  display: flex;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.visitation-empty {
+  margin: 0.9rem 0 0;
   color: var(--muted-light);
 }
 

@@ -40,6 +40,7 @@ type VisitationPayload = {
   pk: string;
   sk: string;
   action: "schedule" | "note" | "complete";
+  visitationId?: string;
   schedule?: string;
   note?: string;
 };
@@ -60,12 +61,13 @@ type StoredMemberData = {
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
-  visitation?: {
+  visitations?: Array<{
+    id: string;
     scheduledAt?: string;
     note?: string;
     completedAt?: string;
     updatedAt?: string;
-  };
+  }>;
 };
 
 const prependHistoryEntry = (
@@ -134,6 +136,17 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         };
       }
 
+      if ((payload.action === "note" || payload.action === "complete") && !payload.visitationId) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "visitationId is required for note and complete actions.",
+            time,
+          }),
+        };
+      }
+
       const existingResponse = await dynamoClient.send(
         new GetCommand({
           TableName: tableName,
@@ -165,21 +178,52 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         existingData = {};
       }
 
-      const nextVisitation = {
-        ...(existingData.visitation ?? {}),
-        updatedAt: time,
-      };
+      const existingVisitations = existingData.visitations ?? [];
+      let nextVisitations = existingVisitations;
+      let historyMessage = "";
 
       if (payload.action === "schedule") {
-        nextVisitation.scheduledAt = payload.schedule;
+        nextVisitations = [
+          {
+            id: crypto.randomUUID(),
+            scheduledAt: payload.schedule,
+            updatedAt: time,
+          },
+          ...existingVisitations,
+        ];
+        historyMessage = `Visitation scheduled for ${payload.schedule}.`;
       }
 
       if (payload.action === "note") {
-        nextVisitation.note = payload.note;
+        nextVisitations = existingVisitations.map((visitation) =>
+          visitation.id === payload.visitationId
+            ? {
+                ...visitation,
+                note: payload.note,
+                updatedAt: time,
+              }
+            : visitation,
+        );
+
+        const targetVisit = existingVisitations.find(
+          (visitation) => visitation.id === payload.visitationId,
+        );
+        historyMessage = targetVisit?.note
+          ? "Visitation note edited."
+          : "Visitation note added.";
       }
 
       if (payload.action === "complete") {
-        nextVisitation.completedAt = time;
+        nextVisitations = existingVisitations.map((visitation) =>
+          visitation.id === payload.visitationId
+            ? {
+                ...visitation,
+                completedAt: time,
+                updatedAt: time,
+              }
+            : visitation,
+        );
+        historyMessage = "Visitation marked as done.";
       }
 
       await dynamoClient.send(
@@ -193,16 +237,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
               history: prependHistoryEntry(existingData.history, {
                 timestamp: time,
                 action: `visitation_${payload.action}`,
-                message:
-                  payload.action === "schedule"
-                    ? `Visitation scheduled for ${payload.schedule}.`
-                    : payload.action === "note"
-                      ? existingData.visitation?.note
-                        ? "Visitation note edited."
-                        : "Visitation note added."
-                      : "Visitation marked as done.",
+                message: historyMessage,
               }),
-              visitation: nextVisitation,
+              visitations: nextVisitations,
               updatedAt: time,
             }),
           },
