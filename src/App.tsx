@@ -111,6 +111,12 @@ type SelectedMemberState = {
   sk: string;
 } | null;
 
+type VisitationFocusState = {
+  pk: string;
+  sk: string;
+  memberName: string;
+} | null;
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
   firstName: "",
@@ -155,6 +161,7 @@ export default function App() {
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
   const [editingMember, setEditingMember] = useState<EditingMemberState>(null);
   const [selectedMember, setSelectedMember] = useState<SelectedMemberState>(null);
+  const [visitationFocus, setVisitationFocus] = useState<VisitationFocusState>(null);
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
   const [deletingMemberKey, setDeletingMemberKey] = useState<string | null>(null);
@@ -221,6 +228,11 @@ export default function App() {
 
       return haystack.includes(normalizedMemberSearch);
     }) ?? [];
+  const visitationItems = visitationFocus
+    ? (backendMessage?.items.filter(
+        (item) => item.pk === visitationFocus.pk && item.sk === visitationFocus.sk,
+      ) ?? [])
+    : (backendMessage?.items ?? []);
 
   const checkAuthSession = async () => {
     try {
@@ -424,6 +436,11 @@ export default function App() {
   const openMemberDetailsPage = (pk: string, sk: string) => {
     setSelectedMember({ pk, sk });
     setActivePage("member-details");
+  };
+
+  const openMemberVisitationPage = (pk: string, sk: string, memberName: string) => {
+    setVisitationFocus({ pk, sk, memberName });
+    setActivePage("visitation");
   };
 
   const handleDeleteMember = async (pk: string, sk: string) => {
@@ -748,6 +765,9 @@ export default function App() {
                         type="button"
                         className={`nav-item${isActive ? " active" : ""}`}
                         onClick={() => {
+                          if (item.key !== "visitation") {
+                            setVisitationFocus(null);
+                          }
                           setActivePage(item.key);
                           setIsMobileMenuOpen(false);
                         }}
@@ -847,6 +867,21 @@ export default function App() {
                           <div className="api-data-actions">
                             <button
                               type="button"
+                              className="api-visitations-button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openMemberVisitationPage(
+                                  item.pk,
+                                  item.sk,
+                                  fullName || `${item.pk} / ${item.sk}`,
+                                );
+                              }}
+                            >
+                              Visitations
+                            </button>
+
+                            <button
+                              type="button"
                               className="api-edit-button"
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -904,7 +939,23 @@ export default function App() {
 
           {activePage === "visitation" ? (
             <div className="visitation-board">
-              {backendMessage?.items.map((item) => {
+              {visitationFocus ? (
+                <div className="visitation-focus-banner">
+                  <div>
+                    <p className="visitation-focus-label">Focused Member</p>
+                    <p className="visitation-focus-name">{visitationFocus.memberName}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="member-cancel-button"
+                    onClick={() => setVisitationFocus(null)}
+                  >
+                    Show All
+                  </button>
+                </div>
+              ) : null}
+
+              {visitationItems.map((item) => {
                 const memberData = parseMemberData(item.data);
                 const fullName = [memberData?.firstName, memberData?.lastName]
                   .filter(Boolean)
@@ -964,6 +1015,25 @@ export default function App() {
                             </div>
 
                             <div className="visit-entry-actions">
+                              <button
+                                type="button"
+                                className="visitation-action-button visitation-action-schedule"
+                                onClick={() =>
+                                  openVisitationModal(
+                                    "schedule",
+                                    item.pk,
+                                    item.sk,
+                                    fullName || "Unnamed member",
+                                    {
+                                      visitationId: visit.id,
+                                      schedule: visit.scheduledAt,
+                                    },
+                                  )
+                                }
+                              >
+                                <span>Edit Visit</span>
+                              </button>
+
                               <button
                                 type="button"
                                 className={`visitation-action-button visitation-action-note${
@@ -1341,7 +1411,9 @@ export default function App() {
             <p className="eyebrow">{visitationModal.memberName}</p>
             <h2 className="modal-title">
               {visitationModal.action === "schedule"
-                ? "Schedule visitation"
+                ? visitationModal.visitationId
+                  ? "Edit visitation"
+                  : "Schedule visitation"
                 : visitationModal.action === "note"
                   ? "Add visitation note"
                   : "Mark visitation done"}
@@ -1375,8 +1447,8 @@ export default function App() {
 
               {visitationModal.action === "complete" ? (
                 <p className="modal-copy">
-                  Confirm that the visitation for {visitationModal.memberName} has been
-                  completed.
+                  Confirm that this specific visit for {visitationModal.memberName} has
+                  been completed.
                 </p>
               ) : null}
 

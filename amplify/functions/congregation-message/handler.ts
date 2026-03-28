@@ -183,15 +183,28 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       let historyMessage = "";
 
       if (payload.action === "schedule") {
-        nextVisitations = [
-          {
-            id: crypto.randomUUID(),
-            scheduledAt: payload.schedule,
-            updatedAt: time,
-          },
-          ...existingVisitations,
-        ];
-        historyMessage = `Visitation scheduled for ${payload.schedule}.`;
+        if (payload.visitationId) {
+          nextVisitations = existingVisitations.map((visitation) =>
+            visitation.id === payload.visitationId
+              ? {
+                  ...visitation,
+                  scheduledAt: payload.schedule,
+                  updatedAt: time,
+                }
+              : visitation,
+          );
+          historyMessage = `Visitation schedule updated to ${payload.schedule}.`;
+        } else {
+          nextVisitations = [
+            {
+              id: crypto.randomUUID(),
+              scheduledAt: payload.schedule,
+              updatedAt: time,
+            },
+            ...existingVisitations,
+          ];
+          historyMessage = `Visitation scheduled for ${payload.schedule}.`;
+        }
       }
 
       if (payload.action === "note") {

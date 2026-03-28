@@ -468,6 +468,7 @@ button {
   gap: 0.5rem;
 }
 
+.api-visitations-button,
 .api-edit-button,
 .api-delete-button {
   border-radius: 999px;
@@ -475,6 +476,12 @@ button {
   font-weight: 700;
   padding: 0.42rem 0.72rem;
   cursor: pointer;
+}
+
+.api-visitations-button {
+  border: 1px solid rgba(244, 196, 48, 0.28);
+  background: rgba(244, 196, 48, 0.14);
+  color: #fde68a;
 }
 
 .api-edit-button {
@@ -489,6 +496,7 @@ button {
   color: var(--danger-text);
 }
 
+.api-visitations-button:disabled,
 .api-edit-button:disabled,
 .api-delete-button:disabled {
   opacity: 0.7;
@@ -821,6 +829,36 @@ button {
   display: grid;
   gap: 1rem;
   margin-top: 1.5rem;
+}
+
+.visitation-focus-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  background: rgba(244, 196, 48, 0.12);
+  border: 1px solid rgba(244, 196, 48, 0.2);
+}
+
+.visitation-focus-label,
+.visitation-focus-name {
+  margin: 0;
+}
+
+.visitation-focus-label {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-light);
+}
+
+.visitation-focus-name {
+  margin-top: 0.2rem;
+  color: var(--dark-card-text);
+  font-weight: 700;
 }
 
 .visitation-card {
