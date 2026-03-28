@@ -171,6 +171,29 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
       const sanitizedItems = payload.items.map((item) => item.trim()).filter(Boolean);
       const announcementSk = `WEEK#${payload.weekLabel}`;
+      const existingAnnouncementResponse = await dynamoClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            pk: "ANNOUNCEMENT",
+            sk: announcementSk,
+          },
+        }),
+      );
+
+      if (
+        existingAnnouncementResponse.Item &&
+        (!payload.sk || payload.sk !== announcementSk)
+      ) {
+        return {
+          statusCode: 409,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "An announcement week already exists for that week.",
+            time,
+          }),
+        };
+      }
 
       await dynamoClient.send(
         new PutCommand({

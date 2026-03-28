@@ -147,6 +147,16 @@ type DeleteModalState = {
   memberName: string;
 } | null;
 
+type AnnouncementDeleteModalState = {
+  sk: string;
+  weekLabel: string;
+} | null;
+
+type AnnouncementItemDeleteModalState = {
+  index: number;
+  label: string;
+} | null;
+
 type EditingMemberState = {
   pk: string;
   sk: string;
@@ -278,6 +288,10 @@ export default function App() {
   );
   const [isAnnouncementSubmitting, setIsAnnouncementSubmitting] = useState(false);
   const [deletingAnnouncementSk, setDeletingAnnouncementSk] = useState<string | null>(null);
+  const [announcementDeleteModal, setAnnouncementDeleteModal] =
+    useState<AnnouncementDeleteModalState>(null);
+  const [announcementItemDeleteModal, setAnnouncementItemDeleteModal] =
+    useState<AnnouncementItemDeleteModalState>(null);
   const [memberSearch, setMemberSearch] = useState("");
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
   const [editingMember, setEditingMember] = useState<EditingMemberState>(null);
@@ -546,6 +560,23 @@ export default function App() {
     });
   };
 
+  const openAnnouncementItemDeleteModal = (index: number, label: string) => {
+    setAnnouncementItemDeleteModal({ index, label });
+  };
+
+  const closeAnnouncementItemDeleteModal = () => {
+    setAnnouncementItemDeleteModal(null);
+  };
+
+  const confirmRemoveAnnouncementItem = () => {
+    if (!announcementItemDeleteModal) {
+      return;
+    }
+
+    removeAnnouncementItem(announcementItemDeleteModal.index);
+    closeAnnouncementItemDeleteModal();
+  };
+
   const startCreateAnnouncementWeek = () => {
     setAnnouncementWeekForm(initialAnnouncementWeekForm);
     setAnnouncementSubmitState(null);
@@ -569,6 +600,14 @@ export default function App() {
 
     if (!congregationApiName) {
       setAnnouncementSubmitState("Backend API is not configured yet.");
+      return;
+    }
+
+    const nextAnnouncementSk = `WEEK#${announcementWeekForm.weekLabel}`;
+    const existingWeek = announcementWeeks.find((week) => week.sk === nextAnnouncementSk);
+
+    if (existingWeek && announcementWeekForm.sk !== nextAnnouncementSk) {
+      setAnnouncementSubmitState("That week already exists.");
       return;
     }
 
@@ -598,7 +637,7 @@ export default function App() {
       );
       setAnnouncementWeekForm(initialAnnouncementWeekForm);
       await loadAnnouncements();
-    } catch {
+    } catch (error) {
       setAnnouncementSubmitState("Unable to save announcement week.");
     } finally {
       setIsAnnouncementSubmitting(false);
@@ -632,6 +671,23 @@ export default function App() {
     } finally {
       setDeletingAnnouncementSk(null);
     }
+  };
+
+  const openAnnouncementDeleteModal = (sk: string, weekLabel: string) => {
+    setAnnouncementDeleteModal({ sk, weekLabel });
+  };
+
+  const closeAnnouncementDeleteModal = () => {
+    setAnnouncementDeleteModal(null);
+  };
+
+  const confirmRemoveAnnouncementWeek = async () => {
+    if (!announcementDeleteModal) {
+      return;
+    }
+
+    await handleRemoveAnnouncementWeek(announcementDeleteModal.sk);
+    closeAnnouncementDeleteModal();
   };
 
   const handleMemberSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1560,7 +1616,7 @@ export default function App() {
                     <span>Announcements</span>
                     <div className="announcement-items-list">
                       {announcementWeekForm.items.map((item, index) => (
-                        <div className="announcement-item-row" key={`${index}-${item}`}>
+                        <div className="announcement-item-row" key={index}>
                           <input
                             type="text"
                             placeholder={`Announcement ${index + 1}`}
@@ -1572,7 +1628,12 @@ export default function App() {
                           <button
                             type="button"
                             className="announcement-remove-button"
-                            onClick={() => removeAnnouncementItem(index)}
+                            onClick={() =>
+                              openAnnouncementItemDeleteModal(
+                                index,
+                                item || `Announcement ${index + 1}`,
+                              )
+                            }
                           >
                             Remove
                           </button>
@@ -1646,10 +1707,15 @@ export default function App() {
                             <button
                               type="button"
                               className="api-delete-button"
-                              onClick={() => handleRemoveAnnouncementWeek(week.sk)}
+                              onClick={() =>
+                                openAnnouncementDeleteModal(
+                                  week.sk,
+                                  formatAnnouncementWeekLabel(week.parsed?.weekLabel),
+                                )
+                              }
                               disabled={deletingAnnouncementSk === week.sk}
                             >
-                              {deletingAnnouncementSk === week.sk ? "..." : "×"}
+                              {deletingAnnouncementSk === week.sk ? "..." : "Delete"}
                             </button>
                           </div>
                         </div>
@@ -1985,6 +2051,88 @@ export default function App() {
                 {deletingMemberKey === `${deleteModal.pk}-${deleteModal.sk}`
                   ? "Deleting..."
                   : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {announcementDeleteModal ? (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onClick={closeAnnouncementDeleteModal}
+        >
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Delete announcement week confirmation"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="eyebrow">Delete Week</p>
+            <h2 className="modal-title">{announcementDeleteModal.weekLabel}</h2>
+            <p className="modal-copy">
+              Remove this announcement week and its full list of items? This action
+              cannot be undone.
+            </p>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-secondary-button"
+                onClick={closeAnnouncementDeleteModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="modal-danger-button"
+                onClick={confirmRemoveAnnouncementWeek}
+                disabled={deletingAnnouncementSk === announcementDeleteModal.sk}
+              >
+                {deletingAnnouncementSk === announcementDeleteModal.sk
+                  ? "Deleting..."
+                  : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {announcementItemDeleteModal ? (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onClick={closeAnnouncementItemDeleteModal}
+        >
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Delete announcement item confirmation"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="eyebrow">Remove Announcement</p>
+            <h2 className="modal-title">{announcementItemDeleteModal.label}</h2>
+            <p className="modal-copy">
+              Remove this announcement from the current week list?
+            </p>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-secondary-button"
+                onClick={closeAnnouncementItemDeleteModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="modal-danger-button"
+                onClick={confirmRemoveAnnouncementItem}
+              >
+                Remove
               </button>
             </div>
           </div>
