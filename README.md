@@ -15,6 +15,58 @@ The application uses a React frontend with Amplify-managed authentication and AP
 
 ![Architecture Diagram](public/architecture.png)
 
+## DynamoDB Schema
+
+The backend stores congregation members in a DynamoDB table named `test_table`.
+
+- Partition key: `pk`
+- Sort key: `sk`
+- Data payload: `data`
+
+For congregation members, the key pattern is:
+
+- `pk`: `CONGREGATION`
+- `sk`: `MEMBER#<uuid>`
+
+The `data` attribute is a JSON string. It stores the member profile plus visitation history in this shape:
+
+```json
+{
+  "firstName": "Daniel",
+  "lastName": "Wanis",
+  "email": "daniel@example.com",
+  "phone": "6130000000",
+  "role": "Member",
+  "status": "Active",
+  "address": "121 Hollowbrook Drive",
+  "notes": "General member notes",
+  "createdAt": "2026-03-28T12:00:00.000Z",
+  "updatedAt": "2026-03-28T14:30:00.000Z",
+  "history": [
+    {
+      "timestamp": "2026-03-28T14:30:00.000Z",
+      "action": "member_updated",
+      "message": "Member details edited."
+    }
+  ],
+  "visitations": [
+    {
+      "id": "uuid",
+      "scheduledAt": "2026-04-04T13:12:00.000Z",
+      "note": "Need it as soon as possible",
+      "completedAt": "2026-04-04T15:00:00.000Z",
+      "updatedAt": "2026-04-04T15:00:00.000Z"
+    }
+  ]
+}
+```
+
+Field notes:
+
+- `history` is an array of audit-style entries used by the member details page log.
+- `visitations` is an array because one member can have multiple visits.
+- Each visit has its own `id`, so schedule updates, notes, and completion status can be applied to a specific visit.
+
 ## AWS Setup
 
 1. Install the AWS CLI.
