@@ -162,6 +162,7 @@ export default function App() {
   const [editingMember, setEditingMember] = useState<EditingMemberState>(null);
   const [selectedMember, setSelectedMember] = useState<SelectedMemberState>(null);
   const [visitationFocus, setVisitationFocus] = useState<VisitationFocusState>(null);
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
   const [deletingMemberKey, setDeletingMemberKey] = useState<string | null>(null);
@@ -337,6 +338,10 @@ export default function App() {
       document.removeEventListener("touchstart", handlePointerDown);
     };
   }, [isMobileMenuOpen]);
+
+  useEffect(() => {
+    setIsHistoryExpanded(false);
+  }, [selectedMember?.pk, selectedMember?.sk]);
 
   const updateMemberForm = (
     field: keyof MemberFormState,
@@ -1335,34 +1340,48 @@ export default function App() {
                   </div>
 
                   <div className="member-detail-history-card">
-                    <p className="member-detail-subtitle">Log History</p>
-                    {selectedMemberHistory.length > 0 ? (
-                      <div className="member-history-list">
-                        {selectedMemberHistory.map((entry, index) => (
-                          <div
-                            className="member-history-item"
-                            key={`${entry.action}-${entry.timestamp}-${index}`}
-                          >
-                            <div className="member-history-top">
-                              <p className="member-history-action">
-                                {entry.action
-                                  .split("_")
-                                  .join(" ")
-                                  .replace(/\b\w/g, (match: string) =>
-                                    match.toUpperCase(),
-                                  )}
-                              </p>
-                              <p className="member-history-time">
-                                {new Date(entry.timestamp).toLocaleString()}
-                              </p>
+                    <button
+                      type="button"
+                      className="member-history-toggle"
+                      onClick={() => setIsHistoryExpanded((current) => !current)}
+                    >
+                      <span className="member-detail-subtitle">Log History</span>
+                      <span className="member-history-toggle-icon">
+                        {isHistoryExpanded ? "Hide" : "Show"}
+                      </span>
+                    </button>
+
+                    {isHistoryExpanded ? (
+                      selectedMemberHistory.length > 0 ? (
+                        <div className="member-history-list">
+                          {selectedMemberHistory.map((entry, index) => (
+                            <div
+                              className="member-history-item"
+                              key={`${entry.action}-${entry.timestamp}-${index}`}
+                            >
+                              <div className="member-history-top">
+                                <p className="member-history-action">
+                                  {entry.action
+                                    .split("_")
+                                    .join(" ")
+                                    .replace(/\b\w/g, (match: string) =>
+                                      match.toUpperCase(),
+                                    )}
+                                </p>
+                                <p className="member-history-time">
+                                  {new Date(entry.timestamp).toLocaleString()}
+                                </p>
+                              </div>
+                              <p className="member-history-message">{entry.message}</p>
                             </div>
-                            <p className="member-history-message">{entry.message}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="member-detail-value">No activity has been recorded yet.</p>
-                    )}
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="member-detail-value">
+                          No activity has been recorded yet.
+                        </p>
+                      )
+                    ) : null}
                   </div>
 
                   <div className="member-detail-visit-card">
