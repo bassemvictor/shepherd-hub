@@ -45,6 +45,11 @@ type VisitationPayload = {
 };
 
 type StoredMemberData = {
+  history?: Array<{
+    timestamp: string;
+    action: string;
+    message: string;
+  }>;
   firstName?: string;
   lastName?: string;
   email?: string;
@@ -62,6 +67,11 @@ type StoredMemberData = {
     updatedAt?: string;
   };
 };
+
+const prependHistoryEntry = (
+  history: StoredMemberData["history"],
+  entry: NonNullable<StoredMemberData["history"]>[number],
+) => [entry, ...(history ?? [])];
 
 const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
@@ -180,6 +190,18 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             sk: payload.sk,
             data: JSON.stringify({
               ...existingData,
+              history: prependHistoryEntry(existingData.history, {
+                timestamp: time,
+                action: `visitation_${payload.action}`,
+                message:
+                  payload.action === "schedule"
+                    ? `Visitation scheduled for ${payload.schedule}.`
+                    : payload.action === "note"
+                      ? existingData.visitation?.note
+                        ? "Visitation note edited."
+                        : "Visitation note added."
+                      : "Visitation marked as done.",
+              }),
               visitation: nextVisitation,
               updatedAt: time,
             }),
@@ -211,7 +233,34 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         };
       }
 
+      const existingResponse = await dynamoClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            pk: payload.pk,
+            sk: payload.sk,
+          },
+        }),
+      );
+
+      const existingItem = existingResponse.Item as TableRow | undefined;
+      let existingData: StoredMemberData = {};
+
+      if (existingItem) {
+        try {
+          existingData = JSON.parse(existingItem.data) as StoredMemberData;
+        } catch {
+          existingData = {};
+        }
+      }
+
       const data = JSON.stringify({
+        ...existingData,
+        history: prependHistoryEntry(existingData.history, {
+          timestamp: time,
+          action: "member_updated",
+          message: "Member details edited.",
+        }),
         firstName: payload.firstName ?? "",
         lastName: payload.lastName ?? "",
         email: payload.email ?? "",
@@ -294,6 +343,11 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     const memberId = crypto.randomUUID();
     const data = JSON.stringify({
+      history: prependHistoryEntry(undefined, {
+        timestamp: time,
+        action: "member_created",
+        message: "Member entry added.",
+      }),
       firstName: payload.firstName ?? "",
       lastName: payload.lastName ?? "",
       email: payload.email ?? "",

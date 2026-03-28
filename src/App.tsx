@@ -72,6 +72,11 @@ type MemberFormState = {
 type StoredMemberData = Partial<MemberFormState> & {
   createdAt?: string;
   updatedAt?: string;
+  history?: Array<{
+    timestamp: string;
+    action: string;
+    message: string;
+  }>;
   visitation?: {
     scheduledAt?: string;
     note?: string;
@@ -176,6 +181,18 @@ export default function App() {
         .filter(Boolean)
         .join(" ") || "Unnamed member"
     : "Member";
+  const selectedMemberHistory =
+    selectedMemberData?.history && selectedMemberData.history.length > 0
+      ? selectedMemberData.history
+      : selectedMemberData?.createdAt
+        ? [
+            {
+              timestamp: selectedMemberData.createdAt,
+              action: "member_created",
+              message: "Member entry added.",
+            },
+          ]
+        : [];
   const normalizedMemberSearch = memberSearch.trim().toLowerCase();
   const filteredCongregationItems =
     backendMessage?.items.filter((item) => {
@@ -1206,6 +1223,27 @@ export default function App() {
                         {selectedMemberData.notes || "No notes yet"}
                       </p>
                     </div>
+                  </div>
+
+                  <div className="member-detail-history-card">
+                    <p className="member-detail-subtitle">Log History</p>
+                    {selectedMemberHistory.length > 0 ? (
+                      <div className="member-history-list">
+                        {selectedMemberHistory.map((entry, index) => (
+                          <div
+                            className="member-history-item"
+                            key={`${entry.action}-${entry.timestamp}-${index}`}
+                          >
+                            <p className="member-history-time">
+                              {new Date(entry.timestamp).toLocaleString()}
+                            </p>
+                            <p className="member-history-message">{entry.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="member-detail-value">No activity has been recorded yet.</p>
+                    )}
                   </div>
 
                   <div className="member-detail-visit-card">
