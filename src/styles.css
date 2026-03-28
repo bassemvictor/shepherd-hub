@@ -1328,6 +1328,26 @@ button {
     align-items: stretch;
   }
 
+  .api-data-item {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .api-data-details {
+    order: 1;
+    margin-top: 0;
+  }
+
+  .api-data-row {
+    order: 2;
+    margin-top: 0.45rem;
+  }
+
+  .api-data-key {
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
+
   .api-data-actions {
     flex-wrap: wrap;
     width: 100%;

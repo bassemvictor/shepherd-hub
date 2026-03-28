@@ -11,13 +11,11 @@ const pageContent: Record<
 > = {
   congregation: {
     eyebrow: "Congregation",
-    description:
-      "Track members, responsibilities, and updates from a single dashboard built for day-to-day congregation work.",
+    description: "",
   },
   visitation: {
     eyebrow: "Visitation",
-    description:
-      "Organize upcoming visits, remember special circumstances, and keep a clear history of care and encouragement.",
+    description: "",
   },
   "new-member": {
     eyebrow: "New Member",
@@ -26,8 +24,7 @@ const pageContent: Record<
   },
   "member-details": {
     eyebrow: "Member Details",
-    description:
-      "Review the member profile, contact details, and visitation updates in one place.",
+    description: "",
   },
 };
 
@@ -1174,10 +1171,13 @@ export default function App() {
                     <option value="" disabled>
                       Select a role
                     </option>
-                    <option>Elder</option>
-                    <option>Ministerial Servant</option>
-                    <option>Publisher</option>
-                    <option>Pioneer</option>
+                    <option>Priest</option>
+                    <option>Member</option>
+                    <option>Servant</option>
+                    <option>Visitor</option>
+                    <option>Sector coordinator</option>
+                    <option>Contractor</option>
+                    <option>Student</option>
                   </select>
                 </label>
 
