@@ -3,7 +3,7 @@ import { get, post } from "aws-amplify/api";
 import { confirmSignIn, getCurrentUser, signIn, signOut } from "aws-amplify/auth";
 import outputs from "../amplify_outputs.json";
 
-type PageKey = "congregation" | "visitation" | "new-member";
+type PageKey = "congregation" | "visitation" | "new-member" | "member-details";
 
 const pageContent: Record<
   PageKey,
@@ -23,6 +23,11 @@ const pageContent: Record<
     eyebrow: "New Member",
     description:
       "Capture the basic details for a congregation member.",
+  },
+  "member-details": {
+    eyebrow: "Member Details",
+    description:
+      "Review the member profile, contact details, and visitation updates in one place.",
   },
 };
 
@@ -95,6 +100,11 @@ type EditingMemberState = {
   createdAt?: string;
 } | null;
 
+type SelectedMemberState = {
+  pk: string;
+  sk: string;
+} | null;
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
   firstName: "",
@@ -138,6 +148,7 @@ export default function App() {
   const [memberSearch, setMemberSearch] = useState("");
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
   const [editingMember, setEditingMember] = useState<EditingMemberState>(null);
+  const [selectedMember, setSelectedMember] = useState<SelectedMemberState>(null);
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
   const [deletingMemberKey, setDeletingMemberKey] = useState<string | null>(null);
@@ -151,6 +162,20 @@ export default function App() {
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>(null);
   const currentPage = pageContent[activePage];
   const isEditingMember = editingMember !== null;
+  const selectedMemberItem =
+    selectedMember && backendMessage
+      ? backendMessage.items.find(
+          (item) => item.pk === selectedMember.pk && item.sk === selectedMember.sk,
+        ) ?? null
+      : null;
+  const selectedMemberData = selectedMemberItem
+    ? parseMemberData(selectedMemberItem.data)
+    : null;
+  const selectedMemberName = selectedMemberData
+    ? [selectedMemberData.firstName, selectedMemberData.lastName]
+        .filter(Boolean)
+        .join(" ") || "Unnamed member"
+    : "Member";
   const normalizedMemberSearch = memberSearch.trim().toLowerCase();
   const filteredCongregationItems =
     backendMessage?.items.filter((item) => {
@@ -376,6 +401,11 @@ export default function App() {
     setMemberForm(initialMemberForm);
     setMemberSubmitState(null);
     setActivePage("congregation");
+  };
+
+  const openMemberDetailsPage = (pk: string, sk: string) => {
+    setSelectedMember({ pk, sk });
+    setActivePage("member-details");
   };
 
   const handleDeleteMember = async (pk: string, sk: string) => {
@@ -779,7 +809,11 @@ export default function App() {
                         .join(" ");
 
                       return (
-                        <article className="api-data-item" key={`${item.pk}-${item.sk}`}>
+                        <article
+                          className="api-data-item api-data-item-clickable"
+                          key={`${item.pk}-${item.sk}`}
+                          onClick={() => openMemberDetailsPage(item.pk, item.sk)}
+                        >
                         <div className="api-data-row">
                           <p className="api-data-key">
                             {item.pk} / {item.sk}
@@ -789,9 +823,10 @@ export default function App() {
                             <button
                               type="button"
                               className="api-edit-button"
-                              onClick={() =>
-                                openEditMemberPage(item.pk, item.sk, memberData)
-                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openEditMemberPage(item.pk, item.sk, memberData);
+                              }}
                             >
                               Edit
                             </button>
@@ -799,13 +834,14 @@ export default function App() {
                             <button
                               type="button"
                               className="api-delete-button"
-                              onClick={() =>
+                              onClick={(event) => {
+                                event.stopPropagation();
                                 openDeleteModal(
                                   item.pk,
                                   item.sk,
                                   fullName || `${item.pk} / ${item.sk}`,
-                                )
-                              }
+                                );
+                              }}
                               disabled={deletingMemberKey === `${item.pk}-${item.sk}`}
                             >
                               {deletingMemberKey === `${item.pk}-${item.sk}`
@@ -1095,6 +1131,130 @@ export default function App() {
                 </button>
               </div>
             </form>
+          ) : null}
+
+          {activePage === "member-details" ? (
+            <div className="member-detail-card">
+              {selectedMemberItem && selectedMemberData ? (
+                <>
+                  <div className="member-detail-header">
+                    <div>
+                      <p className="member-detail-key">
+                        {selectedMemberItem.pk} / {selectedMemberItem.sk}
+                      </p>
+                      <h2 className="member-detail-name">{selectedMemberName}</h2>
+                    </div>
+
+                    <div className="member-detail-actions">
+                      <button
+                        type="button"
+                        className="member-cancel-button"
+                        onClick={() => setActivePage("congregation")}
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        className="member-submit-button"
+                        onClick={() =>
+                          openEditMemberPage(
+                            selectedMemberItem.pk,
+                            selectedMemberItem.sk,
+                            selectedMemberData,
+                          )
+                        }
+                      >
+                        Edit Member
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="member-detail-grid">
+                    <div className="member-detail-section">
+                      <p className="member-detail-label">Role</p>
+                      <p className="member-detail-value">
+                        {selectedMemberData.role || "Not set"}
+                      </p>
+                    </div>
+                    <div className="member-detail-section">
+                      <p className="member-detail-label">Status</p>
+                      <p className="member-detail-value">
+                        {selectedMemberData.status || "Not set"}
+                      </p>
+                    </div>
+                    <div className="member-detail-section">
+                      <p className="member-detail-label">Email</p>
+                      <p className="member-detail-value">
+                        {selectedMemberData.email || "Not set"}
+                      </p>
+                    </div>
+                    <div className="member-detail-section">
+                      <p className="member-detail-label">Phone</p>
+                      <p className="member-detail-value">
+                        {selectedMemberData.phone || "Not set"}
+                      </p>
+                    </div>
+                    <div className="member-detail-section member-detail-section-full">
+                      <p className="member-detail-label">Address</p>
+                      <p className="member-detail-value">
+                        {selectedMemberData.address || "Not set"}
+                      </p>
+                    </div>
+                    <div className="member-detail-section member-detail-section-full">
+                      <p className="member-detail-label">Notes</p>
+                      <p className="member-detail-value">
+                        {selectedMemberData.notes || "No notes yet"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="member-detail-visit-card">
+                    <p className="member-detail-subtitle">Visitation</p>
+                    <div className="member-detail-grid">
+                      <div className="member-detail-section">
+                        <p className="member-detail-label">Scheduled</p>
+                        <p className="member-detail-value">
+                          {selectedMemberData.visitation?.scheduledAt
+                            ? new Date(
+                                selectedMemberData.visitation.scheduledAt,
+                              ).toLocaleString()
+                            : "Not scheduled"}
+                        </p>
+                      </div>
+                      <div className="member-detail-section">
+                        <p className="member-detail-label">Completed</p>
+                        <p className="member-detail-value">
+                          {selectedMemberData.visitation?.completedAt
+                            ? new Date(
+                                selectedMemberData.visitation.completedAt,
+                              ).toLocaleString()
+                            : "Not completed"}
+                        </p>
+                      </div>
+                      <div className="member-detail-section member-detail-section-full">
+                        <p className="member-detail-label">Last note</p>
+                        <p className="member-detail-value">
+                          {selectedMemberData.visitation?.note || "No visitation note yet"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="member-detail-empty">
+                  <p className="member-detail-value">
+                    The selected member could not be found.
+                  </p>
+                  <button
+                    type="button"
+                    className="member-cancel-button"
+                    onClick={() => setActivePage("congregation")}
+                  >
+                    Back to Congregation
+                  </button>
+                </div>
+              )}
+            </div>
           ) : null}
         </section>
       </main>

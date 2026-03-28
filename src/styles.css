@@ -431,6 +431,19 @@ button {
   background: var(--soft-card-bg);
 }
 
+.api-data-item-clickable {
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.api-data-item-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+}
+
 .api-data-key,
 .api-data-value {
   margin: 0;
@@ -490,6 +503,7 @@ button {
   margin: 0;
   font-size: 1.15rem;
   font-weight: 700;
+  color: var(--dark-card-text);
 }
 
 .api-data-meta {
@@ -627,6 +641,99 @@ button {
 .member-submit-button:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+
+.member-detail-card {
+  margin-top: 1.5rem;
+  padding: 1.2rem;
+  border-radius: 20px;
+  background: var(--dark-card-bg);
+  color: var(--dark-card-text);
+}
+
+.member-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.member-detail-key,
+.member-detail-name,
+.member-detail-label,
+.member-detail-value,
+.member-detail-subtitle {
+  margin: 0;
+}
+
+.member-detail-key {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted-light);
+}
+
+.member-detail-card .member-detail-name {
+  margin-top: 0.35rem;
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  line-height: 1.05;
+  color: var(--dark-card-text);
+  max-width: none;
+}
+
+.member-detail-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.member-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 1.25rem;
+}
+
+.member-detail-section,
+.member-detail-visit-card {
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  background: var(--soft-card-bg);
+}
+
+.member-detail-section-full {
+  grid-column: 1 / -1;
+}
+
+.member-detail-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-light);
+}
+
+.member-detail-value {
+  margin-top: 0.35rem;
+  font-size: 0.98rem;
+  color: var(--dark-card-text);
+}
+
+.member-detail-visit-card {
+  margin-top: 1rem;
+}
+
+.member-detail-subtitle {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-light);
+}
+
+.member-detail-empty {
+  display: grid;
+  gap: 1rem;
 }
 
 .visitation-board {
@@ -854,6 +961,14 @@ button {
   .congregation-search-input {
     width: 100%;
   }
+
+  .member-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .member-detail-section-full {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 640px) {
@@ -938,5 +1053,19 @@ button {
 
   .description {
     font-size: 1rem;
+  }
+
+  .member-detail-header {
+    flex-direction: column;
+  }
+
+  .member-detail-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .member-detail-actions .member-cancel-button,
+  .member-detail-actions .member-submit-button {
+    width: 100%;
   }
 }
