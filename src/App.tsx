@@ -1234,9 +1234,19 @@ export default function App() {
                             className="member-history-item"
                             key={`${entry.action}-${entry.timestamp}-${index}`}
                           >
-                            <p className="member-history-time">
-                              {new Date(entry.timestamp).toLocaleString()}
-                            </p>
+                            <div className="member-history-top">
+                              <p className="member-history-action">
+                                {entry.action
+                                  .split("_")
+                                  .join(" ")
+                                  .replace(/\b\w/g, (match: string) =>
+                                    match.toUpperCase(),
+                                  )}
+                              </p>
+                              <p className="member-history-time">
+                                {new Date(entry.timestamp).toLocaleString()}
+                              </p>
+                            </div>
                             <p className="member-history-message">{entry.message}</p>
                           </div>
                         ))}
