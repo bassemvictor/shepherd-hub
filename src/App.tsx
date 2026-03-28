@@ -3,7 +3,17 @@ import { get, post } from "aws-amplify/api";
 import { confirmSignIn, getCurrentUser, signIn, signOut } from "aws-amplify/auth";
 import outputs from "../amplify_outputs.json";
 
-type PageKey = "congregation" | "visitation" | "new-member" | "member-details";
+type PageKey =
+  | "congregation"
+  | "visitation"
+  | "new-member"
+  | "member-details"
+  | "events"
+  | "sunday-school"
+  | "summer-camp"
+  | "parking"
+  | "board-meeting"
+  | "announcements";
 
 const pageContent: Record<
   PageKey,
@@ -26,6 +36,30 @@ const pageContent: Record<
     eyebrow: "Member Details",
     description: "",
   },
+  events: {
+    eyebrow: "Events",
+    description: "",
+  },
+  "sunday-school": {
+    eyebrow: "Sunday School",
+    description: "",
+  },
+  "summer-camp": {
+    eyebrow: "Summer Camp",
+    description: "",
+  },
+  parking: {
+    eyebrow: "Parking",
+    description: "",
+  },
+  "board-meeting": {
+    eyebrow: "Board Meeting",
+    description: "",
+  },
+  announcements: {
+    eyebrow: "Announcements",
+    description: "",
+  },
 };
 
 const navSections: Array<{
@@ -37,6 +71,12 @@ const navSections: Array<{
     items: [
       { key: "congregation", label: "Congregation" },
       { key: "visitation", label: "Visitation" },
+      { key: "announcements", label: "Announcements" },
+      { key: "events", label: "Events" },
+      { key: "sunday-school", label: "Sunday School" },
+      { key: "summer-camp", label: "Summer Camp" },
+      { key: "parking", label: "Parking" },
+      { key: "board-meeting", label: "Board Meeting" },
     ],
   },
   {
@@ -46,6 +86,16 @@ const navSections: Array<{
 ];
 
 type BackendMessage = {
+  message: string;
+  time: string;
+  items: Array<{
+    pk: string;
+    sk: string;
+    data: string;
+  }>;
+};
+
+type AnnouncementResponse = {
   message: string;
   time: string;
   items: Array<{
@@ -114,6 +164,20 @@ type VisitationFocusState = {
   memberName: string;
 } | null;
 
+type AnnouncementWeekData = {
+  weekLabel?: string;
+  items?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type AnnouncementWeekFormState = {
+  sk?: string;
+  createdAt?: string;
+  weekLabel: string;
+  items: string[];
+};
+
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
   firstName: "",
@@ -132,6 +196,56 @@ const parseMemberData = (value: string): StoredMemberData | null => {
   } catch {
     return null;
   }
+};
+
+const parseAnnouncementWeekData = (value: string): AnnouncementWeekData | null => {
+  try {
+    return JSON.parse(value) as AnnouncementWeekData;
+  } catch {
+    return null;
+  }
+};
+
+const formatAnnouncementWeekLabel = (value: string | undefined) => {
+  if (!value) {
+    return "Unknown week";
+  }
+
+  const match = /^(\d{4})-W(\d{2})$/.exec(value);
+
+  if (!match) {
+    return value;
+  }
+
+  const [, yearText, weekText] = match;
+  const year = Number(yearText);
+  const week = Number(weekText);
+  const januaryFourth = new Date(Date.UTC(year, 0, 4));
+  const januaryFourthDay = januaryFourth.getUTCDay() || 7;
+  const mondayOfWeekOne = new Date(januaryFourth);
+  mondayOfWeekOne.setUTCDate(januaryFourth.getUTCDate() - januaryFourthDay + 1);
+  const mondayOfTargetWeek = new Date(mondayOfWeekOne);
+  mondayOfTargetWeek.setUTCDate(mondayOfWeekOne.getUTCDate() + (week - 1) * 7);
+
+  return `Week of ${mondayOfTargetWeek.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })}`;
+};
+
+const placeholderPages: PageKey[] = [
+  "events",
+  "sunday-school",
+  "summer-camp",
+  "parking",
+  "board-meeting",
+];
+
+const initialAnnouncementWeekForm: AnnouncementWeekFormState = {
+  weekLabel: "",
+  items: [""],
 };
 
 export default function App() {
@@ -154,6 +268,16 @@ export default function App() {
   const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isBackendLoading, setIsBackendLoading] = useState(false);
+  const [announcements, setAnnouncements] = useState<AnnouncementResponse | null>(null);
+  const [announcementsError, setAnnouncementsError] = useState<string | null>(null);
+  const [isAnnouncementsLoading, setIsAnnouncementsLoading] = useState(false);
+  const [announcementWeekForm, setAnnouncementWeekForm] =
+    useState<AnnouncementWeekFormState>(initialAnnouncementWeekForm);
+  const [announcementSubmitState, setAnnouncementSubmitState] = useState<string | null>(
+    null,
+  );
+  const [isAnnouncementSubmitting, setIsAnnouncementSubmitting] = useState(false);
+  const [deletingAnnouncementSk, setDeletingAnnouncementSk] = useState<string | null>(null);
   const [memberSearch, setMemberSearch] = useState("");
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
   const [editingMember, setEditingMember] = useState<EditingMemberState>(null);
@@ -231,6 +355,14 @@ export default function App() {
         (item) => item.pk === visitationFocus.pk && item.sk === visitationFocus.sk,
       ) ?? [])
     : (backendMessage?.items ?? []);
+  const announcementWeeks =
+    announcements?.items
+      .slice()
+      .sort((left, right) => right.sk.localeCompare(left.sk))
+      .map((item) => ({
+        ...item,
+        parsed: parseAnnouncementWeekData(item.data),
+      })) ?? [];
 
   const checkAuthSession = async () => {
     try {
@@ -268,6 +400,32 @@ export default function App() {
     }
   };
 
+  const loadAnnouncements = async () => {
+    if (!congregationApiName) {
+      setAnnouncementsError(
+        "Backend API is not configured yet. Run the Amplify sandbox and generate outputs.",
+      );
+      return;
+    }
+
+    setIsAnnouncementsLoading(true);
+    setAnnouncementsError(null);
+
+    try {
+      const restOperation = get({
+        apiName: congregationApiName,
+        path: "/announcements",
+      });
+      const { body } = await restOperation.response;
+      const response = (await body.json()) as AnnouncementResponse;
+      setAnnouncements(response);
+    } catch {
+      setAnnouncementsError("Unable to load announcements.");
+    } finally {
+      setIsAnnouncementsLoading(false);
+    }
+  };
+
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("shepherd-hub-theme");
 
@@ -300,6 +458,7 @@ export default function App() {
 
     void (async () => {
       await loadBackendMessage();
+      await loadAnnouncements();
       if (!isMounted) {
         return;
       }
@@ -348,6 +507,131 @@ export default function App() {
       ...current,
       [field]: value,
     }));
+  };
+
+  const updateAnnouncementWeekField = (
+    field: "weekLabel",
+    value: string,
+  ) => {
+    setAnnouncementWeekForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const updateAnnouncementItem = (index: number, value: string) => {
+    setAnnouncementWeekForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) =>
+        itemIndex === index ? value : item,
+      ),
+    }));
+  };
+
+  const addAnnouncementItem = () => {
+    setAnnouncementWeekForm((current) => ({
+      ...current,
+      items: [...current.items, ""],
+    }));
+  };
+
+  const removeAnnouncementItem = (index: number) => {
+    setAnnouncementWeekForm((current) => {
+      const nextItems = current.items.filter((_, itemIndex) => itemIndex !== index);
+
+      return {
+        ...current,
+        items: nextItems.length > 0 ? nextItems : [""],
+      };
+    });
+  };
+
+  const startCreateAnnouncementWeek = () => {
+    setAnnouncementWeekForm(initialAnnouncementWeekForm);
+    setAnnouncementSubmitState(null);
+  };
+
+  const startEditAnnouncementWeek = (
+    sk: string,
+    parsed: AnnouncementWeekData | null,
+  ) => {
+    setAnnouncementWeekForm({
+      sk,
+      createdAt: parsed?.createdAt,
+      weekLabel: parsed?.weekLabel ?? "",
+      items: parsed?.items && parsed.items.length > 0 ? parsed.items : [""],
+    });
+    setAnnouncementSubmitState(null);
+  };
+
+  const handleAnnouncementWeekSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!congregationApiName) {
+      setAnnouncementSubmitState("Backend API is not configured yet.");
+      return;
+    }
+
+    setIsAnnouncementSubmitting(true);
+    setAnnouncementSubmitState(null);
+
+    try {
+      const restOperation = post({
+        apiName: congregationApiName,
+        path: "/announcements/week",
+        options: {
+          body: {
+            ...(announcementWeekForm.sk ? { sk: announcementWeekForm.sk } : {}),
+            ...(announcementWeekForm.createdAt
+              ? { createdAt: announcementWeekForm.createdAt }
+              : {}),
+            weekLabel: announcementWeekForm.weekLabel,
+            items: announcementWeekForm.items,
+          },
+        },
+      });
+      await restOperation.response;
+      setAnnouncementSubmitState(
+        announcementWeekForm.sk
+          ? "Announcement week updated."
+          : "Announcement week created.",
+      );
+      setAnnouncementWeekForm(initialAnnouncementWeekForm);
+      await loadAnnouncements();
+    } catch {
+      setAnnouncementSubmitState("Unable to save announcement week.");
+    } finally {
+      setIsAnnouncementSubmitting(false);
+    }
+  };
+
+  const handleRemoveAnnouncementWeek = async (sk: string) => {
+    if (!congregationApiName) {
+      return;
+    }
+
+    setDeletingAnnouncementSk(sk);
+
+    try {
+      const restOperation = post({
+        apiName: congregationApiName,
+        path: "/announcements/week/remove",
+        options: {
+          body: {
+            pk: "ANNOUNCEMENT",
+            sk,
+          },
+        },
+      });
+      await restOperation.response;
+      await loadAnnouncements();
+      if (announcementWeekForm.sk === sk) {
+        setAnnouncementWeekForm(initialAnnouncementWeekForm);
+        setAnnouncementSubmitState(null);
+      }
+    } finally {
+      setDeletingAnnouncementSk(null);
+    }
   };
 
   const handleMemberSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1249,6 +1533,146 @@ export default function App() {
                 </button>
               </div>
             </form>
+          ) : null}
+
+          {activePage === "announcements" ? (
+            <div className="announcements-page">
+              <form className="announcements-editor-card" onSubmit={handleAnnouncementWeekSubmit}>
+                <div className="member-form-header">
+                  <p className="member-form-mode">
+                    {announcementWeekForm.sk ? "Edit Week" : "Add Week"}
+                  </p>
+                </div>
+
+                <div className="member-form-grid">
+                  <label className="member-field member-field-full">
+                    <span>Week</span>
+                    <input
+                      type="week"
+                      value={announcementWeekForm.weekLabel}
+                      onChange={(event) =>
+                        updateAnnouncementWeekField("weekLabel", event.target.value)
+                      }
+                    />
+                  </label>
+
+                  <div className="member-field member-field-full">
+                    <span>Announcements</span>
+                    <div className="announcement-items-list">
+                      {announcementWeekForm.items.map((item, index) => (
+                        <div className="announcement-item-row" key={`${index}-${item}`}>
+                          <input
+                            type="text"
+                            placeholder={`Announcement ${index + 1}`}
+                            value={item}
+                            onChange={(event) =>
+                              updateAnnouncementItem(index, event.target.value)
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="announcement-remove-button"
+                            onClick={() => removeAnnouncementItem(index)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="announcement-add-button"
+                      onClick={addAnnouncementItem}
+                    >
+                      Add Item
+                    </button>
+                  </div>
+                </div>
+
+                <div className="member-form-actions">
+                  {announcementSubmitState ? (
+                    <p className="member-submit-message">{announcementSubmitState}</p>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="member-cancel-button"
+                    onClick={startCreateAnnouncementWeek}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="submit"
+                    className="member-submit-button"
+                    disabled={isAnnouncementSubmitting}
+                  >
+                    {isAnnouncementSubmitting
+                      ? "Saving..."
+                      : announcementWeekForm.sk
+                        ? "Update Week"
+                        : "Create Week"}
+                  </button>
+                </div>
+              </form>
+
+              <div className="announcements-list-card">
+                <p className="api-message-label">Weekly Announcements</p>
+                {isAnnouncementsLoading ? (
+                  <p className="api-message-text">Loading announcement weeks...</p>
+                ) : announcementsError ? (
+                  <p className="api-message-text">{announcementsError}</p>
+                ) : announcementWeeks.length === 0 ? (
+                  <p className="api-message-text">No announcement weeks yet.</p>
+                ) : (
+                  <div className="announcement-weeks-list">
+                    {announcementWeeks.map((week) => (
+                      <article className="announcement-week-card" key={week.sk}>
+                        <div className="announcement-week-header">
+                          <div>
+                            <p className="announcement-week-title">
+                              {formatAnnouncementWeekLabel(week.parsed?.weekLabel)}
+                            </p>
+                            <p className="announcement-week-meta">{week.sk}</p>
+                          </div>
+                          <div className="announcement-week-actions">
+                            <button
+                              type="button"
+                              className="api-edit-button"
+                              onClick={() =>
+                                startEditAnnouncementWeek(week.sk, week.parsed)
+                              }
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="api-delete-button"
+                              onClick={() => handleRemoveAnnouncementWeek(week.sk)}
+                              disabled={deletingAnnouncementSk === week.sk}
+                            >
+                              {deletingAnnouncementSk === week.sk ? "..." : "×"}
+                            </button>
+                          </div>
+                        </div>
+                        <ul className="announcement-week-items">
+                          {(week.parsed?.items ?? []).map((item, index) => (
+                            <li key={`${week.sk}-${index}`}>{item}</li>
+                          ))}
+                        </ul>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {placeholderPages.includes(activePage) ? (
+            <div className="placeholder-page-card">
+              <p className="placeholder-page-kicker">Placeholder</p>
+              <p className="placeholder-page-copy">
+                This page is ready for future content and workflow details.
+              </p>
+            </div>
           ) : null}
 
           {activePage === "member-details" ? (

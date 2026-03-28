@@ -631,6 +631,12 @@ button {
   color: #f8fafc;
 }
 
+[data-theme="dark"] .announcement-item-row input {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
 [data-theme="dark"] .member-field input::placeholder,
 [data-theme="dark"] .member-field textarea::placeholder {
   color: rgba(248, 250, 252, 0.45);
@@ -678,6 +684,149 @@ button {
 .member-submit-button:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+
+.placeholder-page-card {
+  margin-top: 1.5rem;
+  padding: 1.2rem;
+  border-radius: 20px;
+  background: var(--dark-card-bg);
+  border: 1px solid rgba(233, 201, 112, 0.2);
+  color: var(--dark-card-text);
+}
+
+.placeholder-page-kicker,
+.placeholder-page-title,
+.placeholder-page-copy {
+  margin: 0;
+}
+
+.placeholder-page-kicker {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-light);
+}
+
+.placeholder-page-title {
+  margin-top: 0.35rem;
+  font-size: 1.6rem;
+  color: var(--dark-card-text);
+}
+
+.placeholder-page-copy {
+  margin-top: 0.6rem;
+  color: var(--content-text);
+}
+
+.announcements-page {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.announcements-editor-card,
+.announcements-list-card {
+  padding: 1.1rem;
+  border-radius: 20px;
+  background: var(--dark-card-bg);
+  border: 1px solid rgba(233, 201, 112, 0.2);
+  color: var(--dark-card-text);
+}
+
+.announcement-items-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.announcement-item-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem;
+}
+
+.announcement-item-row input {
+  width: 100%;
+  border: 1px solid rgba(219, 183, 86, 0.24);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #172033;
+  padding: 0.85rem 0.9rem;
+  outline: none;
+}
+
+.announcement-add-button,
+.announcement-remove-button {
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.announcement-add-button {
+  margin-top: 0.8rem;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  background: rgba(59, 130, 246, 0.12);
+  color: #1e40af;
+  padding: 0.7rem 1rem;
+}
+
+.announcement-remove-button {
+  border: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  padding: 0.7rem 0.95rem;
+}
+
+.announcement-weeks-list {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.9rem;
+}
+
+.announcement-week-card {
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  background: var(--soft-card-bg);
+  border: 1px solid rgba(219, 183, 86, 0.16);
+}
+
+.announcement-week-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.announcement-week-title,
+.announcement-week-meta {
+  margin: 0;
+}
+
+.announcement-week-title {
+  font-weight: 700;
+  color: var(--dark-card-text);
+}
+
+.announcement-week-meta {
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted-light);
+}
+
+.announcement-week-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.announcement-week-items {
+  margin: 0.8rem 0 0;
+  padding-left: 1.15rem;
+  color: var(--dark-card-text);
+}
+
+.announcement-week-items li + li {
+  margin-top: 0.4rem;
 }
 
 .member-detail-card {
@@ -1041,6 +1190,20 @@ button {
   margin-top: 0.75rem;
 }
 
+[data-theme="dark"] .visitation-card {
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: 0 18px 38px rgba(2, 6, 23, 0.28);
+}
+
+[data-theme="dark"] .visit-entry {
+  background: rgba(15, 23, 42, 0.86);
+  border-color: rgba(148, 163, 184, 0.16);
+}
+
+[data-theme="dark"] .visit-entry-time {
+  color: #f8fafc;
+}
+
 .visitation-empty {
   margin: 0.9rem 0 0;
   color: var(--muted-light);
@@ -1096,6 +1259,7 @@ button {
 
 .visitation-action-complete.active {
   background: #86efac;
+  color: #14532d;
 }
 
 [data-theme="dark"] .visitation-action-schedule {
@@ -1110,6 +1274,10 @@ button {
 
 [data-theme="dark"] .visitation-action-complete {
   color: #bbf7d0;
+}
+
+[data-theme="dark"] .visitation-action-complete.active {
+  color: #14532d;
 }
 
 .modal-overlay {
@@ -1236,6 +1404,14 @@ button {
 
   .member-detail-section-full {
     grid-column: auto;
+  }
+
+  .announcement-item-row {
+    grid-template-columns: 1fr;
+  }
+
+  .announcement-week-header {
+    flex-direction: column;
   }
 }
 

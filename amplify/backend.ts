@@ -94,6 +94,33 @@ congregationApi.addRoutes({
   ),
 });
 
+congregationApi.addRoutes({
+  path: "/announcements",
+  methods: [HttpMethod.GET],
+  integration: new HttpLambdaIntegration(
+    "AnnouncementsListIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
+  path: "/announcements/week",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "AnnouncementsWeekIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
+  path: "/announcements/week/remove",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "AnnouncementsWeekRemoveIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
 backend.addOutput({
   custom: {
     API: {

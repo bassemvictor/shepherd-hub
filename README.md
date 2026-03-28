@@ -67,6 +67,33 @@ Field notes:
 - `visitations` is an array because one member can have multiple visits.
 - Each visit has its own `id`, so schedule updates, notes, and completion status can be applied to a specific visit.
 
+For weekly announcements, the key pattern is:
+
+- `pk`: `ANNOUNCEMENT`
+- `sk`: `WEEK#<uuid>`
+
+The `data` attribute is also a JSON string for announcements. It stores one week of announcement items in this shape:
+
+```json
+{
+  "weekLabel": "Week of April 7",
+  "items": [
+    "Board meeting after service",
+    "Summer camp registration opens Friday",
+    "Parking volunteers needed this weekend"
+  ],
+  "createdAt": "2026-03-28T12:00:00.000Z",
+  "updatedAt": "2026-03-28T14:30:00.000Z"
+}
+```
+
+Announcement notes:
+
+- each DynamoDB item represents one announcement week
+- `weekLabel` is the display label shown in the Announcements page
+- `items` is the editable list of announcement strings for that week
+- weeks are currently ordered in the UI by descending `sk`
+
 ## AWS Setup
 
 1. Install the AWS CLI.

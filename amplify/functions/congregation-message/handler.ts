@@ -4,6 +4,7 @@ import {
   GetCommand,
   DynamoDBDocumentClient,
   PutCommand,
+  QueryCommand,
   ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
@@ -45,6 +46,18 @@ type VisitationPayload = {
   note?: string;
 };
 
+type AnnouncementWeekPayload = {
+  sk?: string;
+  weekLabel: string;
+  items: string[];
+  createdAt?: string;
+};
+
+type DeleteAnnouncementPayload = {
+  pk: "ANNOUNCEMENT";
+  sk: string;
+};
+
 type StoredMemberData = {
   history?: Array<{
     timestamp: string;
@@ -70,6 +83,13 @@ type StoredMemberData = {
   }>;
 };
 
+type StoredAnnouncementWeekData = {
+  weekLabel?: string;
+  items?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 const prependHistoryEntry = (
   history: StoredMemberData["history"],
   entry: NonNullable<StoredMemberData["history"]>[number],
@@ -86,6 +106,7 @@ const responseHeaders = {
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const time = new Date().toISOString();
   const tableName = process.env.TEST_TABLE_NAME;
+  const requestPath = event.requestContext.http.path;
 
   if (!tableName) {
     return {
@@ -100,6 +121,98 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   }
 
   if (event.requestContext.http.method === "POST") {
+    if (requestPath.endsWith("/announcements/week/remove")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<DeleteAnnouncementPayload>;
+
+      if (!payload.sk) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "sk is required.",
+            time,
+          }),
+        };
+      }
+
+      await dynamoClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            pk: "ANNOUNCEMENT",
+            sk: payload.sk,
+          },
+        }),
+      );
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Announcement week removed.",
+          time,
+        }),
+      };
+    }
+
+    if (requestPath.endsWith("/announcements/week")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<AnnouncementWeekPayload>;
+
+      if (!payload.weekLabel || !Array.isArray(payload.items)) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "weekLabel and items are required.",
+            time,
+          }),
+        };
+      }
+
+      const sanitizedItems = payload.items.map((item) => item.trim()).filter(Boolean);
+      const announcementSk = `WEEK#${payload.weekLabel}`;
+
+      await dynamoClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            pk: "ANNOUNCEMENT",
+            sk: announcementSk,
+            data: JSON.stringify({
+              weekLabel: payload.weekLabel,
+              items: sanitizedItems,
+              createdAt: payload.createdAt ?? time,
+              updatedAt: time,
+            }),
+          },
+        }),
+      );
+
+      if (payload.sk && payload.sk !== announcementSk) {
+        await dynamoClient.send(
+          new DeleteCommand({
+            TableName: tableName,
+            Key: {
+              pk: "ANNOUNCEMENT",
+              sk: payload.sk,
+            },
+          }),
+        );
+      }
+
+      return {
+        statusCode: payload.sk ? 200 : 201,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: payload.sk
+            ? "Announcement week updated."
+            : "Announcement week created.",
+          time,
+          sk: announcementSk,
+        }),
+      };
+    }
+
     if (event.requestContext.http.path.endsWith("/congregation/member/visitation")) {
       const payload = JSON.parse(event.body ?? "{}") as Partial<VisitationPayload>;
 
@@ -430,10 +543,38 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     };
   }
 
+  if (requestPath.endsWith("/announcements")) {
+    const response = await dynamoClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: {
+          ":pk": "ANNOUNCEMENT",
+        },
+      }),
+    );
+    const items = ((response.Items ?? []) as TableRow[]).sort((left, right) =>
+      left.sk.localeCompare(right.sk),
+    );
+
+    return {
+      statusCode: 200,
+      headers: responseHeaders,
+      body: JSON.stringify({
+        message: "Announcement weeks loaded.",
+        time,
+        items,
+      }),
+    };
+  }
+
   const response = await dynamoClient.send(
-    new ScanCommand({
+    new QueryCommand({
       TableName: tableName,
-      Limit: 10,
+      KeyConditionExpression: "pk = :pk",
+      ExpressionAttributeValues: {
+        ":pk": "CONGREGATION",
+      },
     }),
   );
   const items = ((response.Items ?? []) as TableRow[]).sort((left, right) =>
