@@ -1,6 +1,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DeleteCommand,
+  GetCommand,
   DynamoDBDocumentClient,
   PutCommand,
   ScanCommand,
@@ -35,6 +36,33 @@ type DeleteMemberPayload = {
   sk: string;
 };
 
+type VisitationPayload = {
+  pk: string;
+  sk: string;
+  action: "schedule" | "note" | "complete";
+  schedule?: string;
+  note?: string;
+};
+
+type StoredMemberData = {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+  status?: string;
+  address?: string;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  visitation?: {
+    scheduledAt?: string;
+    note?: string;
+    completedAt?: string;
+    updatedAt?: string;
+  };
+};
+
 const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 const responseHeaders = {
@@ -60,6 +88,115 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   }
 
   if (event.requestContext.http.method === "POST") {
+    if (event.requestContext.http.path.endsWith("/congregation/member/visitation")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<VisitationPayload>;
+
+      if (!payload.pk || !payload.sk || !payload.action) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "pk, sk, and action are required.",
+            time,
+          }),
+        };
+      }
+
+      if (payload.action === "schedule" && !payload.schedule) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Schedule is required.",
+            time,
+          }),
+        };
+      }
+
+      if (payload.action === "note" && !payload.note) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Note is required.",
+            time,
+          }),
+        };
+      }
+
+      const existingResponse = await dynamoClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            pk: payload.pk,
+            sk: payload.sk,
+          },
+        }),
+      );
+
+      const existingItem = existingResponse.Item as TableRow | undefined;
+
+      if (!existingItem) {
+        return {
+          statusCode: 404,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Congregation member not found.",
+            time,
+          }),
+        };
+      }
+
+      let existingData: StoredMemberData = {};
+
+      try {
+        existingData = JSON.parse(existingItem.data) as StoredMemberData;
+      } catch {
+        existingData = {};
+      }
+
+      const nextVisitation = {
+        ...(existingData.visitation ?? {}),
+        updatedAt: time,
+      };
+
+      if (payload.action === "schedule") {
+        nextVisitation.scheduledAt = payload.schedule;
+      }
+
+      if (payload.action === "note") {
+        nextVisitation.note = payload.note;
+      }
+
+      if (payload.action === "complete") {
+        nextVisitation.completedAt = time;
+      }
+
+      await dynamoClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            pk: payload.pk,
+            sk: payload.sk,
+            data: JSON.stringify({
+              ...existingData,
+              visitation: nextVisitation,
+              updatedAt: time,
+            }),
+          },
+        }),
+      );
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Visitation updated.",
+          time,
+        }),
+      };
+    }
+
     if (event.requestContext.http.path.endsWith("/congregation/member/update")) {
       const payload = JSON.parse(event.body ?? "{}") as Partial<UpdateMemberPayload>;
 

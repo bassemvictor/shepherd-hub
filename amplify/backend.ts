@@ -85,6 +85,15 @@ congregationApi.addRoutes({
   ),
 });
 
+congregationApi.addRoutes({
+  path: "/congregation/member/visitation",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "CongregationMemberVisitationIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
 backend.addOutput({
   custom: {
     API: {

@@ -66,16 +66,19 @@ type MemberFormState = {
 
 type StoredMemberData = Partial<MemberFormState> & {
   createdAt?: string;
-};
-
-type VisitationActionState = {
-  scheduled?: boolean;
-  noted?: boolean;
-  completed?: boolean;
+  updatedAt?: string;
+  visitation?: {
+    scheduledAt?: string;
+    note?: string;
+    completedAt?: string;
+    updatedAt?: string;
+  };
 };
 
 type VisitationModalState = {
   action: "schedule" | "note" | "complete";
+  pk: string;
+  sk: string;
   memberKey: string;
   memberName: string;
 } | null;
@@ -138,12 +141,13 @@ export default function App() {
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
   const [deletingMemberKey, setDeletingMemberKey] = useState<string | null>(null);
-  const [visitationActions, setVisitationActions] = useState<
-    Record<string, VisitationActionState>
-  >({});
   const [visitationModal, setVisitationModal] = useState<VisitationModalState>(null);
   const [visitationSchedule, setVisitationSchedule] = useState("");
   const [visitationNote, setVisitationNote] = useState("");
+  const [visitationSubmitState, setVisitationSubmitState] = useState<string | null>(
+    null,
+  );
+  const [isVisitationSubmitting, setIsVisitationSubmitting] = useState(false);
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>(null);
   const currentPage = pageContent[activePage];
   const isEditingMember = editingMember !== null;
@@ -482,59 +486,73 @@ export default function App() {
     setTheme((current) => (current === "light" ? "dark" : "light"));
   };
 
-  const applyVisitationAction = (
-    memberKey: string,
-    action: keyof VisitationActionState,
-  ) => {
-    setVisitationActions((current) => ({
-      ...current,
-      [memberKey]: {
-        ...current[memberKey],
-        [action]: true,
-      },
-    }));
-  };
-
   const openVisitationModal = (
     action: NonNullable<VisitationModalState>["action"],
+    pk: string,
+    sk: string,
     memberKey: string,
     memberName: string,
+    memberData: StoredMemberData | null,
   ) => {
     setVisitationModal({
       action,
+      pk,
+      sk,
       memberKey,
       memberName,
     });
-    setVisitationSchedule("");
-    setVisitationNote("");
+    setVisitationSchedule(memberData?.visitation?.scheduledAt ?? "");
+    setVisitationNote(memberData?.visitation?.note ?? "");
+    setVisitationSubmitState(null);
   };
 
   const closeVisitationModal = () => {
     setVisitationModal(null);
     setVisitationSchedule("");
     setVisitationNote("");
+    setVisitationSubmitState(null);
   };
 
-  const handleVisitationModalSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleVisitationModalSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!visitationModal) {
+    if (!visitationModal || !congregationApiName) {
       return;
     }
 
-    if (visitationModal.action === "schedule") {
-      applyVisitationAction(visitationModal.memberKey, "scheduled");
-    }
+    setIsVisitationSubmitting(true);
+    setVisitationSubmitState(null);
 
-    if (visitationModal.action === "note") {
-      applyVisitationAction(visitationModal.memberKey, "noted");
-    }
+    try {
+      const body: Record<string, string> = {
+        pk: visitationModal.pk,
+        sk: visitationModal.sk,
+        action: visitationModal.action,
+      };
 
-    if (visitationModal.action === "complete") {
-      applyVisitationAction(visitationModal.memberKey, "completed");
-    }
+      if (visitationModal.action === "schedule") {
+        body.schedule = visitationSchedule;
+      }
 
-    closeVisitationModal();
+      if (visitationModal.action === "note") {
+        body.note = visitationNote;
+      }
+
+      const restOperation = post({
+        apiName: congregationApiName,
+        path: "/congregation/member/visitation",
+        options: {
+          body,
+        },
+      });
+      await restOperation.response;
+      await loadBackendMessage();
+      closeVisitationModal();
+    } catch {
+      setVisitationSubmitState("Unable to save visitation update.");
+    } finally {
+      setIsVisitationSubmitting(false);
+    }
   };
 
   if (authStatus !== "signed-in") {
@@ -831,7 +849,11 @@ export default function App() {
                 const fullName = [memberData?.firstName, memberData?.lastName]
                   .filter(Boolean)
                   .join(" ");
-                const actionState = visitationActions[memberKey] ?? {};
+                const actionState = {
+                  scheduled: Boolean(memberData?.visitation?.scheduledAt),
+                  noted: Boolean(memberData?.visitation?.note),
+                  completed: Boolean(memberData?.visitation?.completedAt),
+                };
 
                 return (
                   <article className="visitation-card" key={memberKey}>
@@ -855,8 +877,11 @@ export default function App() {
                         onClick={() =>
                           openVisitationModal(
                             "schedule",
+                            item.pk,
+                            item.sk,
                             memberKey,
                             fullName || "Unnamed member",
+                            memberData,
                           )
                         }
                       >
@@ -871,8 +896,11 @@ export default function App() {
                         onClick={() =>
                           openVisitationModal(
                             "note",
+                            item.pk,
+                            item.sk,
                             memberKey,
                             fullName || "Unnamed member",
+                            memberData,
                           )
                         }
                       >
@@ -887,14 +915,39 @@ export default function App() {
                         onClick={() =>
                           openVisitationModal(
                             "complete",
+                            item.pk,
+                            item.sk,
                             memberKey,
                             fullName || "Unnamed member",
+                            memberData,
                           )
                         }
                       >
                         <span>Mark Done</span>
                       </button>
                     </div>
+
+                    {memberData?.visitation ? (
+                      <div className="visitation-summary">
+                        {memberData.visitation.scheduledAt ? (
+                          <p className="visitation-summary-item">
+                            Scheduled:{" "}
+                            {new Date(memberData.visitation.scheduledAt).toLocaleString()}
+                          </p>
+                        ) : null}
+                        {memberData.visitation.note ? (
+                          <p className="visitation-summary-item">
+                            Note: {memberData.visitation.note}
+                          </p>
+                        ) : null}
+                        {memberData.visitation.completedAt ? (
+                          <p className="visitation-summary-item">
+                            Completed:{" "}
+                            {new Date(memberData.visitation.completedAt).toLocaleString()}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </article>
                 );
               })}
@@ -1098,11 +1151,26 @@ export default function App() {
               ) : null}
 
               <div className="modal-actions">
-                <button type="button" className="modal-secondary-button" onClick={closeVisitationModal}>
+                {visitationSubmitState ? (
+                  <p className="modal-submit-message">{visitationSubmitState}</p>
+                ) : null}
+                <button
+                  type="button"
+                  className="modal-secondary-button"
+                  onClick={closeVisitationModal}
+                >
                   Cancel
                 </button>
-                <button type="submit" className="member-submit-button">
-                  {visitationModal.action === "complete" ? "Confirm" : "Save"}
+                <button
+                  type="submit"
+                  className="member-submit-button"
+                  disabled={isVisitationSubmitting}
+                >
+                  {isVisitationSubmitting
+                    ? "Saving..."
+                    : visitationModal.action === "complete"
+                      ? "Confirm"
+                      : "Save"}
                 </button>
               </div>
             </form>
