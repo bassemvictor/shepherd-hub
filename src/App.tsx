@@ -439,6 +439,7 @@ export default function App() {
   };
 
   const openMemberVisitationPage = (pk: string, sk: string, memberName: string) => {
+    setSelectedMember({ pk, sk });
     setVisitationFocus({ pk, sk, memberName });
     setActivePage("visitation");
   };
@@ -945,13 +946,28 @@ export default function App() {
                     <p className="visitation-focus-label">Focused Member</p>
                     <p className="visitation-focus-name">{visitationFocus.memberName}</p>
                   </div>
-                  <button
-                    type="button"
-                    className="member-cancel-button"
-                    onClick={() => setVisitationFocus(null)}
-                  >
-                    Show All
-                  </button>
+                  <div className="visitation-focus-actions">
+                    <button
+                      type="button"
+                      className="member-cancel-button"
+                      onClick={() => {
+                        setSelectedMember({
+                          pk: visitationFocus.pk,
+                          sk: visitationFocus.sk,
+                        });
+                        setActivePage("member-details");
+                      }}
+                    >
+                      Back to Details
+                    </button>
+                    <button
+                      type="button"
+                      className="member-cancel-button"
+                      onClick={() => setVisitationFocus(null)}
+                    >
+                      Show All
+                    </button>
+                  </div>
                 </div>
               ) : null}
 
@@ -1249,6 +1265,19 @@ export default function App() {
                         onClick={() => setActivePage("congregation")}
                       >
                         Back
+                      </button>
+                      <button
+                        type="button"
+                        className="api-visitations-button"
+                        onClick={() =>
+                          openMemberVisitationPage(
+                            selectedMemberItem.pk,
+                            selectedMemberItem.sk,
+                            selectedMemberName,
+                          )
+                        }
+                      >
+                        Visitations
                       </button>
                       <button
                         type="button"
