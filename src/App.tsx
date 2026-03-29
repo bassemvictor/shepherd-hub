@@ -1282,12 +1282,6 @@ export default function App() {
 
   return (
     <div className="app-shell" data-theme={theme}>
-      {isBackendRequestInFlight ? (
-        <div className="loading-overlay" aria-live="polite" aria-label="Loading">
-          <div className="loading-spinner" />
-        </div>
-      ) : null}
-
       <aside className="side-panel" ref={sidePanelRef}>
         <div className="side-panel-header">
           <button
@@ -1376,6 +1370,12 @@ export default function App() {
       </aside>
 
       <main className="content-panel">
+        {isBackendRequestInFlight ? (
+          <div className="page-progress" aria-live="polite" aria-label="Loading">
+            <div className="page-progress-bar" />
+          </div>
+        ) : null}
+
         <section className="hero-card">
           <div className="hero-header">
             <div>
