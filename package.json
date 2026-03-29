@@ -12,6 +12,7 @@
     "ampx:generate-outputs": "ampx generate outputs"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "3.972.0",
     "@aws-sdk/client-dynamodb": "3.972.0",
     "@aws-sdk/lib-dynamodb": "3.972.0",
     "aws-amplify": "6.16.3",

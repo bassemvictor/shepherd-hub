@@ -770,6 +770,91 @@ button {
   margin-top: 1.5rem;
 }
 
+.user-access-page {
+  margin-top: 1.5rem;
+}
+
+.user-access-card {
+  padding: 1.1rem;
+  border-radius: 20px;
+  background: var(--dark-card-bg);
+  border: 1px solid rgba(233, 201, 112, 0.2);
+  color: var(--dark-card-text);
+}
+
+.user-access-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.user-access-list {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.9rem;
+}
+
+.user-access-item {
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  background: var(--soft-card-bg);
+  border: 1px solid rgba(219, 183, 86, 0.16);
+}
+
+.user-access-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.user-access-username,
+.user-access-meta {
+  margin: 0;
+}
+
+.user-access-username {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--dark-card-text);
+}
+
+.user-access-meta {
+  margin-top: 0.25rem;
+  color: var(--muted-light);
+  font-size: 0.86rem;
+}
+
+.user-access-groups {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-top: 0.95rem;
+}
+
+.user-access-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(244, 196, 48, 0.1);
+  border: 1px solid rgba(219, 183, 86, 0.18);
+  color: var(--dark-card-text);
+  font-weight: 600;
+}
+
+.user-access-group input {
+  margin: 0;
+}
+
+[data-theme="dark"] .user-access-group {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
 .announcements-editor-card,
 .announcements-list-card {
   padding: 1.1rem;
@@ -1538,6 +1623,10 @@ button {
 
   .announcement-sort-control {
     width: 100%;
+    flex-direction: column;
+  }
+
+  .user-access-top {
     flex-direction: column;
   }
 

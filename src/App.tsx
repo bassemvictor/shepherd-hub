@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { get, post } from "aws-amplify/api";
-import { confirmSignIn, getCurrentUser, signIn, signOut } from "aws-amplify/auth";
+import {
+  confirmSignIn,
+  fetchAuthSession,
+  getCurrentUser,
+  signIn,
+  signOut,
+} from "aws-amplify/auth";
 import outputs from "../amplify_outputs.json";
 
 type PageKey =
@@ -9,6 +15,7 @@ type PageKey =
   | "new-member"
   | "member-details"
   | "announcement-week"
+  | "user-access"
   | "events"
   | "sunday-school"
   | "summer-camp"
@@ -39,6 +46,10 @@ const pageContent: Record<
   },
   "announcement-week": {
     eyebrow: "Add Week",
+    description: "",
+  },
+  "user-access": {
+    eyebrow: "User Access",
     description: "",
   },
   events: {
@@ -86,7 +97,7 @@ const navSections: Array<{
   },
   {
     label: "Manage",
-    items: [],
+    items: [{ key: "user-access", label: "User Access" }],
   },
 ];
 
@@ -195,6 +206,27 @@ type AnnouncementWeekFormState = {
 
 type AnnouncementSortOrder = "latest" | "oldest";
 type MemberSortOrder = "name-asc" | "name-desc";
+type UserDirectoryItem = {
+  username: string;
+  email: string;
+  enabled: boolean;
+  status: string;
+  groups: string[];
+};
+
+type UserDirectoryResponse = {
+  message: string;
+  time: string;
+  groupOptions: string[];
+  items: UserDirectoryItem[];
+};
+
+const manageableGroups = ["admin", "super_user", "regular_user"] as const;
+const groupLabelMap: Record<(typeof manageableGroups)[number], string> = {
+  admin: "Admin",
+  super_user: "Super User",
+  regular_user: "Regular User",
+};
 
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];
 const initialMemberForm: MemberFormState = {
@@ -281,6 +313,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [currentUserLabel, setCurrentUserLabel] = useState<string>("");
+  const [currentUserGroups, setCurrentUserGroups] = useState<string[]>([]);
   const [activePage, setActivePage] = useState<PageKey>("congregation");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
@@ -320,8 +353,16 @@ export default function App() {
   );
   const [isVisitationSubmitting, setIsVisitationSubmitting] = useState(false);
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>(null);
+  const [userDirectory, setUserDirectory] = useState<UserDirectoryItem[]>([]);
+  const [groupAssignments, setGroupAssignments] = useState<Record<string, string[]>>({});
+  const [isUserDirectoryLoading, setIsUserDirectoryLoading] = useState(false);
+  const [userDirectoryError, setUserDirectoryError] = useState<string | null>(null);
+  const [savingUserGroups, setSavingUserGroups] = useState<string | null>(null);
+  const [userDirectoryStatus, setUserDirectoryStatus] = useState<string | null>(null);
   const currentPage = pageContent[activePage];
   const isEditingMember = editingMember !== null;
+  const canManageUsers =
+    currentUserGroups.includes("admin") || currentUserGroups.includes("super_user");
   const selectedMemberItem =
     selectedMember && backendMessage
       ? backendMessage.items.find(
@@ -407,12 +448,62 @@ export default function App() {
         parsed: parseAnnouncementWeekData(item.data),
       })) ?? [];
 
+  const getAuthHeader = async () => {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+
+    if (!token) {
+      throw new Error("No auth token available.");
+    }
+
+    return token;
+  };
+
+  const authorizedGet = async <T,>(path: string) => {
+    const authorization = await getAuthHeader();
+    const restOperation = get({
+      apiName: congregationApiName,
+      path,
+      options: {
+        headers: {
+          Authorization: authorization,
+        },
+      },
+    });
+    const { body } = await restOperation.response;
+    return (await body.json()) as T;
+  };
+
+  const authorizedPost = async (path: string, body: unknown) => {
+    const authorization = await getAuthHeader();
+    const restOperation = post({
+      apiName: congregationApiName,
+      path,
+      options: {
+        headers: {
+          Authorization: authorization,
+        },
+        body: body as never,
+      },
+    });
+
+    return restOperation.response;
+  };
+
   const checkAuthSession = async () => {
     try {
-      const user = await getCurrentUser();
+      const [user, session] = await Promise.all([getCurrentUser(), fetchAuthSession()]);
+      const groupsClaim = session.tokens?.idToken?.payload["cognito:groups"];
+      const groups = Array.isArray(groupsClaim)
+        ? groupsClaim.map(String)
+        : typeof groupsClaim === "string"
+          ? [groupsClaim]
+          : [];
       setCurrentUserLabel(user.signInDetails?.loginId ?? user.username);
+      setCurrentUserGroups(groups);
       setAuthStatus("signed-in");
     } catch {
+      setCurrentUserGroups([]);
       setAuthStatus("signed-out");
     }
   };
@@ -429,12 +520,7 @@ export default function App() {
     setBackendError(null);
 
     try {
-      const restOperation = get({
-        apiName: congregationApiName,
-        path: "/congregation/message",
-      });
-      const { body } = await restOperation.response;
-      const response = (await body.json()) as BackendMessage;
+      const response = await authorizedGet<BackendMessage>("/congregation/message");
       setBackendMessage(response);
     } catch (error) {
       setBackendError("Unable to load the congregation backend message.");
@@ -455,17 +541,77 @@ export default function App() {
     setAnnouncementsError(null);
 
     try {
-      const restOperation = get({
-        apiName: congregationApiName,
-        path: "/announcements",
-      });
-      const { body } = await restOperation.response;
-      const response = (await body.json()) as AnnouncementResponse;
+      const response = await authorizedGet<AnnouncementResponse>("/announcements");
       setAnnouncements(response);
     } catch {
       setAnnouncementsError("Unable to load announcements.");
     } finally {
       setIsAnnouncementsLoading(false);
+    }
+  };
+
+  const loadUserDirectory = async () => {
+    if (!congregationApiName || !canManageUsers) {
+      return;
+    }
+
+    setIsUserDirectoryLoading(true);
+    setUserDirectoryError(null);
+
+    try {
+      const response = await authorizedGet<UserDirectoryResponse>("/admin/users");
+      setUserDirectory(response.items);
+      setGroupAssignments(
+        Object.fromEntries(
+          response.items.map((user) => [user.username, user.groups]),
+        ),
+      );
+    } catch {
+      setUserDirectoryError("Unable to load user access.");
+    } finally {
+      setIsUserDirectoryLoading(false);
+    }
+  };
+
+  const toggleUserGroupAssignment = (username: string, groupName: (typeof manageableGroups)[number]) => {
+    setGroupAssignments((current) => {
+      const existingGroups = current[username] ?? [];
+      const nextGroups = existingGroups.includes(groupName)
+        ? existingGroups.filter((group) => group !== groupName)
+        : [...existingGroups, groupName];
+
+      return {
+        ...current,
+        [username]: nextGroups,
+      };
+    });
+  };
+
+  const handleSaveUserGroups = async (username: string) => {
+    if (!canManageUsers || !congregationApiName) {
+      return;
+    }
+
+    setSavingUserGroups(username);
+    setUserDirectoryStatus(null);
+
+    try {
+      await authorizedPost("/admin/users/groups", {
+        username,
+        groups: groupAssignments[username] ?? [],
+      });
+      setUserDirectory((current) =>
+        current.map((user) =>
+          user.username === username
+            ? { ...user, groups: groupAssignments[username] ?? [] }
+            : user,
+        ),
+      );
+      setUserDirectoryStatus(`Updated access for ${username}.`);
+    } catch {
+      setUserDirectoryStatus(`Unable to update access for ${username}.`);
+    } finally {
+      setSavingUserGroups(null);
     }
   };
 
@@ -511,6 +657,20 @@ export default function App() {
       isMounted = false;
     };
   }, [authStatus]);
+
+  useEffect(() => {
+    if (authStatus !== "signed-in" || activePage !== "user-access" || !canManageUsers) {
+      return;
+    }
+
+    void loadUserDirectory();
+  }, [activePage, authStatus, canManageUsers]);
+
+  useEffect(() => {
+    if (activePage === "user-access" && !canManageUsers) {
+      setActivePage("congregation");
+    }
+  }, [activePage, canManageUsers]);
 
   useEffect(() => {
     if (!isMobileMenuOpen) {
@@ -646,21 +806,14 @@ export default function App() {
     setAnnouncementSubmitState(null);
 
     try {
-      const restOperation = post({
-        apiName: congregationApiName,
-        path: "/announcements/week",
-        options: {
-          body: {
-            ...(announcementWeekForm.sk ? { sk: announcementWeekForm.sk } : {}),
-            ...(announcementWeekForm.createdAt
-              ? { createdAt: announcementWeekForm.createdAt }
-              : {}),
-            weekLabel: announcementWeekForm.weekLabel,
-            items: announcementWeekForm.items,
-          },
-        },
+      await authorizedPost("/announcements/week", {
+        ...(announcementWeekForm.sk ? { sk: announcementWeekForm.sk } : {}),
+        ...(announcementWeekForm.createdAt
+          ? { createdAt: announcementWeekForm.createdAt }
+          : {}),
+        weekLabel: announcementWeekForm.weekLabel,
+        items: announcementWeekForm.items,
       });
-      await restOperation.response;
       setAnnouncementSubmitState(
         announcementWeekForm.sk
           ? "Announcement week updated."
@@ -684,17 +837,10 @@ export default function App() {
     setDeletingAnnouncementSk(sk);
 
     try {
-      const restOperation = post({
-        apiName: congregationApiName,
-        path: "/announcements/week/remove",
-        options: {
-          body: {
-            pk: "ANNOUNCEMENT",
-            sk,
-          },
-        },
+      await authorizedPost("/announcements/week/remove", {
+        pk: "ANNOUNCEMENT",
+        sk,
       });
-      await restOperation.response;
       await loadAnnouncements();
       if (announcementWeekForm.sk === sk) {
         setAnnouncementWeekForm(initialAnnouncementWeekForm);
@@ -745,16 +891,10 @@ export default function App() {
           }
         : memberForm;
 
-      const restOperation = post({
-        apiName: congregationApiName,
-        path: editingMember
-          ? "/congregation/member/update"
-          : "/congregation/member",
-        options: {
-          body: requestBody,
-        },
-      });
-      await restOperation.response;
+      await authorizedPost(
+        editingMember ? "/congregation/member/update" : "/congregation/member",
+        requestBody,
+      );
       setMemberSubmitState(editingMember ? "Member updated." : "Member saved.");
       setMemberForm(initialMemberForm);
       setEditingMember(null);
@@ -827,14 +967,7 @@ export default function App() {
     setDeletingMemberKey(memberKey);
 
     try {
-      const restOperation = post({
-        apiName: congregationApiName,
-        path: "/congregation/member/remove",
-        options: {
-          body: { pk, sk },
-        },
-      });
-      await restOperation.response;
+      await authorizedPost("/congregation/member/remove", { pk, sk });
       await loadBackendMessage();
     } finally {
       setDeletingMemberKey(null);
@@ -918,8 +1051,13 @@ export default function App() {
     await signOut();
     setAuthStatus("signed-out");
     setCurrentUserLabel("");
+    setCurrentUserGroups([]);
     setBackendMessage(null);
     setBackendError(null);
+    setUserDirectory([]);
+    setGroupAssignments({});
+    setUserDirectoryError(null);
+    setUserDirectoryStatus(null);
   };
 
   const toggleTheme = () => {
@@ -985,14 +1123,7 @@ export default function App() {
         body.note = visitationNote;
       }
 
-      const restOperation = post({
-        apiName: congregationApiName,
-        path: "/congregation/member/visitation",
-        options: {
-          body,
-        },
-      });
-      await restOperation.response;
+      await authorizedPost("/congregation/member/visitation", body);
       await loadBackendMessage();
       closeVisitationModal();
     } catch {
@@ -1125,6 +1256,12 @@ export default function App() {
           aria-label="Home sections"
         >
           {navSections
+            .map((section) => ({
+              ...section,
+              items: section.items.filter(
+                (item) => item.key !== "user-access" || canManageUsers,
+              ),
+            }))
             .filter((section) => section.items.length > 0)
             .map((section) => (
               <div className="nav-section" key={section.label}>
@@ -1798,6 +1935,74 @@ export default function App() {
                         </ul>
                       </article>
                     ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {activePage === "user-access" ? (
+            <div className="user-access-page">
+              <div className="user-access-card">
+                <div className="user-access-header">
+                  <p className="api-message-label">Assign User Groups</p>
+                  <p className="congregation-search-count">
+                    {userDirectory.length} user{userDirectory.length === 1 ? "" : "s"}
+                  </p>
+                </div>
+
+                {userDirectoryStatus ? (
+                  <p className="member-submit-message">{userDirectoryStatus}</p>
+                ) : null}
+
+                {isUserDirectoryLoading ? (
+                  <p className="api-message-text">Loading users...</p>
+                ) : userDirectoryError ? (
+                  <p className="api-message-text">{userDirectoryError}</p>
+                ) : userDirectory.length === 0 ? (
+                  <p className="api-message-text">No Cognito users found.</p>
+                ) : (
+                  <div className="user-access-list">
+                    {userDirectory.map((user) => {
+                      const assignedGroups = groupAssignments[user.username] ?? user.groups;
+
+                      return (
+                        <article className="user-access-item" key={user.username}>
+                          <div className="user-access-top">
+                            <div>
+                              <p className="user-access-username">{user.username}</p>
+                              <p className="user-access-meta">
+                                {user.email || "No email"} · {user.status} ·{" "}
+                                {user.enabled ? "Enabled" : "Disabled"}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="member-submit-button"
+                              onClick={() => handleSaveUserGroups(user.username)}
+                              disabled={savingUserGroups === user.username}
+                            >
+                              {savingUserGroups === user.username ? "Saving..." : "Save"}
+                            </button>
+                          </div>
+
+                          <div className="user-access-groups">
+                            {manageableGroups.map((groupName) => (
+                              <label className="user-access-group" key={groupName}>
+                                <input
+                                  type="checkbox"
+                                  checked={assignedGroups.includes(groupName)}
+                                  onChange={() =>
+                                    toggleUserGroupAssignment(user.username, groupName)
+                                  }
+                                />
+                                <span>{groupLabelMap[groupName]}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
                 )}
               </div>

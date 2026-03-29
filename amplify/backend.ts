@@ -5,12 +5,14 @@ import {
   HttpApi,
   HttpMethod,
 } from "aws-cdk-lib/aws-apigatewayv2";
+import { HttpUserPoolAuthorizer } from "aws-cdk-lib/aws-apigatewayv2-authorizers";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import {
   AttributeType,
   BillingMode,
   Table,
 } from "aws-cdk-lib/aws-dynamodb";
+import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 
 import { auth } from "./auth/resource.js";
 import { congregationMessage } from "./functions/congregation-message/resource.js";
@@ -37,7 +39,30 @@ const testTable = new Table(storageStack, "TestTable", {
 });
 
 backend.congregationMessage.addEnvironment("TEST_TABLE_NAME", testTable.tableName);
+backend.congregationMessage.addEnvironment(
+  "USER_POOL_ID",
+  backend.auth.resources.userPool.userPoolId,
+);
 testTable.grantReadWriteData(backend.congregationMessage.resources.lambda);
+backend.congregationMessage.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      "cognito-idp:ListUsers",
+      "cognito-idp:AdminListGroupsForUser",
+      "cognito-idp:AdminAddUserToGroup",
+      "cognito-idp:AdminRemoveUserFromGroup",
+    ],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  }),
+);
+
+const userPoolAuthorizer = new HttpUserPoolAuthorizer(
+  "CongregationUserPoolAuthorizer",
+  backend.auth.resources.userPool,
+  {
+    userPoolClients: [backend.auth.resources.userPoolClient],
+  },
+);
 
 const congregationApi = new HttpApi(apiStack, "CongregationApi", {
   apiName: "congregationApi",
@@ -47,6 +72,7 @@ const congregationApi = new HttpApi(apiStack, "CongregationApi", {
     allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST],
   },
   createDefaultStage: true,
+  defaultAuthorizer: userPoolAuthorizer,
 });
 
 congregationApi.addRoutes({
@@ -117,6 +143,24 @@ congregationApi.addRoutes({
   methods: [HttpMethod.POST],
   integration: new HttpLambdaIntegration(
     "AnnouncementsWeekRemoveIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
+  path: "/admin/users",
+  methods: [HttpMethod.GET],
+  integration: new HttpLambdaIntegration(
+    "AdminUsersListIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
+  path: "/admin/users/groups",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "AdminUsersGroupsIntegration",
     backend.congregationMessage.resources.lambda,
   ),
 });

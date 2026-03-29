@@ -1,3 +1,10 @@
+import {
+  AdminAddUserToGroupCommand,
+  AdminListGroupsForUserCommand,
+  AdminRemoveUserFromGroupCommand,
+  CognitoIdentityProviderClient,
+  ListUsersCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DeleteCommand,
@@ -5,7 +12,6 @@ import {
   DynamoDBDocumentClient,
   PutCommand,
   QueryCommand,
-  ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
 
@@ -58,6 +64,11 @@ type DeleteAnnouncementPayload = {
   sk: string;
 };
 
+type UpdateUserGroupsPayload = {
+  username: string;
+  groups: string[];
+};
+
 type StoredMemberData = {
   history?: Array<{
     timestamp: string;
@@ -90,12 +101,22 @@ type StoredAnnouncementWeekData = {
   updatedAt?: string;
 };
 
+type CognitoUserDirectoryItem = {
+  username: string;
+  email: string;
+  enabled: boolean;
+  status: string;
+  groups: string[];
+};
+
 const prependHistoryEntry = (
   history: StoredMemberData["history"],
   entry: NonNullable<StoredMemberData["history"]>[number],
 ) => [entry, ...(history ?? [])];
 
 const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const cognitoClient = new CognitoIdentityProviderClient({});
+const allowedUserGroups = ["admin", "super_user", "regular_user"] as const;
 
 const responseHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -103,10 +124,49 @@ const responseHeaders = {
   "Content-Type": "application/json",
 };
 
+const getRequestGroups = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
+  const claims =
+    ((event.requestContext as { authorizer?: { jwt?: { claims?: Record<string, unknown> } } })
+      .authorizer?.jwt?.claims as Record<string, unknown> | undefined) ?? {};
+  const rawGroups = claims["cognito:groups"];
+
+  if (Array.isArray(rawGroups)) {
+    return rawGroups.map(String);
+  }
+
+  if (typeof rawGroups === "string") {
+    try {
+      const parsed = JSON.parse(rawGroups);
+      return Array.isArray(parsed) ? parsed.map(String) : [rawGroups];
+    } catch {
+      return rawGroups
+        .split(",")
+        .map((group) => group.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+};
+
+const isUserManager = (groups: string[]) =>
+  groups.includes("admin") || groups.includes("super_user");
+
+const forbiddenResponse = (time: string) => ({
+  statusCode: 403,
+  headers: responseHeaders,
+  body: JSON.stringify({
+    message: "You do not have access to manage user groups.",
+    time,
+  }),
+});
+
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const time = new Date().toISOString();
   const tableName = process.env.TEST_TABLE_NAME;
+  const userPoolId = process.env.USER_POOL_ID;
   const requestPath = event.requestContext.http.path;
+  const requestGroups = getRequestGroups(event);
 
   if (!tableName) {
     return {
@@ -120,7 +180,97 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     };
   }
 
+  if (
+    (requestPath.endsWith("/admin/users") ||
+      requestPath.endsWith("/admin/users/groups")) &&
+    !isUserManager(requestGroups)
+  ) {
+    return forbiddenResponse(time);
+  }
+
+  if (
+    (requestPath.endsWith("/admin/users") ||
+      requestPath.endsWith("/admin/users/groups")) &&
+    !userPoolId
+  ) {
+    return {
+      statusCode: 500,
+      headers: responseHeaders,
+      body: JSON.stringify({
+        message: "USER_POOL_ID is not configured.",
+        time,
+      }),
+    };
+  }
+
   if (event.requestContext.http.method === "POST") {
+    if (requestPath.endsWith("/admin/users/groups")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<UpdateUserGroupsPayload>;
+
+      if (!payload.username || !Array.isArray(payload.groups)) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "username and groups are required.",
+            time,
+          }),
+        };
+      }
+
+      const nextGroups = payload.groups.filter((group): group is (typeof allowedUserGroups)[number] =>
+        allowedUserGroups.includes(group as (typeof allowedUserGroups)[number]),
+      );
+
+      const existingGroupsResponse = await cognitoClient.send(
+        new AdminListGroupsForUserCommand({
+          UserPoolId: userPoolId,
+          Username: payload.username,
+        }),
+      );
+
+      const existingGroups = (existingGroupsResponse.Groups ?? [])
+        .map((group: { GroupName?: string }) => group.GroupName)
+        .filter((groupName): groupName is string => Boolean(groupName))
+        .filter(
+          (groupName): groupName is (typeof allowedUserGroups)[number] =>
+            allowedUserGroups.includes(groupName as (typeof allowedUserGroups)[number]),
+        );
+
+      const groupsToAdd = nextGroups.filter((group) => !existingGroups.includes(group));
+      const groupsToRemove = existingGroups.filter((group) => !nextGroups.includes(group));
+
+      await Promise.all([
+        ...groupsToAdd.map((groupName) =>
+          cognitoClient.send(
+            new AdminAddUserToGroupCommand({
+              GroupName: groupName,
+              UserPoolId: userPoolId,
+              Username: payload.username,
+            }),
+          ),
+        ),
+        ...groupsToRemove.map((groupName) =>
+          cognitoClient.send(
+            new AdminRemoveUserFromGroupCommand({
+              GroupName: groupName,
+              UserPoolId: userPoolId,
+              Username: payload.username,
+            }),
+          ),
+        ),
+      ]);
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "User groups updated.",
+          time,
+        }),
+      };
+    }
+
     if (requestPath.endsWith("/announcements/week/remove")) {
       const payload = JSON.parse(event.body ?? "{}") as Partial<DeleteAnnouncementPayload>;
 
@@ -562,6 +712,59 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       body: JSON.stringify({
         message: "Congregation member created.",
         time,
+      }),
+    };
+  }
+
+  if (requestPath.endsWith("/admin/users")) {
+    const usersResponse = await cognitoClient.send(
+      new ListUsersCommand({
+        UserPoolId: userPoolId,
+      }),
+    );
+
+    const users = await Promise.all(
+      (usersResponse.Users ?? []).map(
+        async (user: {
+          Username?: string;
+          Attributes?: Array<{ Name?: string; Value?: string }>;
+          Enabled?: boolean;
+          UserStatus?: string;
+        }): Promise<CognitoUserDirectoryItem> => {
+        const username = user.Username ?? "";
+        const email =
+          user.Attributes?.find((attribute: { Name?: string; Value?: string }) => attribute.Name === "email")?.Value ?? "";
+        const groupsResponse = await cognitoClient.send(
+          new AdminListGroupsForUserCommand({
+            UserPoolId: userPoolId,
+            Username: username,
+          }),
+        );
+
+        return {
+          username,
+          email,
+          enabled: user.Enabled ?? false,
+          status: user.UserStatus ?? "UNKNOWN",
+          groups: (groupsResponse.Groups ?? [])
+            .map((group: { GroupName?: string }) => group.GroupName)
+            .filter((groupName): groupName is string => Boolean(groupName))
+            .filter(
+              (groupName): groupName is (typeof allowedUserGroups)[number] =>
+                allowedUserGroups.includes(groupName as (typeof allowedUserGroups)[number]),
+            ),
+        };
+      }),
+    );
+
+    return {
+      statusCode: 200,
+      headers: responseHeaders,
+      body: JSON.stringify({
+        message: "User directory loaded.",
+        time,
+        groupOptions: allowedUserGroups,
+        items: users,
       }),
     };
   }
