@@ -389,6 +389,7 @@ export default function App() {
   const isEditingMember = editingMember !== null;
   const canManageUsers =
     currentUserGroups.includes("admin") || currentUserGroups.includes("super_user");
+  const canManageAnnouncements = canManageUsers;
   const selectedMemberItem =
     selectedMember && backendMessage
       ? backendMessage.items.find(
@@ -705,6 +706,12 @@ export default function App() {
   }, [activePage, canManageUsers]);
 
   useEffect(() => {
+    if (activePage === "announcement-week" && !canManageAnnouncements) {
+      setActivePage("announcements");
+    }
+  }, [activePage, canManageAnnouncements]);
+
+  useEffect(() => {
     if (!isMobileMenuOpen) {
       return;
     }
@@ -799,6 +806,9 @@ export default function App() {
   };
 
   const startCreateAnnouncementWeek = () => {
+    if (!canManageAnnouncements) {
+      return;
+    }
     setAnnouncementWeekForm(initialAnnouncementWeekForm);
     setAnnouncementSubmitState(null);
     setActivePage("announcement-week");
@@ -808,6 +818,9 @@ export default function App() {
     sk: string,
     parsed: AnnouncementWeekData | null,
   ) => {
+    if (!canManageAnnouncements) {
+      return;
+    }
     setAnnouncementWeekForm({
       sk,
       createdAt: parsed?.createdAt,
@@ -1362,7 +1375,7 @@ export default function App() {
               >
                 Add Member
               </button>
-            ) : activePage === "announcements" ? (
+            ) : activePage === "announcements" && canManageAnnouncements ? (
               <button
                 type="button"
                 className="hero-action-button"
@@ -1935,30 +1948,32 @@ export default function App() {
                             </p>
                             <p className="announcement-week-meta">{week.sk}</p>
                           </div>
-                          <div className="announcement-week-actions">
-                            <button
-                              type="button"
-                              className="api-edit-button"
-                              onClick={() =>
-                                startEditAnnouncementWeek(week.sk, week.parsed)
-                              }
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="api-delete-button"
-                              onClick={() =>
-                                openAnnouncementDeleteModal(
-                                  week.sk,
-                                  formatAnnouncementWeekLabel(week.parsed?.weekLabel),
-                                )
-                              }
-                              disabled={deletingAnnouncementSk === week.sk}
-                            >
-                              {deletingAnnouncementSk === week.sk ? "..." : "Delete"}
-                            </button>
-                          </div>
+                          {canManageAnnouncements ? (
+                            <div className="announcement-week-actions">
+                              <button
+                                type="button"
+                                className="api-edit-button"
+                                onClick={() =>
+                                  startEditAnnouncementWeek(week.sk, week.parsed)
+                                }
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="api-delete-button"
+                                onClick={() =>
+                                  openAnnouncementDeleteModal(
+                                    week.sk,
+                                    formatAnnouncementWeekLabel(week.parsed?.weekLabel),
+                                  )
+                                }
+                                disabled={deletingAnnouncementSk === week.sk}
+                              >
+                                {deletingAnnouncementSk === week.sk ? "..." : "Delete"}
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                         <ul className="announcement-week-items">
                           {(week.parsed?.items ?? []).map((item, index) => (

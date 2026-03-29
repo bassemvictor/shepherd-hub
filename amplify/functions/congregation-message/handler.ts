@@ -161,11 +161,11 @@ const getRequestGroups = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
 const isUserManager = (groups: string[]) =>
   groups.includes("admin") || groups.includes("super_user");
 
-const forbiddenResponse = (time: string) => ({
+const forbiddenResponse = (time: string, message: string) => ({
   statusCode: 403,
   headers: responseHeaders,
   body: JSON.stringify({
-    message: "You do not have access to manage user groups.",
+    message,
     time,
   }),
 });
@@ -175,9 +175,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const tableName = process.env.TEST_TABLE_NAME;
   const userPoolId = process.env.USER_POOL_ID;
   const requestPath = event.requestContext.http.path;
-  const requestClaims =
-    ((event.requestContext as { authorizer?: { jwt?: { claims?: Record<string, unknown> } } })
-      .authorizer?.jwt?.claims as Record<string, unknown> | undefined) ?? {};
   const requestGroups = getRequestGroups(event);
 
   if (!tableName) {
@@ -197,21 +194,18 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       requestPath.endsWith("/admin/users/groups")) &&
     !isUserManager(requestGroups)
   ) {
-    console.log(
-      JSON.stringify({
-        message: "Admin route forbidden",
-        path: requestPath,
-        groups: requestGroups,
-        cognitoGroupsClaim: requestClaims["cognito:groups"],
-        groupsClaim: requestClaims.groups,
-        sub: requestClaims.sub,
-        username:
-          requestClaims["cognito:username"] ??
-          requestClaims.username ??
-          requestClaims.email,
-      }),
+    return forbiddenResponse(time, "You do not have access to manage user groups.");
+  }
+
+  if (
+    (requestPath.endsWith("/announcements/week") ||
+      requestPath.endsWith("/announcements/week/remove")) &&
+    !isUserManager(requestGroups)
+  ) {
+    return forbiddenResponse(
+      time,
+      "You do not have access to add or edit announcements.",
     );
-    return forbiddenResponse(time);
   }
 
   if (
