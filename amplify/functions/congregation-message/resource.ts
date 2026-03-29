@@ -2,5 +2,5 @@ import { defineFunction } from "@aws-amplify/backend";
 
 export const congregationMessage = defineFunction({
   name: "congregation-message",
-  runtime: 20,
+  runtime: 24,
 });
