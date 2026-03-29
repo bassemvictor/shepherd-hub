@@ -109,14 +109,20 @@ type CognitoUserDirectoryItem = {
   groups: string[];
 };
 
+type AwsCommandClient = {
+  send: any;
+};
+
 const prependHistoryEntry = (
   history: StoredMemberData["history"],
   entry: NonNullable<StoredMemberData["history"]>[number],
 ) => [entry, ...(history ?? [])];
 
-const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-const cognitoClient = new CognitoIdentityProviderClient({});
+const defaultDynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({})) as AwsCommandClient;
+const defaultCognitoClient = new CognitoIdentityProviderClient({}) as AwsCommandClient;
 const allowedUserGroups = ["admin", "super_user", "regular_user"] as const;
+let dynamoClient: AwsCommandClient = defaultDynamoClient;
+let cognitoClient: AwsCommandClient = defaultCognitoClient;
 
 const responseHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -169,6 +175,24 @@ const forbiddenResponse = (time: string, message: string) => ({
     time,
   }),
 });
+
+export const setHandlerClientsForTesting = (clients: {
+  dynamoClient?: AwsCommandClient;
+  cognitoClient?: AwsCommandClient;
+}) => {
+  if (clients.dynamoClient) {
+    dynamoClient = clients.dynamoClient;
+  }
+
+  if (clients.cognitoClient) {
+    cognitoClient = clients.cognitoClient;
+  }
+};
+
+export const resetHandlerClientsForTesting = () => {
+  dynamoClient = defaultDynamoClient;
+  cognitoClient = defaultCognitoClient;
+};
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const time = new Date().toISOString();
@@ -249,16 +273,20 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         }),
       );
 
-      const existingGroups = (existingGroupsResponse.Groups ?? [])
+      const existingGroups = ((existingGroupsResponse.Groups ?? []) as Array<{ GroupName?: string }>)
         .map((group: { GroupName?: string }) => group.GroupName)
-        .filter((groupName): groupName is string => Boolean(groupName))
+        .filter((groupName: string | undefined): groupName is string => Boolean(groupName))
         .filter(
-          (groupName): groupName is (typeof allowedUserGroups)[number] =>
+          (groupName: string): groupName is (typeof allowedUserGroups)[number] =>
             allowedUserGroups.includes(groupName as (typeof allowedUserGroups)[number]),
         );
 
-      const groupsToAdd = nextGroups.filter((group) => !existingGroups.includes(group));
-      const groupsToRemove = existingGroups.filter((group) => !nextGroups.includes(group));
+      const groupsToAdd = nextGroups.filter(
+        (group: (typeof allowedUserGroups)[number]) => !existingGroups.includes(group),
+      );
+      const groupsToRemove = existingGroups.filter(
+        (groupName: (typeof allowedUserGroups)[number]) => !nextGroups.includes(groupName),
+      );
 
       await Promise.all([
         ...groupsToAdd.map((groupName) =>
@@ -768,9 +796,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           status: user.UserStatus ?? "UNKNOWN",
           groups: (groupsResponse.Groups ?? [])
             .map((group: { GroupName?: string }) => group.GroupName)
-            .filter((groupName): groupName is string => Boolean(groupName))
+            .filter((groupName: string | undefined): groupName is string => Boolean(groupName))
             .filter(
-              (groupName): groupName is (typeof allowedUserGroups)[number] =>
+              (groupName: string): groupName is (typeof allowedUserGroups)[number] =>
                 allowedUserGroups.includes(groupName as (typeof allowedUserGroups)[number]),
             ),
         };

@@ -119,6 +119,47 @@ The `User Access` page reads Cognito users from the user pool and allows group a
 
 These assignments are stored in Cognito group membership, not in DynamoDB.
 
+## Unit Tests
+
+The Lambda handler has mocked unit tests for all current route handlers.
+
+Files involved:
+
+- test suite: `tests/congregation-message.handler.test.ts`
+- test TypeScript config: `tsconfig.lambda-tests.json`
+- test script: `npm run test:lambda`
+
+How the tests work:
+
+- the Lambda exports small test helpers that allow the DynamoDB and Cognito clients to be replaced during tests
+- the tests use Node's built-in test runner (`node --test`)
+- AWS calls are mocked by providing fake `send()` implementations, so no real AWS resources are required
+- API Gateway requests are also mocked with in-memory event objects
+
+What is covered:
+
+- congregation list handler
+- member create, update, and delete
+- visitation schedule, note, and complete actions
+- announcements list, create, and delete
+- admin user list
+- admin group assignment
+- RBAC and validation error paths such as missing table config or forbidden access
+
+Run the Lambda unit tests with:
+
+```bash
+npm run test:lambda
+```
+
+The test script:
+
+1. compiles the backend and test files with `tsconfig.lambda-tests.json`
+2. writes the compiled files to `.test-dist/`
+3. runs the compiled tests with Node's built-in test runner
+
+These tests are focused on Lambda route logic and mocked AWS interactions. They do not deploy infrastructure and they do not exercise the frontend.
+
 ## AWS Setup
 
 1. Install the AWS CLI.

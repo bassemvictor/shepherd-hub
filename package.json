@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json && vite build",
+    "test:lambda": "tsc -p tsconfig.lambda-tests.json && node --test .test-dist/tests/**/*.test.js",
     "preview": "vite preview",
     "ampx:sandbox": "ampx sandbox",
     "ampx:deploy": "ampx pipeline-deploy --branch main",
