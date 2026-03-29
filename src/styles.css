@@ -400,6 +400,17 @@ button {
   margin-top: 1rem;
 }
 
+.congregation-search-field {
+  display: flex;
+  flex: 1 1 24rem;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.45rem;
+  color: var(--muted-light);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
 .congregation-search-input {
   flex: 1 1 24rem;
   width: auto;
@@ -752,6 +763,10 @@ button {
 .announcements-page {
   display: grid;
   gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.announcements-editor-page {
   margin-top: 1.5rem;
 }
 
@@ -1461,8 +1476,14 @@ button {
     align-items: stretch;
   }
 
+  .congregation-search-field {
+    width: 100%;
+    flex: 1 1 auto;
+  }
+
   .congregation-search-input {
     width: 100%;
+    flex: 1 1 auto;
   }
 
   .congregation-search-tools {

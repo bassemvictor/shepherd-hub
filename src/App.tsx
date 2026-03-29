@@ -8,6 +8,7 @@ type PageKey =
   | "visitation"
   | "new-member"
   | "member-details"
+  | "announcement-week"
   | "events"
   | "sunday-school"
   | "summer-camp"
@@ -34,6 +35,10 @@ const pageContent: Record<
   },
   "member-details": {
     eyebrow: "Member Details",
+    description: "",
+  },
+  "announcement-week": {
+    eyebrow: "Add Week",
     description: "",
   },
   events: {
@@ -604,6 +609,7 @@ export default function App() {
   const startCreateAnnouncementWeek = () => {
     setAnnouncementWeekForm(initialAnnouncementWeekForm);
     setAnnouncementSubmitState(null);
+    setActivePage("announcement-week");
   };
 
   const startEditAnnouncementWeek = (
@@ -617,6 +623,7 @@ export default function App() {
       items: parsed?.items && parsed.items.length > 0 ? parsed.items : [""],
     });
     setAnnouncementSubmitState(null);
+    setActivePage("announcement-week");
   };
 
   const handleAnnouncementWeekSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -661,6 +668,7 @@ export default function App() {
       );
       setAnnouncementWeekForm(initialAnnouncementWeekForm);
       await loadAnnouncements();
+      setActivePage("announcements");
     } catch (error) {
       setAnnouncementSubmitState("Unable to save announcement week.");
     } finally {
@@ -1185,6 +1193,14 @@ export default function App() {
               >
                 Add Member
               </button>
+            ) : activePage === "announcements" ? (
+              <button
+                type="button"
+                className="hero-action-button"
+                onClick={startCreateAnnouncementWeek}
+              >
+                Add Week
+              </button>
             ) : null}
           </div>
 
@@ -1624,8 +1640,8 @@ export default function App() {
             </form>
           ) : null}
 
-          {activePage === "announcements" ? (
-            <div className="announcements-page">
+          {activePage === "announcement-week" ? (
+            <div className="announcements-editor-page">
               <form className="announcements-editor-card" onSubmit={handleAnnouncementWeekSubmit}>
                 <div className="member-form-header">
                   <p className="member-form-mode">
@@ -1690,9 +1706,12 @@ export default function App() {
                   <button
                     type="button"
                     className="member-cancel-button"
-                    onClick={startCreateAnnouncementWeek}
+                    onClick={() => {
+                      setAnnouncementSubmitState(null);
+                      setActivePage("announcements");
+                    }}
                   >
-                    Clear
+                    Cancel
                   </button>
                   <button
                     type="submit"
@@ -1707,7 +1726,11 @@ export default function App() {
                   </button>
                 </div>
               </form>
+            </div>
+          ) : null}
 
+          {activePage === "announcements" ? (
+            <div className="announcements-page">
               <div className="announcements-list-card">
                 <div className="announcement-list-toolbar">
                   <p className="api-message-label">Weekly Announcements</p>
