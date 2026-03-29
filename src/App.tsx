@@ -390,6 +390,16 @@ export default function App() {
   const canManageUsers =
     currentUserGroups.includes("admin") || currentUserGroups.includes("super_user");
   const canManageAnnouncements = canManageUsers;
+  const isBackendRequestInFlight =
+    isBackendLoading ||
+    isAnnouncementsLoading ||
+    isAnnouncementSubmitting ||
+    deletingAnnouncementSk !== null ||
+    isMemberSubmitting ||
+    deletingMemberKey !== null ||
+    isVisitationSubmitting ||
+    isUserDirectoryLoading ||
+    savingUserGroups !== null;
   const selectedMemberItem =
     selectedMember && backendMessage
       ? backendMessage.items.find(
@@ -1272,6 +1282,12 @@ export default function App() {
 
   return (
     <div className="app-shell" data-theme={theme}>
+      {isBackendRequestInFlight ? (
+        <div className="loading-overlay" aria-live="polite" aria-label="Loading">
+          <div className="loading-spinner" />
+        </div>
+      ) : null}
+
       <aside className="side-panel" ref={sidePanelRef}>
         <div className="side-panel-header">
           <button
