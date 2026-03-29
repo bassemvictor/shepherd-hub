@@ -94,6 +94,31 @@ Announcement notes:
 - `items` is the editable list of announcement strings for that week
 - weeks are currently ordered in the UI by descending `sk`
 
+## RBAC
+
+Shepherd Hub uses Amazon Cognito groups for role-based access control.
+
+Configured groups:
+
+- `admin`
+- `super_user`
+- `regular_user`
+
+Current access model:
+
+- all signed-in users must authenticate with Cognito before the UI is available
+- `admin` and `super_user` can access the `User Access` page
+- `admin` and `super_user` can assign Cognito users into the supported groups
+- the backend also enforces this for the admin user-management API routes, so this is not only a UI restriction
+
+The `User Access` page reads Cognito users from the user pool and allows group assignment for:
+
+- `Admin`
+- `Super User`
+- `Regular User`
+
+These assignments are stored in Cognito group membership, not in DynamoDB.
+
 ## AWS Setup
 
 1. Install the AWS CLI.
