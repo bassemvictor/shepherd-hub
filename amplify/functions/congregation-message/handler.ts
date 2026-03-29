@@ -128,25 +128,32 @@ const getRequestGroups = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
   const claims =
     ((event.requestContext as { authorizer?: { jwt?: { claims?: Record<string, unknown> } } })
       .authorizer?.jwt?.claims as Record<string, unknown> | undefined) ?? {};
-  const rawGroups = claims["cognito:groups"];
-
-  if (Array.isArray(rawGroups)) {
-    return rawGroups.map(String);
-  }
-
-  if (typeof rawGroups === "string") {
-    try {
-      const parsed = JSON.parse(rawGroups);
-      return Array.isArray(parsed) ? parsed.map(String) : [rawGroups];
-    } catch {
-      return rawGroups
-        .split(",")
-        .map((group) => group.trim())
-        .filter(Boolean);
+  const normalizeGroups = (rawGroups: unknown) => {
+    if (Array.isArray(rawGroups)) {
+      return rawGroups.map(String);
     }
-  }
 
-  return [];
+    if (typeof rawGroups === "string") {
+      try {
+        const parsed = JSON.parse(rawGroups);
+        return Array.isArray(parsed) ? parsed.map(String) : [rawGroups];
+      } catch {
+        return rawGroups
+          .split(",")
+          .map((group) => group.trim())
+          .filter(Boolean);
+      }
+    }
+
+    return [];
+  };
+
+  return Array.from(
+    new Set([
+      ...normalizeGroups(claims["cognito:groups"]),
+      ...normalizeGroups(claims.groups),
+    ]),
+  );
 };
 
 const isUserManager = (groups: string[]) =>
@@ -166,6 +173,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const tableName = process.env.TEST_TABLE_NAME;
   const userPoolId = process.env.USER_POOL_ID;
   const requestPath = event.requestContext.http.path;
+  const requestClaims =
+    ((event.requestContext as { authorizer?: { jwt?: { claims?: Record<string, unknown> } } })
+      .authorizer?.jwt?.claims as Record<string, unknown> | undefined) ?? {};
   const requestGroups = getRequestGroups(event);
 
   if (!tableName) {
@@ -185,6 +195,20 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       requestPath.endsWith("/admin/users/groups")) &&
     !isUserManager(requestGroups)
   ) {
+    console.log(
+      JSON.stringify({
+        message: "Admin route forbidden",
+        path: requestPath,
+        groups: requestGroups,
+        cognitoGroupsClaim: requestClaims["cognito:groups"],
+        groupsClaim: requestClaims.groups,
+        sub: requestClaims.sub,
+        username:
+          requestClaims["cognito:username"] ??
+          requestClaims.username ??
+          requestClaims.email,
+      }),
+    );
     return forbiddenResponse(time);
   }
 

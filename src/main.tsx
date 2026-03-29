@@ -6,7 +6,15 @@ import outputs from "../amplify_outputs.json";
 import App from "./App";
 import "./styles.css";
 
-const restApis = outputs.custom?.API ?? {};
+const restApis = Object.fromEntries(
+  Object.entries(outputs.custom?.API ?? {}).map(([key, value]) => [
+    key,
+    {
+      ...value,
+      endpoint: value.endpoint.replace(/\/+$/, ""),
+    },
+  ]),
+);
 const amplifyConfig = parseAmplifyConfig(outputs);
 
 Amplify.configure({

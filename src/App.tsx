@@ -285,6 +285,30 @@ const formatAnnouncementWeekLabel = (value: string | undefined) => {
   })}`;
 };
 
+const extractGroupsFromClaim = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return value.map(String);
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.map(String);
+      }
+    } catch {
+      return value
+        .split(",")
+        .map((group) => group.trim())
+        .filter(Boolean);
+    }
+
+    return [value];
+  }
+
+  return [];
+};
+
 const placeholderPages: PageKey[] = [
   "events",
   "sunday-school",
@@ -449,8 +473,9 @@ export default function App() {
       })) ?? [];
 
   const getAuthHeader = async () => {
-    const session = await fetchAuthSession();
-    const token = session.tokens?.idToken?.toString();
+    const session = await fetchAuthSession({ forceRefresh: true });
+    const token =
+      session.tokens?.accessToken?.toString() ?? session.tokens?.idToken?.toString();
 
     if (!token) {
       throw new Error("No auth token available.");
@@ -492,13 +517,18 @@ export default function App() {
 
   const checkAuthSession = async () => {
     try {
-      const [user, session] = await Promise.all([getCurrentUser(), fetchAuthSession()]);
-      const groupsClaim = session.tokens?.idToken?.payload["cognito:groups"];
-      const groups = Array.isArray(groupsClaim)
-        ? groupsClaim.map(String)
-        : typeof groupsClaim === "string"
-          ? [groupsClaim]
-          : [];
+      const [user, session] = await Promise.all([
+        getCurrentUser(),
+        fetchAuthSession({ forceRefresh: true }),
+      ]);
+      const groups = Array.from(
+        new Set([
+          ...extractGroupsFromClaim(session.tokens?.idToken?.payload["cognito:groups"]),
+          ...extractGroupsFromClaim(
+            session.tokens?.accessToken?.payload["cognito:groups"],
+          ),
+        ]),
+      );
       setCurrentUserLabel(user.signInDetails?.loginId ?? user.username);
       setCurrentUserGroups(groups);
       setAuthStatus("signed-in");
