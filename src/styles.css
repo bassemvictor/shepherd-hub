@@ -1007,6 +1007,11 @@ button {
   border: 1px solid rgba(219, 183, 86, 0.16);
 }
 
+[data-theme="dark"] .member-visit-item {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
 .member-visit-top {
   display: flex;
   align-items: center;
@@ -1068,6 +1073,11 @@ button {
   border: 1px solid rgba(219, 183, 86, 0.16);
 }
 
+[data-theme="dark"] .member-history-item {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
 .member-history-top {
   display: flex;
   align-items: center;
@@ -1106,10 +1116,21 @@ button {
   color: var(--muted-light);
 }
 
+[data-theme="dark"] .member-history-time {
+  color: rgba(226, 232, 240, 0.72);
+}
+
 .member-history-message {
   margin-top: 0.55rem;
   line-height: 1.55;
   color: var(--dark-card-text);
+}
+
+[data-theme="dark"] .member-history-message,
+[data-theme="dark"] .member-visit-item .member-detail-value,
+[data-theme="dark"] .member-visit-item .member-detail-label,
+[data-theme="dark"] .member-history-toggle-icon {
+  color: #f8fafc;
 }
 
 .visitation-board {
