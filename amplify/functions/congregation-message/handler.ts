@@ -138,8 +138,10 @@ const getRequestGroups = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
         const parsed = JSON.parse(rawGroups);
         return Array.isArray(parsed) ? parsed.map(String) : [rawGroups];
       } catch {
-        return rawGroups
-          .split(",")
+        const cleaned = rawGroups.replace(/^\[|\]$/g, "").trim();
+
+        return cleaned
+          .split(/[,\s]+/)
           .map((group) => group.trim())
           .filter(Boolean);
       }

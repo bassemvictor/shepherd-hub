@@ -297,8 +297,10 @@ const extractGroupsFromClaim = (value: unknown) => {
         return parsed.map(String);
       }
     } catch {
-      return value
-        .split(",")
+      const cleaned = value.replace(/^\[|\]$/g, "").trim();
+
+      return cleaned
+        .split(/[,\s]+/)
         .map((group) => group.trim())
         .filter(Boolean);
     }
