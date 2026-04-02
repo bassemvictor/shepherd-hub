@@ -1110,7 +1110,9 @@ button {
 .member-detail-contact-actions {
   display: flex;
   gap: 0.55rem;
-  margin-top: 0.9rem;
+  align-items: center;
+  margin-top: 0;
+  flex-wrap: wrap;
 }
 
 .member-contact-button {
@@ -1132,10 +1134,28 @@ button {
   height: 1.4rem;
 }
 
+.member-contact-image {
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: contain;
+}
+
 .member-contact-button.whatsapp {
-  border-color: rgba(34, 197, 94, 0.24);
-  background: rgba(34, 197, 94, 0.14);
-  color: #15803d;
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+}
+
+.member-contact-button.imessage {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+}
+
+.member-contact-button.phone {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
 }
 
 .member-contact-button.disabled {
@@ -1145,9 +1165,34 @@ button {
 
 .member-detail-actions {
   display: flex;
+  align-items: flex-start;
   gap: 0.75rem;
-  flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.member-detail-action-groups {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.member-detail-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.member-detail-action-row-primary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.member-detail-action-row-secondary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
 }
 
 .member-detail-actions .api-visitations-button,
@@ -1163,17 +1208,22 @@ button {
   border-color: rgba(9, 114, 211, 0.28);
   background: rgba(9, 114, 211, 0.12);
   color: #0972d3;
+  min-width: 9rem;
+  width: 100%;
 }
 
 .member-detail-actions .member-submit-button {
   background: linear-gradient(135deg, #ffb84d, #ec7211);
   color: #16191f;
+  min-width: 7.5rem;
 }
 
 .member-detail-actions .api-delete-button {
   border-color: rgba(209, 50, 18, 0.28);
   background: rgba(209, 50, 18, 0.12);
   color: #d13212;
+  min-width: 7.5rem;
+  width: 100%;
 }
 
 .member-back-button {
@@ -1181,6 +1231,10 @@ button {
   padding: 0.55rem;
   font-size: 1.2rem;
   line-height: 1;
+}
+
+.member-detail-actions .member-submit-button {
+  width: 100%;
 }
 
 [data-theme="dark"] .member-detail-actions .api-visitations-button {
@@ -1207,9 +1261,21 @@ button {
 }
 
 [data-theme="dark"] .member-contact-button.whatsapp {
-  border-color: rgba(34, 197, 94, 0.26);
-  background: rgba(34, 197, 94, 0.2);
-  color: #bbf7d0;
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+}
+
+[data-theme="dark"] .member-contact-button.imessage {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+}
+
+[data-theme="dark"] .member-contact-button.phone {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
 }
 
 .visitation-focus-actions .member-back-button {
@@ -2101,38 +2167,33 @@ button {
 
   .member-detail-actions {
     width: 100%;
-    display: grid;
-    grid-template-columns: auto 1fr 1fr;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.6rem;
   }
 
-  .member-detail-actions .member-back-button {
-    grid-column: 1;
-    justify-self: start;
+  .member-detail-action-groups {
+    flex: 1;
+    min-width: 0;
   }
 
   .visitation-focus-actions .member-back-button {
     width: 2.5rem;
   }
 
+  .member-detail-action-row {
+    justify-content: flex-start;
+  }
+
+  .member-detail-action-row-primary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .member-detail-action-row-primary .member-detail-contact-actions {
+    justify-content: flex-end;
+  }
+
   .member-detail-actions .api-visitations-button {
-    grid-column: 2;
-  }
-
-  .member-detail-actions .member-submit-button {
-    grid-column: 3;
-  }
-
-  .member-detail-actions .api-delete-button {
-    grid-column: 1 / -1;
-  }
-
-  .member-detail-actions .member-cancel-button,
-  .member-detail-actions .member-submit-button,
-  .member-detail-actions .api-visitations-button,
-  .member-detail-actions .api-delete-button {
-    width: 100%;
+    min-width: 0;
   }
 
   .member-detail-actions .member-back-button {

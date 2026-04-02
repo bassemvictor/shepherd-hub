@@ -1740,7 +1740,7 @@ export default function App() {
             <form className="member-form-card" onSubmit={handleMemberSubmit}>
               <div className="member-form-header">
                 <p className="member-form-mode">
-                  {isEditingMember ? "Edit Member" : "Add Member"}
+                  {isEditingMember ? "Edit" : "Add Member"}
                 </p>
               </div>
 
@@ -2135,140 +2135,134 @@ export default function App() {
                         {selectedMemberItem.pk} / {selectedMemberItem.sk}
                       </p>
                       <h2 className="member-detail-name">{selectedMemberName}</h2>
-                      <div className="member-detail-contact-actions">
-                        <a
-                          className={`member-contact-button${
-                            selectedMemberPhone ? "" : " disabled"
-                          }`}
-                          href={selectedMemberPhone ? `tel:${selectedMemberPhone}` : undefined}
-                          aria-label="Call member"
-                          onClick={(event) => {
-                            if (!selectedMemberPhone) {
-                              event.preventDefault();
-                            }
-                          }}
-                        >
-                          <svg
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                            className="member-contact-icon"
-                          >
-                            <path
-                              d="M7.5 4.5c.4-.4 1-.6 1.6-.4l2 1c.7.3 1 1.1.8 1.8l-.6 1.9a13 13 0 0 0 4 4l1.9-.6c.7-.2 1.5.1 1.8.8l1 2c.2.6 0 1.2-.4 1.6l-1.3 1.3c-.6.6-1.4.9-2.3.8-2.3-.3-4.9-1.7-7.1-3.9s-3.6-4.8-3.9-7.1c-.1-.9.2-1.7.8-2.3z"
-                              fill="currentColor"
-                            />
-                          </svg>
-                        </a>
-                        <a
-                          className={`member-contact-button${
-                            selectedMemberPhone ? "" : " disabled"
-                          }`}
-                          href={selectedMemberPhone ? `sms:${selectedMemberPhone}` : undefined}
-                          aria-label="Message member"
-                          onClick={(event) => {
-                            if (!selectedMemberPhone) {
-                              event.preventDefault();
-                            }
-                          }}
-                        >
-                          <svg
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                            className="member-contact-icon"
-                          >
-                            <path
-                              d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H9l-4.2 3.2c-.3.2-.8 0-.8-.4V16.5c0-.3 0-.3-.1-.5A2.5 2.5 0 0 1 4 13.5z"
-                              fill="currentColor"
-                            />
-                          </svg>
-                        </a>
-                        <a
-                          className={`member-contact-button whatsapp${
-                            selectedMemberWhatsappPhone ? "" : " disabled"
-                          }`}
-                          href={
-                            selectedMemberWhatsappPhone
-                              ? `https://wa.me/${selectedMemberWhatsappPhone}`
-                              : undefined
-                          }
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label="Open WhatsApp"
-                          onClick={(event) => {
-                            if (!selectedMemberWhatsappPhone) {
-                              event.preventDefault();
-                            }
-                          }}
-                        >
-                          <svg
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                            className="member-contact-icon"
-                          >
-                            <path
-                              d="M12 4a8 8 0 0 0-6.8 12.2L4 20l3.9-1.2A8 8 0 1 0 12 4m4.2 11.1c-.2.6-1.1 1.1-1.6 1.2-.4.1-.9.2-1.5 0-.4-.1-.9-.3-1.6-.6-2.8-1.2-4.7-4.2-4.8-4.4-.2-.2-1.1-1.4-1.1-2.6 0-1.3.7-1.9 1-2.2.2-.2.5-.2.7-.2h.5c.2 0 .4 0 .6.5l.8 1.9c.1.2.1.4 0 .6-.1.2-.2.4-.4.6l-.3.4c-.1.1-.2.3-.1.5.2.4.8 1.3 1.8 2.1 1.2 1 2.1 1.4 2.5 1.6.2.1.4 0 .5-.1l.8-.9c.2-.2.4-.3.6-.2l1.9.9c.2.1.4.2.4.4.1.2.1 1-.1 1.6"
-                              fill="currentColor"
-                            />
-                          </svg>
-                        </a>
-                      </div>
                     </div>
 
                     <div className="member-detail-actions">
-                      <button
-                        type="button"
-                        className="member-cancel-button member-back-button"
-                        onClick={() => setActivePage("congregation")}
-                        aria-label="Back to congregation"
-                      >
-                        ←
-                      </button>
-                      <button
-                        type="button"
-                        className="api-visitations-button"
-                        onClick={() =>
-                          openMemberVisitationPage(
-                            selectedMemberItem.pk,
-                            selectedMemberItem.sk,
-                            selectedMemberName,
-                          )
-                        }
-                      >
-                        Visitations
-                      </button>
-                      <button
-                        type="button"
-                        className="member-submit-button"
-                        onClick={() =>
-                          openEditMemberPage(
-                            selectedMemberItem.pk,
-                            selectedMemberItem.sk,
-                            selectedMemberData,
-                          )
-                        }
-                      >
-                        Edit Member
-                      </button>
-                      <button
-                        type="button"
-                        className="api-delete-button"
-                        onClick={() =>
-                          openDeleteModal(
-                            selectedMemberItem.pk,
-                            selectedMemberItem.sk,
-                            selectedMemberName,
-                          )
-                        }
-                        disabled={
-                          deletingMemberKey ===
-                          `${selectedMemberItem.pk}-${selectedMemberItem.sk}`
-                        }
-                      >
-                        {deletingMemberKey ===
-                        `${selectedMemberItem.pk}-${selectedMemberItem.sk}`
-                          ? "Deleting..."
-                          : "Delete"}
-                      </button>
+                      <div className="member-detail-action-groups">
+                        <div className="member-detail-action-row member-detail-action-row-primary">
+                          <button
+                            type="button"
+                            className="member-cancel-button member-back-button"
+                            onClick={() => setActivePage("congregation")}
+                            aria-label="Back to congregation"
+                          >
+                            ←
+                          </button>
+                          <button
+                            type="button"
+                            className="api-visitations-button"
+                            onClick={() =>
+                              openMemberVisitationPage(
+                                selectedMemberItem.pk,
+                                selectedMemberItem.sk,
+                                selectedMemberName,
+                              )
+                            }
+                          >
+                            Visitations
+                          </button>
+                          <div className="member-detail-contact-actions">
+                            <a
+                              className={`member-contact-button phone${
+                                selectedMemberPhone ? "" : " disabled"
+                              }`}
+                              href={selectedMemberPhone ? `tel:${selectedMemberPhone}` : undefined}
+                              aria-label="Call member"
+                              onClick={(event) => {
+                                if (!selectedMemberPhone) {
+                                  event.preventDefault();
+                                }
+                              }}
+                            >
+                              <img
+                                src="/phone-ios.png"
+                                alt=""
+                                aria-hidden="true"
+                                className="member-contact-image"
+                              />
+                            </a>
+                            <a
+                              className={`member-contact-button imessage${
+                                selectedMemberPhone ? "" : " disabled"
+                              }`}
+                              href={selectedMemberPhone ? `sms:${selectedMemberPhone}` : undefined}
+                              aria-label="Message member"
+                              onClick={(event) => {
+                                if (!selectedMemberPhone) {
+                                  event.preventDefault();
+                                }
+                              }}
+                            >
+                              <img
+                                src="/imessage.png"
+                                alt=""
+                                aria-hidden="true"
+                                className="member-contact-image"
+                              />
+                            </a>
+                            <a
+                              className={`member-contact-button whatsapp${
+                                selectedMemberWhatsappPhone ? "" : " disabled"
+                              }`}
+                              href={
+                                selectedMemberWhatsappPhone
+                                  ? `https://wa.me/${selectedMemberWhatsappPhone}`
+                                  : undefined
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label="Open WhatsApp"
+                              onClick={(event) => {
+                                if (!selectedMemberWhatsappPhone) {
+                                  event.preventDefault();
+                                }
+                              }}
+                            >
+                              <img
+                                src="/whatsapp.png"
+                                alt=""
+                                aria-hidden="true"
+                                className="member-contact-image"
+                              />
+                            </a>
+                          </div>
+                        </div>
+                        <div className="member-detail-action-row member-detail-action-row-secondary">
+                          <button
+                            type="button"
+                            className="member-submit-button"
+                            onClick={() =>
+                              openEditMemberPage(
+                                selectedMemberItem.pk,
+                                selectedMemberItem.sk,
+                                selectedMemberData,
+                              )
+                            }
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="api-delete-button"
+                            onClick={() =>
+                              openDeleteModal(
+                                selectedMemberItem.pk,
+                                selectedMemberItem.sk,
+                                selectedMemberName,
+                              )
+                            }
+                            disabled={
+                              deletingMemberKey ===
+                              `${selectedMemberItem.pk}-${selectedMemberItem.sk}`
+                            }
+                          >
+                            {deletingMemberKey ===
+                            `${selectedMemberItem.pk}-${selectedMemberItem.sk}`
+                              ? "Deleting..."
+                              : "Delete"}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
