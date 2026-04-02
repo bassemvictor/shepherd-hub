@@ -248,6 +248,33 @@ const parseMemberData = (value: string): StoredMemberData | null => {
   }
 };
 
+const formatMemberKeyLabel = (pk: string, sk: string) => `${pk} / ${sk}`;
+
+const formatCompactMemberKey = (sk: string) => {
+  return sk;
+};
+
+const getMemberInitials = (
+  firstName?: string,
+  lastName?: string,
+  fallbackName?: string,
+) => {
+  const parts = [firstName, lastName]
+    .filter(Boolean)
+    .map((value) => value!.trim())
+    .filter(Boolean);
+
+  if (parts.length > 0) {
+    return parts.slice(0, 2).map((value) => value[0]!.toUpperCase()).join("");
+  }
+
+  if (fallbackName?.trim()) {
+    return fallbackName.trim()[0]!.toUpperCase();
+  }
+
+  return "?";
+};
+
 const parseAnnouncementWeekData = (value: string): AnnouncementWeekData | null => {
   try {
     return JSON.parse(value) as AnnouncementWeekData;
@@ -1380,7 +1407,9 @@ export default function App() {
           <div className="hero-header">
             <div>
               <p className="eyebrow">{currentPage.eyebrow}</p>
-              <p className="description">{currentPage.description}</p>
+              {currentPage.description ? (
+                <p className="description">{currentPage.description}</p>
+              ) : null}
             </div>
 
             {activePage === "congregation" ? (
@@ -1409,17 +1438,23 @@ export default function App() {
               {!isBackendLoading && !backendError && backendMessage ? (
                 <>
                   <div className="congregation-search-row">
-                    <input
-                      type="search"
-                      className="congregation-search-input"
-                      placeholder="Search members"
-                      value={memberSearch}
-                      onChange={(event) => setMemberSearch(event.target.value)}
-                    />
+                    <label className="congregation-search-shell">
+                      <span className="congregation-search-icon" aria-hidden="true">
+                        Search
+                      </span>
+                      <input
+                        type="search"
+                        className="congregation-search-input"
+                        placeholder="Search members"
+                        value={memberSearch}
+                        onChange={(event) => setMemberSearch(event.target.value)}
+                      />
+                    </label>
                     <div className="congregation-search-tools">
                       <label className="congregation-sort-control">
-                        <span>Sort by name</span>
+                        <span className="congregation-sort-label">Sort</span>
                         <select
+                          aria-label="Sort members by name"
                           value={memberSortOrder}
                           onChange={(event) =>
                             setMemberSortOrder(event.target.value as MemberSortOrder)
@@ -1442,71 +1477,54 @@ export default function App() {
                       const fullName = [memberData?.firstName, memberData?.lastName]
                         .filter(Boolean)
                         .join(" ");
+                      const memberLabel = fullName || formatMemberKeyLabel(item.pk, item.sk);
+                      const memberInitials = getMemberInitials(
+                        memberData?.firstName,
+                        memberData?.lastName,
+                        memberLabel,
+                      );
 
                       return (
                         <article
                           className="api-data-item api-data-item-clickable"
                           key={`${item.pk}-${item.sk}`}
-                          onClick={() => openMemberDetailsPage(item.pk, item.sk)}
                         >
-                        <div className="api-data-row">
-                          <p className="api-data-key">
-                            {item.pk} / {item.sk}
-                          </p>
-
-                          <div className="api-data-actions">
-                            <button
-                              type="button"
-                              className="api-visitations-button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                openMemberVisitationPage(
-                                  item.pk,
-                                  item.sk,
-                                  fullName || `${item.pk} / ${item.sk}`,
-                                );
-                              }}
-                            >
-                              Visitations
-                            </button>
-
-                            <button
-                              type="button"
-                              className="api-edit-button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                openEditMemberPage(item.pk, item.sk, memberData);
-                              }}
-                            >
-                              Edit
-                            </button>
-
-                            <button
-                              type="button"
-                              className="api-delete-button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                openDeleteModal(
-                                  item.pk,
-                                  item.sk,
-                                  fullName || `${item.pk} / ${item.sk}`,
-                                );
-                              }}
-                              disabled={deletingMemberKey === `${item.pk}-${item.sk}`}
-                            >
-                              {deletingMemberKey === `${item.pk}-${item.sk}`
-                                ? "Deleting..."
-                                : "Delete"}
-                            </button>
-                          </div>
-                        </div>
-
                           {memberData ? (
                             <div className="api-data-details">
-                              <p className="api-data-name">{fullName || "Unnamed member"}</p>
-                              <div className="api-data-meta">
-                                <span>{memberData.role || "No role"}</span>
-                                <span>{memberData.status || "No status"}</span>
+                              <div
+                                className="api-data-layout"
+                                onClick={() => openMemberDetailsPage(item.pk, item.sk)}
+                              >
+                                <div className="api-data-avatar" aria-hidden="true">
+                                  {memberInitials}
+                                </div>
+
+                                <div className="api-data-content">
+                                  <div className="api-data-row">
+                                    <div className="api-data-title-block">
+                                      <p className="api-data-name">
+                                        {fullName || "Unnamed member"}
+                                      </p>
+                                      <p
+                                        className="api-data-key"
+                                        title={formatMemberKeyLabel(item.pk, item.sk)}
+                                      >
+                                        <span className="api-data-key-full">
+                                          {formatMemberKeyLabel(item.pk, item.sk)}
+                                        </span>
+                                        <span className="api-data-key-compact">
+                                          {formatCompactMemberKey(item.sk)}
+                                        </span>
+                                      </p>
+                                    </div>
+
+                                  </div>
+
+                                  <div className="api-data-meta">
+                                    <span>{memberData.role || "No role"}</span>
+                                    <span>{memberData.status || "No status"}</span>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           ) : (
@@ -1522,6 +1540,15 @@ export default function App() {
                       </p>
                     ) : null}
                   </div>
+
+                  <button
+                    type="button"
+                    className="mobile-fab-button"
+                    onClick={openNewMemberPage}
+                    aria-label="Add member"
+                  >
+                    +
+                  </button>
                 </>
               ) : null}
             </div>
@@ -1538,7 +1565,7 @@ export default function App() {
                   <div className="visitation-focus-actions">
                     <button
                       type="button"
-                      className="member-cancel-button"
+                      className="member-cancel-button member-back-button"
                       onClick={() => {
                         setSelectedMember({
                           pk: visitationFocus.pk,
@@ -1546,8 +1573,9 @@ export default function App() {
                         });
                         setActivePage("member-details");
                       }}
+                      aria-label="Back to details"
                     >
-                      Back to Details
+                      ←
                     </button>
                     <button
                       type="button"
@@ -1968,7 +1996,7 @@ export default function App() {
                             <div className="announcement-week-actions">
                               <button
                                 type="button"
-                                className="api-edit-button"
+                                className="announcement-edit-button"
                                 onClick={() =>
                                   startEditAnnouncementWeek(week.sk, week.parsed)
                                 }
@@ -2096,10 +2124,11 @@ export default function App() {
                     <div className="member-detail-actions">
                       <button
                         type="button"
-                        className="member-cancel-button"
+                        className="member-cancel-button member-back-button"
                         onClick={() => setActivePage("congregation")}
+                        aria-label="Back to congregation"
                       >
-                        Back
+                        ←
                       </button>
                       <button
                         type="button"
@@ -2126,6 +2155,26 @@ export default function App() {
                         }
                       >
                         Edit Member
+                      </button>
+                      <button
+                        type="button"
+                        className="api-delete-button"
+                        onClick={() =>
+                          openDeleteModal(
+                            selectedMemberItem.pk,
+                            selectedMemberItem.sk,
+                            selectedMemberName,
+                          )
+                        }
+                        disabled={
+                          deletingMemberKey ===
+                          `${selectedMemberItem.pk}-${selectedMemberItem.sk}`
+                        }
+                      >
+                        {deletingMemberKey ===
+                        `${selectedMemberItem.pk}-${selectedMemberItem.sk}`
+                          ? "Deleting..."
+                          : "Delete"}
                       </button>
                     </div>
                   </div>
