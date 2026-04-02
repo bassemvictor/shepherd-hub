@@ -1070,7 +1070,6 @@ button {
 }
 
 .member-detail-card {
-  margin-top: 1.5rem;
   padding: 1.2rem;
   border-radius: 20px;
   background: var(--dark-card-bg);
@@ -1106,6 +1105,42 @@ button {
   line-height: 1.05;
   color: var(--dark-card-text);
   max-width: none;
+}
+
+.member-detail-contact-actions {
+  display: flex;
+  gap: 0.55rem;
+  margin-top: 0.9rem;
+}
+
+.member-contact-button {
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(9, 114, 211, 0.22);
+  background: rgba(9, 114, 211, 0.1);
+  color: #0972d3;
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.member-contact-icon {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.member-contact-button.whatsapp {
+  border-color: rgba(34, 197, 94, 0.24);
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+}
+
+.member-contact-button.disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .member-detail-actions {
@@ -1163,6 +1198,18 @@ button {
   border-color: rgba(242, 78, 30, 0.3);
   background: rgba(209, 50, 18, 0.2);
   color: #ffb4a6;
+}
+
+[data-theme="dark"] .member-contact-button {
+  border-color: rgba(66, 153, 225, 0.24);
+  background: rgba(9, 114, 211, 0.2);
+  color: #9fd3ff;
+}
+
+[data-theme="dark"] .member-contact-button.whatsapp {
+  border-color: rgba(34, 197, 94, 0.26);
+  background: rgba(34, 197, 94, 0.2);
+  color: #bbf7d0;
 }
 
 .visitation-focus-actions .member-back-button {
