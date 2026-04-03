@@ -14,6 +14,7 @@ type PageKey =
   | "visitation"
   | "new-member"
   | "member-details"
+  | "member-details-beta"
   | "announcement-week"
   | "user-access"
   | "events"
@@ -42,6 +43,10 @@ const pageContent: Record<
   },
   "member-details": {
     eyebrow: "Member Details",
+    description: "",
+  },
+  "member-details-beta": {
+    eyebrow: "Member Details Beta",
     description: "",
   },
   "announcement-week": {
@@ -326,6 +331,20 @@ const formatAnnouncementWeekLabel = (value: string | undefined) => {
   })}`;
 };
 
+const getCurrentIsoWeekLabel = () => {
+  const today = new Date();
+  const utcDate = new Date(
+    Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()),
+  );
+  const day = utcDate.getUTCDay() || 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+  const year = utcDate.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const week = Math.ceil(((utcDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+
+  return `${year}-W${String(week).padStart(2, "0")}`;
+};
+
 const extractGroupsFromClaim = (value: unknown) => {
   if (Array.isArray(value)) {
     return value.map(String);
@@ -367,6 +386,7 @@ const initialAnnouncementWeekForm: AnnouncementWeekFormState = {
 
 export default function App() {
   const sidePanelRef = useRef<HTMLElement | null>(null);
+  const betaMemberMenuRef = useRef<HTMLDivElement | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
   const [challengeResponse, setChallengeResponse] = useState("");
@@ -409,6 +429,10 @@ export default function App() {
   const [selectedMember, setSelectedMember] = useState<SelectedMemberState>(null);
   const [visitationFocus, setVisitationFocus] = useState<VisitationFocusState>(null);
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
+  const [betaMemberTab, setBetaMemberTab] = useState<
+    "details" | "visitations" | "activity"
+  >("visitations");
+  const [isBetaMemberMenuOpen, setIsBetaMemberMenuOpen] = useState(false);
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
   const [deletingMemberKey, setDeletingMemberKey] = useState<string | null>(null);
@@ -431,6 +455,7 @@ export default function App() {
   const canManageUsers =
     currentUserGroups.includes("admin") || currentUserGroups.includes("super_user");
   const canManageAnnouncements = canManageUsers;
+  const currentAnnouncementWeekLabel = getCurrentIsoWeekLabel();
   const isBackendRequestInFlight =
     isBackendLoading ||
     isAnnouncementsLoading ||
@@ -457,6 +482,11 @@ export default function App() {
     : "Member";
   const selectedMemberPhone = normalizePhoneForLink(selectedMemberData?.phone);
   const selectedMemberWhatsappPhone = selectedMemberPhone.replace(/[^\d]/g, "");
+  const selectedMemberInitials = getMemberInitials(
+    selectedMemberData?.firstName,
+    selectedMemberData?.lastName,
+    selectedMemberName,
+  );
   const selectedMemberHistory =
     selectedMemberData?.history && selectedMemberData.history.length > 0
       ? selectedMemberData.history
@@ -791,7 +821,38 @@ export default function App() {
   }, [isMobileMenuOpen]);
 
   useEffect(() => {
+    if (!isBetaMemberMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!betaMemberMenuRef.current) {
+        return;
+      }
+
+      const target = event.target;
+
+      if (target instanceof Node && !betaMemberMenuRef.current.contains(target)) {
+        setIsBetaMemberMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+    };
+  }, [isBetaMemberMenuOpen]);
+
+  useEffect(() => {
     setIsHistoryExpanded(false);
+  }, [selectedMember?.pk, selectedMember?.sk]);
+
+  useEffect(() => {
+    setBetaMemberTab("visitations");
+    setIsBetaMemberMenuOpen(false);
   }, [selectedMember?.pk, selectedMember?.sk]);
 
   const updateMemberForm = (
@@ -1422,7 +1483,22 @@ export default function App() {
         <section className="hero-card">
           <div className="hero-header">
             <div>
-              <p className="eyebrow">{currentPage.eyebrow}</p>
+              <div className="hero-title-row">
+                <p className="eyebrow">{currentPage.eyebrow}</p>
+                {activePage === "member-details" ? (
+                  <button
+                    type="button"
+                    className="hero-inline-link"
+                    onClick={() => {
+                      setBetaMemberTab("visitations");
+                      setIsBetaMemberMenuOpen(false);
+                      setActivePage("member-details-beta");
+                    }}
+                  >
+                    Open Beta Mobile View
+                  </button>
+                ) : null}
+              </div>
               {currentPage.description ? (
                 <p className="description">{currentPage.description}</p>
               ) : null}
@@ -1435,14 +1511,6 @@ export default function App() {
                 onClick={openNewMemberPage}
               >
                 Add Member
-              </button>
-            ) : activePage === "announcements" && canManageAnnouncements ? (
-              <button
-                type="button"
-                className="hero-action-button"
-                onClick={startCreateAnnouncementWeek}
-              >
-                Add Week
               </button>
             ) : null}
           </div>
@@ -1976,20 +2044,31 @@ export default function App() {
               <div className="announcements-list-card">
                 <div className="announcement-list-toolbar">
                   <p className="api-message-label">Weekly Announcements</p>
-                  <label className="announcement-sort-control">
-                    <span>Sort by date</span>
-                    <select
-                      value={announcementSortOrder}
-                      onChange={(event) =>
-                        setAnnouncementSortOrder(
-                          event.target.value as AnnouncementSortOrder,
-                        )
-                      }
-                    >
-                      <option value="latest">Latest first</option>
-                      <option value="oldest">Oldest first</option>
-                    </select>
-                  </label>
+                  <div className="announcement-list-toolbar-actions">
+                    <label className="announcement-sort-control">
+                      <span>Sort by date</span>
+                      <select
+                        value={announcementSortOrder}
+                        onChange={(event) =>
+                          setAnnouncementSortOrder(
+                            event.target.value as AnnouncementSortOrder,
+                          )
+                        }
+                      >
+                        <option value="latest">Latest first</option>
+                        <option value="oldest">Oldest first</option>
+                      </select>
+                    </label>
+                    {canManageAnnouncements ? (
+                      <button
+                        type="button"
+                        className="announcement-toolbar-button"
+                        onClick={startCreateAnnouncementWeek}
+                      >
+                        Add Week
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 {isAnnouncementsLoading ? (
                   <p className="api-message-text">Loading announcement weeks...</p>
@@ -2000,7 +2079,14 @@ export default function App() {
                 ) : (
                   <div className="announcement-weeks-list">
                     {announcementWeeks.map((week) => (
-                      <article className="announcement-week-card" key={week.sk}>
+                      <article
+                        className={`announcement-week-card${
+                          week.parsed?.weekLabel === currentAnnouncementWeekLabel
+                            ? " current"
+                            : ""
+                        }`}
+                        key={week.sk}
+                      >
                         <div className="announcement-week-header">
                           <div>
                             <p className="announcement-week-title">
@@ -2406,6 +2492,407 @@ export default function App() {
                   >
                     Back to Congregation
                   </button>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {activePage === "member-details-beta" ? (
+            <div className="member-detail-beta-page">
+              {selectedMemberItem && selectedMemberData ? (
+                <div className="member-detail-beta-card">
+                  <div className="member-detail-beta-header">
+                    <button
+                      type="button"
+                      className="member-detail-beta-back"
+                      onClick={() => setActivePage("member-details")}
+                    >
+                      <span aria-hidden="true">←</span>
+                      <span>Back</span>
+                    </button>
+                    <div className="member-detail-beta-menu" ref={betaMemberMenuRef}>
+                      <button
+                        type="button"
+                        className="member-detail-beta-menu-button"
+                        aria-label="Open member actions"
+                        onClick={() =>
+                          setIsBetaMemberMenuOpen((current) => !current)
+                        }
+                      >
+                        ...
+                      </button>
+                      {isBetaMemberMenuOpen ? (
+                        <div className="member-detail-beta-menu-panel">
+                          <button
+                            type="button"
+                            className="member-detail-beta-menu-item"
+                            onClick={() => {
+                              setIsBetaMemberMenuOpen(false);
+                              openEditMemberPage(
+                                selectedMemberItem.pk,
+                                selectedMemberItem.sk,
+                                selectedMemberData,
+                              );
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="member-detail-beta-menu-item danger"
+                            onClick={() => {
+                              setIsBetaMemberMenuOpen(false);
+                              openDeleteModal(
+                                selectedMemberItem.pk,
+                                selectedMemberItem.sk,
+                                selectedMemberName,
+                              );
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="member-detail-beta-hero">
+                    <div className="member-detail-beta-avatar-wrap">
+                      <div className="member-detail-beta-avatar">
+                        {selectedMemberInitials}
+                      </div>
+                    </div>
+                    <h2 className="member-detail-beta-name">{selectedMemberName}</h2>
+                    <p className="member-detail-beta-key">
+                      #{selectedMemberItem.sk}
+                    </p>
+                  </div>
+
+                  <div className="member-detail-beta-contact-row">
+                    <a
+                      className={`member-contact-button phone${
+                        selectedMemberPhone ? "" : " disabled"
+                      }`}
+                      href={selectedMemberPhone ? `tel:${selectedMemberPhone}` : undefined}
+                      aria-label="Call member"
+                      onClick={(event) => {
+                        if (!selectedMemberPhone) {
+                          event.preventDefault();
+                        }
+                      }}
+                    >
+                      <img
+                        src="/phone-ios.png"
+                        alt=""
+                        aria-hidden="true"
+                        className="member-contact-image"
+                      />
+                    </a>
+                    <a
+                      className={`member-contact-button imessage${
+                        selectedMemberPhone ? "" : " disabled"
+                      }`}
+                      href={selectedMemberPhone ? `sms:${selectedMemberPhone}` : undefined}
+                      aria-label="Message member"
+                      onClick={(event) => {
+                        if (!selectedMemberPhone) {
+                          event.preventDefault();
+                        }
+                      }}
+                    >
+                      <img
+                        src="/imessage.png"
+                        alt=""
+                        aria-hidden="true"
+                        className="member-contact-image"
+                      />
+                    </a>
+                    <a
+                      className={`member-contact-button whatsapp${
+                        selectedMemberWhatsappPhone ? "" : " disabled"
+                      }`}
+                      href={
+                        selectedMemberWhatsappPhone
+                          ? `https://wa.me/${selectedMemberWhatsappPhone}`
+                          : undefined
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Open WhatsApp"
+                      onClick={(event) => {
+                        if (!selectedMemberWhatsappPhone) {
+                          event.preventDefault();
+                        }
+                      }}
+                    >
+                      <img
+                        src="/whatsapp.png"
+                        alt=""
+                        aria-hidden="true"
+                        className="member-contact-image"
+                      />
+                    </a>
+                  </div>
+
+                  <div className="member-detail-beta-tabs" role="tablist" aria-label="Beta tabs">
+                    <button
+                      type="button"
+                      className={`member-detail-beta-tab${
+                        betaMemberTab === "details" ? " active" : ""
+                      }`}
+                      role="tab"
+                      aria-selected={betaMemberTab === "details"}
+                      onClick={() => setBetaMemberTab("details")}
+                    >
+                      Details
+                    </button>
+                    <button
+                      type="button"
+                      className={`member-detail-beta-tab${
+                        betaMemberTab === "visitations" ? " active" : ""
+                      }`}
+                      role="tab"
+                      aria-selected={betaMemberTab === "visitations"}
+                      onClick={() => setBetaMemberTab("visitations")}
+                    >
+                      Visitations
+                    </button>
+                    <button
+                      type="button"
+                      className={`member-detail-beta-tab${
+                        betaMemberTab === "activity" ? " active" : ""
+                      }`}
+                      role="tab"
+                      aria-selected={betaMemberTab === "activity"}
+                      onClick={() => setBetaMemberTab("activity")}
+                    >
+                      Activity
+                    </button>
+                  </div>
+
+                  <div className="member-detail-beta-tab-panel" role="tabpanel">
+                    {betaMemberTab === "details" ? (
+                      <div className="member-detail-beta-details-grid">
+                        <div className="member-detail-beta-detail-card">
+                          <p className="member-detail-beta-detail-label">Role</p>
+                          <p className="member-detail-beta-detail-value">
+                            {selectedMemberData.role || "Not set"}
+                          </p>
+                        </div>
+                        <div className="member-detail-beta-detail-card">
+                          <p className="member-detail-beta-detail-label">Status</p>
+                          <p className="member-detail-beta-detail-value">
+                            {selectedMemberData.status || "Not set"}
+                          </p>
+                        </div>
+                        <div className="member-detail-beta-detail-card full">
+                          <p className="member-detail-beta-detail-label">Phone</p>
+                          <p className="member-detail-beta-detail-value">
+                            {selectedMemberData.phone || "Not set"}
+                          </p>
+                        </div>
+                        <div className="member-detail-beta-detail-card full">
+                          <p className="member-detail-beta-detail-label">Email</p>
+                          <p className="member-detail-beta-detail-value">
+                            {selectedMemberData.email || "Not set"}
+                          </p>
+                        </div>
+                        <div className="member-detail-beta-detail-card full">
+                          <p className="member-detail-beta-detail-label">Address</p>
+                          <p className="member-detail-beta-detail-value">
+                            {selectedMemberData.address || "Not set"}
+                          </p>
+                        </div>
+                        <div className="member-detail-beta-detail-card full">
+                          <p className="member-detail-beta-detail-label">Notes</p>
+                          <p className="member-detail-beta-detail-value">
+                            {selectedMemberData.notes || "No notes yet"}
+                          </p>
+                        </div>
+                      </div>
+                    ) : betaMemberTab === "visitations" ? (
+                      <div className="member-detail-beta-visitation-board">
+                        <div className="member-detail-beta-visitation-actions">
+                          <button
+                            type="button"
+                            className="visitation-action-button visitation-action-schedule"
+                            onClick={() =>
+                              openVisitationModal(
+                                "schedule",
+                                selectedMemberItem.pk,
+                                selectedMemberItem.sk,
+                                selectedMemberName,
+                              )
+                            }
+                          >
+                            <span>Schedule</span>
+                          </button>
+                        </div>
+
+                        {selectedMemberData.visitations &&
+                        selectedMemberData.visitations.length > 0 ? (
+                          <div className="member-detail-beta-visits">
+                            {selectedMemberData.visitations.map((visit, index) => (
+                              <div className="member-detail-beta-visit-card" key={visit.id}>
+                                <div className="member-detail-beta-visit-top">
+                                  <p className="member-detail-beta-visit-label">
+                                    Visit {selectedMemberData.visitations!.length - index}
+                                  </p>
+                                  <p className="member-detail-beta-visit-time">
+                                    {visit.scheduledAt
+                                      ? new Date(visit.scheduledAt).toLocaleString()
+                                      : "No schedule"}
+                                  </p>
+                                </div>
+
+                                <div className="member-detail-beta-visit-meta">
+                                  <p className="member-detail-beta-visit-meta-item">
+                                    Status: {visit.completedAt ? "Completed" : "Pending"}
+                                  </p>
+                                  <p className="member-detail-beta-visit-meta-item">
+                                    Note: {visit.note || "No note yet"}
+                                  </p>
+                                </div>
+
+                                <div className="member-detail-beta-visit-actions-row">
+                                  <button
+                                    type="button"
+                                    className="visitation-action-button visitation-action-schedule"
+                                    onClick={() =>
+                                      openVisitationModal(
+                                        "schedule",
+                                        selectedMemberItem.pk,
+                                        selectedMemberItem.sk,
+                                        selectedMemberName,
+                                        {
+                                          visitationId: visit.id,
+                                          schedule: visit.scheduledAt,
+                                        },
+                                      )
+                                    }
+                                  >
+                                    <span>Edit Visit</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className={`visitation-action-button visitation-action-note${
+                                      visit.note ? " active" : ""
+                                    }`}
+                                    onClick={() =>
+                                      openVisitationModal(
+                                        "note",
+                                        selectedMemberItem.pk,
+                                        selectedMemberItem.sk,
+                                        selectedMemberName,
+                                        {
+                                          visitationId: visit.id,
+                                          note: visit.note,
+                                        },
+                                      )
+                                    }
+                                  >
+                                    <span>{visit.note ? "Edit Note" : "Add Note"}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className={`visitation-action-button visitation-action-complete${
+                                      visit.completedAt ? " active" : ""
+                                    }`}
+                                    onClick={() =>
+                                      openVisitationModal(
+                                        "complete",
+                                        selectedMemberItem.pk,
+                                        selectedMemberItem.sk,
+                                        selectedMemberName,
+                                        {
+                                          visitationId: visit.id,
+                                        },
+                                      )
+                                    }
+                                  >
+                                    <span>{visit.completedAt ? "Completed" : "Mark Done"}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="member-detail-beta-empty-state compact">
+                            <p className="member-detail-beta-empty-title">
+                              No visitations scheduled yet.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : betaMemberTab === "activity" ? (
+                      selectedMemberHistory.length > 0 ? (
+                        <div className="member-detail-beta-activity-list">
+                          {selectedMemberHistory.map((entry, index) => (
+                            <div
+                              className={`member-detail-beta-activity-item activity-${entry.action.replace(
+                                /_/g,
+                                "-",
+                              )}`}
+                              key={`${entry.action}-${entry.timestamp}-${index}`}
+                            >
+                              <span
+                                className="member-detail-beta-activity-marker"
+                                aria-hidden="true"
+                              />
+                              <div className="member-detail-beta-activity-card">
+                                <div className="member-detail-beta-history-top">
+                                  <span className="member-detail-beta-history-action">
+                                    {entry.action
+                                      .split("_")
+                                      .join(" ")
+                                      .replace(/\b\w/g, (match: string) =>
+                                        match.toUpperCase(),
+                                      )}
+                                  </span>
+                                  <span className="member-detail-beta-history-time">
+                                    {new Date(entry.timestamp).toLocaleString()}
+                                  </span>
+                                </div>
+                                <p className="member-detail-beta-history-message">
+                                  {entry.message}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="member-detail-beta-empty-state compact">
+                          <p className="member-detail-beta-empty-title">
+                            No activity has been recorded yet.
+                          </p>
+                        </div>
+                      )
+                    ) : (
+                      <div className="member-detail-beta-empty-state">
+                        <p className="member-detail-beta-empty-title">Tab</p>
+                        <p className="member-detail-beta-empty-copy">
+                          Beta placeholder content.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="member-detail-card">
+                  <div className="member-detail-empty">
+                    <p className="member-detail-value">
+                      The selected member could not be found.
+                    </p>
+                    <button
+                      type="button"
+                      className="member-cancel-button"
+                      onClick={() => setActivePage("member-details")}
+                    >
+                      Back to Details
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
