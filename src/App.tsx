@@ -244,6 +244,14 @@ type ContactsImportResponse = {
   skippedMembers: string[];
 };
 
+type AppNavigationState = {
+  activePage: PageKey;
+  selectedMember: SelectedMemberState | null;
+  visitationFocus: VisitationFocusState | null;
+  editingMember: EditingMemberState | null;
+  betaMemberTab: "details" | "visitations" | "activity";
+};
+
 const manageableGroups = ["admin", "super_user", "regular_user"] as const;
 const groupLabelMap: Record<(typeof manageableGroups)[number], string> = {
   admin: "Admin",
@@ -406,6 +414,7 @@ export default function App() {
   const sidePanelRef = useRef<HTMLElement | null>(null);
   const betaMemberMenuRef = useRef<HTMLDivElement | null>(null);
   const contactsImportInputRef = useRef<HTMLInputElement | null>(null);
+  const isApplyingPopStateRef = useRef(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
   const [challengeResponse, setChallengeResponse] = useState("");
@@ -624,6 +633,36 @@ export default function App() {
     });
 
     return restOperation.response;
+  };
+
+  const createNavigationState = (
+    overrides: Partial<AppNavigationState> = {},
+  ): AppNavigationState => ({
+    activePage: overrides.activePage ?? activePage,
+    selectedMember: overrides.selectedMember ?? selectedMember,
+    visitationFocus: overrides.visitationFocus ?? visitationFocus,
+    editingMember: overrides.editingMember ?? editingMember,
+    betaMemberTab: overrides.betaMemberTab ?? betaMemberTab,
+  });
+
+  const applyNavigationState = (nextState: AppNavigationState) => {
+    setActivePage(nextState.activePage);
+    setSelectedMember(nextState.selectedMember);
+    setVisitationFocus(nextState.visitationFocus);
+    setEditingMember(nextState.editingMember);
+    setBetaMemberTab(nextState.betaMemberTab);
+    setIsMobileMenuOpen(false);
+    setIsBetaMemberMenuOpen(false);
+  };
+
+  const navigateToState = (overrides: Partial<AppNavigationState>) => {
+    const nextState = createNavigationState(overrides);
+
+    applyNavigationState(nextState);
+
+    if (typeof window !== "undefined") {
+      window.history.pushState({ shepherdHubNav: nextState }, "", window.location.href);
+    }
   };
 
   const checkAuthSession = async () => {
@@ -857,6 +896,54 @@ export default function App() {
   }, [activePage, authStatus, canManageUsers]);
 
   useEffect(() => {
+    if (authStatus !== "signed-in" || typeof window === "undefined") {
+      return;
+    }
+
+    if (isApplyingPopStateRef.current) {
+      isApplyingPopStateRef.current = false;
+      return;
+    }
+
+    window.history.replaceState(
+      { shepherdHubNav: createNavigationState() },
+      "",
+      window.location.href,
+    );
+  }, [
+    authStatus,
+    activePage,
+    selectedMember,
+    visitationFocus,
+    editingMember,
+    betaMemberTab,
+  ]);
+
+  useEffect(() => {
+    if (authStatus !== "signed-in" || typeof window === "undefined") {
+      return;
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      const nextState = (event.state as { shepherdHubNav?: AppNavigationState } | null)
+        ?.shepherdHubNav;
+
+      if (!nextState) {
+        return;
+      }
+
+      isApplyingPopStateRef.current = true;
+      applyNavigationState(nextState);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [authStatus]);
+
+  useEffect(() => {
     if (activePage === "user-access" && !canManageUsers) {
       setActivePage("congregation");
     }
@@ -1005,7 +1092,7 @@ export default function App() {
     }
     setAnnouncementWeekForm(initialAnnouncementWeekForm);
     setAnnouncementSubmitState(null);
-    setActivePage("announcement-week");
+    navigateToState({ activePage: "announcement-week" });
   };
 
   const startEditAnnouncementWeek = (
@@ -1022,7 +1109,7 @@ export default function App() {
       items: parsed?.items && parsed.items.length > 0 ? parsed.items : [""],
     });
     setAnnouncementSubmitState(null);
-    setActivePage("announcement-week");
+    navigateToState({ activePage: "announcement-week" });
   };
 
   const handleAnnouncementWeekSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1152,7 +1239,10 @@ export default function App() {
     setEditingMember(null);
     setMemberForm(initialMemberForm);
     setMemberSubmitState(null);
-    setActivePage("new-member");
+    navigateToState({
+      activePage: "new-member",
+      editingMember: null,
+    });
   };
 
   const openEditMemberPage = (
@@ -1176,7 +1266,14 @@ export default function App() {
       notes: memberData?.notes ?? "",
     });
     setMemberSubmitState(null);
-    setActivePage("new-member");
+    navigateToState({
+      activePage: "new-member",
+      editingMember: {
+        pk,
+        sk,
+        createdAt: memberData?.createdAt,
+      },
+    });
   };
 
   const handleCancelMemberForm = () => {
@@ -1187,14 +1284,18 @@ export default function App() {
   };
 
   const openMemberDetailsPage = (pk: string, sk: string) => {
-    setSelectedMember({ pk, sk });
-    setActivePage("member-details");
+    navigateToState({
+      activePage: "member-details",
+      selectedMember: { pk, sk },
+    });
   };
 
   const openMemberVisitationPage = (pk: string, sk: string, memberName: string) => {
-    setSelectedMember({ pk, sk });
-    setVisitationFocus({ pk, sk, memberName });
-    setActivePage("visitation");
+    navigateToState({
+      activePage: "visitation",
+      selectedMember: { pk, sk },
+      visitationFocus: { pk, sk, memberName },
+    });
   };
 
   const handleDeleteMember = async (pk: string, sk: string) => {
@@ -1232,6 +1333,9 @@ export default function App() {
 
     await handleDeleteMember(deleteModal.pk, deleteModal.sk);
     closeDeleteModal();
+    setSelectedMember(null);
+    setVisitationFocus(null);
+    setActivePage("congregation");
   };
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
@@ -1524,7 +1628,11 @@ export default function App() {
                           if (item.key !== "visitation") {
                             setVisitationFocus(null);
                           }
-                          setActivePage(item.key);
+                          navigateToState({
+                            activePage: item.key,
+                            visitationFocus:
+                              item.key === "visitation" ? visitationFocus : null,
+                          });
                           setIsMobileMenuOpen(false);
                         }}
                       >
@@ -1575,9 +1683,10 @@ export default function App() {
                     type="button"
                     className="hero-inline-link"
                     onClick={() => {
-                      setBetaMemberTab("visitations");
-                      setIsBetaMemberMenuOpen(false);
-                      setActivePage("member-details-beta");
+                      navigateToState({
+                        activePage: "member-details-beta",
+                        betaMemberTab: "visitations",
+                      });
                     }}
                   >
                     Open Beta Mobile View
@@ -1728,11 +1837,14 @@ export default function App() {
                       type="button"
                       className="member-cancel-button member-back-button"
                       onClick={() => {
-                        setSelectedMember({
-                          pk: visitationFocus.pk,
-                          sk: visitationFocus.sk,
+                        navigateToState({
+                          activePage: "member-details",
+                          selectedMember: {
+                            pk: visitationFocus.pk,
+                            sk: visitationFocus.sk,
+                          },
+                          visitationFocus,
                         });
-                        setActivePage("member-details");
                       }}
                       aria-label="Back to details"
                     >
