@@ -12,6 +12,7 @@ import outputs from "../amplify_outputs.json";
 type PageKey =
   | "congregation"
   | "visitation"
+  | "visitation-report"
   | "new-member"
   | "member-details"
   | "member-details-beta"
@@ -35,6 +36,10 @@ const pageContent: Record<
   },
   visitation: {
     eyebrow: "Visitation",
+    description: "",
+  },
+  "visitation-report": {
+    eyebrow: "Visitation Report",
     description: "",
   },
   "new-member": {
@@ -97,12 +102,8 @@ const navSections: Array<{
     items: [
       { key: "congregation", label: "Congregation" },
       { key: "visitation", label: "Visitation" },
+      { key: "visitation-report", label: "Visitation Report" },
       { key: "announcements", label: "Announcements" },
-      { key: "events", label: "Events" },
-      { key: "sunday-school", label: "Sunday School" },
-      { key: "summer-camp", label: "Summer Camp" },
-      { key: "parking", label: "Parking" },
-      { key: "board-meeting", label: "Board Meeting" },
     ],
   },
   {
@@ -158,6 +159,8 @@ type StoredMemberData = Partial<MemberFormState> & {
     scheduledAt?: string;
     note?: string;
     completedAt?: string;
+    assignedPriestSk?: string;
+    assignedPriestName?: string;
     updatedAt?: string;
   }>;
 };
@@ -232,6 +235,11 @@ type UserDirectoryResponse = {
   time: string;
   groupOptions: string[];
   items: UserDirectoryItem[];
+};
+
+type PriestOption = {
+  sk: string;
+  name: string;
 };
 
 type ContactsImportResponse = {
@@ -319,6 +327,12 @@ const getMemberInitials = (
 
   return "?";
 };
+
+const getMemberName = (
+  firstName?: string,
+  lastName?: string,
+  fallback = "",
+) => [firstName, lastName].filter(Boolean).join(" ").trim() || fallback;
 
 const parseAnnouncementWeekData = (value: string): AnnouncementWeekData | null => {
   try {
@@ -467,6 +481,8 @@ export default function App() {
   const [visitationModal, setVisitationModal] = useState<VisitationModalState>(null);
   const [visitationSchedule, setVisitationSchedule] = useState("");
   const [visitationNote, setVisitationNote] = useState("");
+  const [visitationAssignedPriestSk, setVisitationAssignedPriestSk] = useState("");
+  const [visitationAssignedPriestName, setVisitationAssignedPriestName] = useState("");
   const [visitationSubmitState, setVisitationSubmitState] = useState<string | null>(
     null,
   );
@@ -485,6 +501,7 @@ export default function App() {
   const [isContactsImporting, setIsContactsImporting] = useState(false);
   const currentPage = pageContent[activePage];
   const isEditingMember = editingMember !== null;
+  const isAdminUser = currentUserGroups.includes("admin");
   const canManageUsers =
     currentUserGroups.includes("admin") || currentUserGroups.includes("super_user");
   const canManageAnnouncements = canManageUsers;
@@ -563,22 +580,103 @@ export default function App() {
   const sortedCongregationItems = filteredCongregationItems.slice().sort((left, right) => {
     const leftData = parseMemberData(left.data);
     const rightData = parseMemberData(right.data);
-    const leftName =
-      [leftData?.firstName, leftData?.lastName].filter(Boolean).join(" ") ||
-      `${left.pk} ${left.sk}`;
-    const rightName =
-      [rightData?.firstName, rightData?.lastName].filter(Boolean).join(" ") ||
-      `${right.pk} ${right.sk}`;
+    const leftName = getMemberName(leftData?.firstName, leftData?.lastName, `${left.pk} ${left.sk}`);
+    const rightName = getMemberName(
+      rightData?.firstName,
+      rightData?.lastName,
+      `${right.pk} ${right.sk}`,
+    );
 
     return memberSortOrder === "name-asc"
       ? leftName.localeCompare(rightName, undefined, { sensitivity: "base" })
       : rightName.localeCompare(leftName, undefined, { sensitivity: "base" });
   });
+  const priestMembers = ((backendMessage?.items ?? [])
+    .map((item) => {
+      const memberData = parseMemberData(item.data);
+
+      if (memberData?.role !== "Priest") {
+        return null;
+      }
+
+      return {
+        sk: item.sk,
+        name: getMemberName(memberData.firstName, memberData.lastName, item.sk),
+      };
+    })
+    .filter((item): item is PriestOption => item !== null)
+    .sort((left, right) =>
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+    ));
+  const selectedVisitationPriestAvailable =
+    !visitationAssignedPriestSk ||
+    priestMembers.some((priest) => priest.sk === visitationAssignedPriestSk);
   const visitationItems = visitationFocus
     ? (backendMessage?.items.filter(
         (item) => item.pk === visitationFocus.pk && item.sk === visitationFocus.sk,
       ) ?? [])
     : (backendMessage?.items ?? []);
+  const visitationReportGroups = Object.values(
+    (backendMessage?.items ?? []).reduce<
+      Record<
+        string,
+        {
+          priestName: string;
+          priestSk?: string;
+          visits: Array<{
+            memberName: string;
+            memberSk: string;
+            scheduledAt: string;
+            completedAt?: string;
+            note?: string;
+          }>;
+        }
+      >
+    >((groups, item) => {
+      const memberData = parseMemberData(item.data);
+      const memberName = getMemberName(memberData?.firstName, memberData?.lastName, item.sk);
+
+      for (const visit of memberData?.visitations ?? []) {
+        if (!visit.scheduledAt || !visit.assignedPriestName) {
+          continue;
+        }
+
+        const groupKey = visit.assignedPriestSk || visit.assignedPriestName;
+
+        if (!groups[groupKey]) {
+          groups[groupKey] = {
+            priestName: visit.assignedPriestName,
+            priestSk: visit.assignedPriestSk,
+            visits: [],
+          };
+        }
+
+        groups[groupKey].visits.push({
+          memberName,
+          memberSk: item.sk,
+          scheduledAt: visit.scheduledAt,
+          completedAt: visit.completedAt,
+          note: visit.note,
+        });
+      }
+
+      return groups;
+    }, {}),
+  )
+    .map((group) => ({
+      ...group,
+      visits: group.visits
+        .slice()
+        .sort(
+          (left, right) =>
+            new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime(),
+        ),
+    }))
+    .sort((left, right) =>
+      left.priestName.localeCompare(right.priestName, undefined, {
+        sensitivity: "base",
+      }),
+    );
   const announcementWeeks =
     announcements?.items
       .slice()
@@ -1419,6 +1517,8 @@ export default function App() {
       visitationId?: string;
       schedule?: string;
       note?: string;
+      assignedPriestSk?: string;
+      assignedPriestName?: string;
     },
   ) => {
     setVisitationModal({
@@ -1430,6 +1530,8 @@ export default function App() {
     });
     setVisitationSchedule(options?.schedule ?? "");
     setVisitationNote(options?.note ?? "");
+    setVisitationAssignedPriestSk(options?.assignedPriestSk ?? "");
+    setVisitationAssignedPriestName(options?.assignedPriestName ?? "");
     setVisitationSubmitState(null);
   };
 
@@ -1437,6 +1539,8 @@ export default function App() {
     setVisitationModal(null);
     setVisitationSchedule("");
     setVisitationNote("");
+    setVisitationAssignedPriestSk("");
+    setVisitationAssignedPriestName("");
     setVisitationSubmitState(null);
   };
 
@@ -1463,6 +1567,7 @@ export default function App() {
 
       if (visitationModal.action === "schedule") {
         body.schedule = visitationSchedule;
+        body.assignedPriestSk = visitationAssignedPriestSk;
       }
 
       if (visitationModal.action === "note") {
@@ -1863,9 +1968,7 @@ export default function App() {
 
               {visitationItems.map((item) => {
                 const memberData = parseMemberData(item.data);
-                const fullName = [memberData?.firstName, memberData?.lastName]
-                  .filter(Boolean)
-                  .join(" ");
+                const fullName = getMemberName(memberData?.firstName, memberData?.lastName);
                 const visits = memberData?.visitations ?? [];
 
                 return (
@@ -1916,6 +2019,9 @@ export default function App() {
                                 Status: {visit.completedAt ? "Completed" : "Pending"}
                               </p>
                               <p className="visitation-summary-item">
+                                Assigned priest: {visit.assignedPriestName || "Unassigned"}
+                              </p>
+                              <p className="visitation-summary-item">
                                 Note: {visit.note || "No note yet"}
                               </p>
                             </div>
@@ -1933,6 +2039,8 @@ export default function App() {
                                     {
                                       visitationId: visit.id,
                                       schedule: visit.scheduledAt,
+                                      assignedPriestSk: visit.assignedPriestSk,
+                                      assignedPriestName: visit.assignedPriestName,
                                     },
                                   )
                                 }
@@ -1990,6 +2098,67 @@ export default function App() {
                   </article>
                 );
               })}
+            </div>
+          ) : null}
+
+          {activePage === "visitation-report" ? (
+            <div className="visitation-report-board">
+              {visitationReportGroups.length > 0 ? (
+                visitationReportGroups.map((group) => (
+                  <section
+                    className="visitation-report-group"
+                    key={group.priestSk || group.priestName}
+                  >
+                    <div className="visitation-report-group-header">
+                      <div>
+                        <p className="visitation-report-group-label">Priest</p>
+                        <h2 className="visitation-report-group-name">{group.priestName}</h2>
+                      </div>
+                      <p className="visitation-report-group-count">
+                        {group.visits.length} scheduled
+                      </p>
+                    </div>
+
+                    <div className="visitation-report-list">
+                      {group.visits.map((visit) => (
+                        <article
+                          className="visitation-report-item"
+                          key={`${group.priestSk || group.priestName}-${visit.memberSk}-${visit.scheduledAt}`}
+                        >
+                          <div className="visitation-report-item-top">
+                            <div>
+                              <p className="visitation-report-member-name">
+                                {visit.memberName}
+                              </p>
+                              <p className="visitation-report-member-key">
+                                {formatCompactMemberKey(visit.memberSk)}
+                              </p>
+                            </div>
+                            <p className="visitation-report-time">
+                              {new Date(visit.scheduledAt).toLocaleString()}
+                            </p>
+                          </div>
+
+                          <div className="visitation-report-meta">
+                            <p className="visitation-summary-item">
+                              Status: {visit.completedAt ? "Completed" : "Pending"}
+                            </p>
+                            <p className="visitation-summary-item">
+                              Note: {visit.note || "No note yet"}
+                            </p>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ))
+              ) : (
+                <div className="visitation-report-empty">
+                  <p className="member-detail-value">
+                    No scheduled visitations are currently assigned to priests.
+                  </p>
+                </div>
+              )}
             </div>
           ) : null}
 
@@ -2059,7 +2228,9 @@ export default function App() {
                     <option value="" disabled>
                       Select a role
                     </option>
-                    <option>Priest</option>
+                    {isAdminUser || memberForm.role === "Priest" ? (
+                      <option>Priest</option>
+                    ) : null}
                     <option>Member</option>
                     <option>Servant</option>
                     <option>Visitor</option>
@@ -2791,6 +2962,12 @@ export default function App() {
                                 </p>
                               </div>
                               <div className="member-detail-section member-detail-section-full">
+                                <p className="member-detail-label">Assigned Priest</p>
+                                <p className="member-detail-value">
+                                  {visit.assignedPriestName || "Unassigned"}
+                                </p>
+                              </div>
+                              <div className="member-detail-section member-detail-section-full">
                                 <p className="member-detail-label">Note</p>
                                 <p className="member-detail-value">
                                   {visit.note || "No note yet"}
@@ -3075,6 +3252,9 @@ export default function App() {
                                     Status: {visit.completedAt ? "Completed" : "Pending"}
                                   </p>
                                   <p className="member-detail-beta-visit-meta-item">
+                                    Assigned priest: {visit.assignedPriestName || "Unassigned"}
+                                  </p>
+                                  <p className="member-detail-beta-visit-meta-item">
                                     Note: {visit.note || "No note yet"}
                                   </p>
                                 </div>
@@ -3092,6 +3272,8 @@ export default function App() {
                                         {
                                           visitationId: visit.id,
                                           schedule: visit.scheduledAt,
+                                          assignedPriestSk: visit.assignedPriestSk,
+                                          assignedPriestName: visit.assignedPriestName,
                                         },
                                       )
                                     }
@@ -3258,15 +3440,49 @@ export default function App() {
 
             <form className="modal-form" onSubmit={handleVisitationModalSubmit}>
               {visitationModal.action === "schedule" ? (
-                <label className="member-field">
-                  <span>Visitation date</span>
-                  <input
-                    type="datetime-local"
-                    value={visitationSchedule}
-                    onChange={(event) => setVisitationSchedule(event.target.value)}
-                    required
-                  />
-                </label>
+                <>
+                  <label className="member-field">
+                    <span>Visitation date</span>
+                    <input
+                      type="datetime-local"
+                      value={visitationSchedule}
+                      onChange={(event) => setVisitationSchedule(event.target.value)}
+                      required
+                    />
+                  </label>
+
+                  <label className="member-field">
+                    <span>Assign priest</span>
+                    <select
+                      value={visitationAssignedPriestSk}
+                      onChange={(event) => {
+                        const nextSk = event.target.value;
+                        const selectedPriest = priestMembers.find(
+                          (priest) => priest.sk === nextSk,
+                        );
+                        setVisitationAssignedPriestSk(nextSk);
+                        setVisitationAssignedPriestName(selectedPriest?.name ?? "");
+                      }}
+                      required={priestMembers.length > 0}
+                    >
+                      <option value="">
+                        {priestMembers.length > 0
+                          ? "Select a priest"
+                          : "No priests available"}
+                      </option>
+                      {!selectedVisitationPriestAvailable && visitationAssignedPriestSk ? (
+                        <option value={visitationAssignedPriestSk}>
+                          {visitationAssignedPriestName || "Previously assigned priest"}
+                        </option>
+                      ) : null}
+                      {priestMembers.map((priest) => (
+                        <option key={priest.sk} value={priest.sk}>
+                          {priest.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               ) : null}
 
               {visitationModal.action === "note" ? (

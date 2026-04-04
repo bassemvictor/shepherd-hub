@@ -2365,7 +2365,18 @@ button {
   box-shadow: 0 18px 38px rgba(2, 6, 23, 0.28);
 }
 
+[data-theme="dark"] .visitation-report-group,
+[data-theme="dark"] .visitation-report-empty {
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: 0 18px 38px rgba(2, 6, 23, 0.28);
+}
+
 [data-theme="dark"] .visit-entry {
+  background: rgba(15, 23, 42, 0.86);
+  border-color: rgba(148, 163, 184, 0.16);
+}
+
+[data-theme="dark"] .visitation-report-item {
   background: rgba(15, 23, 42, 0.86);
   border-color: rgba(148, 163, 184, 0.16);
 }
@@ -2374,9 +2385,113 @@ button {
   color: #f8fafc;
 }
 
+[data-theme="dark"] .visitation-report-group-name,
+[data-theme="dark"] .visitation-report-member-name,
+[data-theme="dark"] .visitation-report-time {
+  color: #f8fafc;
+}
+
 .visitation-empty {
   margin: 0.9rem 0 0;
   color: var(--muted-light);
+}
+
+.visitation-report-board {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.visitation-report-group,
+.visitation-report-empty {
+  padding: 1rem 1.1rem;
+  border-radius: 18px;
+  background: var(--dark-card-bg);
+  border: 1px solid rgba(233, 201, 112, 0.22);
+  box-shadow: 0 14px 32px rgba(148, 163, 184, 0.12);
+  color: var(--dark-card-text);
+}
+
+.visitation-report-group-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.visitation-report-group-label,
+.visitation-report-group-count,
+.visitation-report-member-key,
+.visitation-report-time {
+  margin: 0;
+}
+
+.visitation-report-group-label {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-light);
+}
+
+.visitation-report-group .visitation-report-group-name {
+  margin: 0.25rem 0 0;
+  font-size: 1.2rem;
+  max-width: none;
+  color: var(--dark-card-text);
+}
+
+.visitation-report-group-count {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--muted-light);
+}
+
+.visitation-report-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.visitation-report-item {
+  padding: 0.9rem;
+  border-radius: 14px;
+  background: rgba(255, 252, 244, 0.94);
+  border: 1px solid rgba(219, 183, 86, 0.16);
+}
+
+.visitation-report-item-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.visitation-report-member-name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--dark-card-text);
+}
+
+.visitation-report-member-key {
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted-light);
+}
+
+.visitation-report-time {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--dark-card-text);
+}
+
+.visitation-report-meta {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.55rem;
 }
 
 .visitation-action-button {

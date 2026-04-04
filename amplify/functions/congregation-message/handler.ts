@@ -50,6 +50,7 @@ type VisitationPayload = {
   visitationId?: string;
   schedule?: string;
   note?: string;
+  assignedPriestSk?: string;
 };
 
 type AnnouncementWeekPayload = {
@@ -95,6 +96,8 @@ type StoredMemberData = {
     scheduledAt?: string;
     note?: string;
     completedAt?: string;
+    assignedPriestSk?: string;
+    assignedPriestName?: string;
     updatedAt?: string;
   }>;
 };
@@ -145,6 +148,9 @@ const normalizeName = (
   normalizeWhitespace(
     [firstName, lastName].filter(Boolean).join(" ") || displayName || "",
   ).toLowerCase();
+
+const getStoredMemberName = (firstName?: string, lastName?: string) =>
+  [firstName, lastName].filter(Boolean).join(" ").trim();
 
 const decodeVcfValue = (value: string) =>
   value
@@ -347,6 +353,7 @@ const getRequestGroups = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
 
 const isUserManager = (groups: string[]) =>
   groups.includes("admin") || groups.includes("super_user");
+const isAdminUser = (groups: string[]) => groups.includes("admin");
 
 const forbiddenResponse = (time: string, message: string) => ({
   statusCode: 403,
@@ -848,27 +855,86 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       let historyMessage = "";
 
       if (payload.action === "schedule") {
+        const assignedPriestSk = payload.assignedPriestSk?.trim() ?? "";
+        let assignedPriestName = "";
+
+        if (assignedPriestSk) {
+          const assignedPriestResponse = await dynamoClient.send(
+            new GetCommand({
+              TableName: tableName,
+              Key: {
+                pk: "CONGREGATION",
+                sk: assignedPriestSk,
+              },
+            }),
+          );
+
+          const assignedPriestItem = assignedPriestResponse.Item as TableRow | undefined;
+
+          if (!assignedPriestItem) {
+            return {
+              statusCode: 400,
+              headers: responseHeaders,
+              body: JSON.stringify({
+                message: "Assigned priest not found.",
+                time,
+              }),
+            };
+          }
+
+          let assignedPriestData: StoredMemberData = {};
+
+          try {
+            assignedPriestData = JSON.parse(assignedPriestItem.data) as StoredMemberData;
+          } catch {
+            assignedPriestData = {};
+          }
+
+          if (assignedPriestData.role !== "Priest") {
+            return {
+              statusCode: 400,
+              headers: responseHeaders,
+              body: JSON.stringify({
+                message: "Assigned member must be a priest.",
+                time,
+              }),
+            };
+          }
+
+          assignedPriestName =
+            getStoredMemberName(assignedPriestData.firstName, assignedPriestData.lastName) ||
+            assignedPriestSk;
+        }
+
         if (payload.visitationId) {
           nextVisitations = existingVisitations.map((visitation) =>
             visitation.id === payload.visitationId
               ? {
                   ...visitation,
                   scheduledAt: payload.schedule,
+                  assignedPriestSk: assignedPriestSk || undefined,
+                  assignedPriestName: assignedPriestName || undefined,
                   updatedAt: time,
                 }
               : visitation,
           );
-          historyMessage = `Visitation schedule updated to ${payload.schedule}.`;
+          historyMessage = assignedPriestName
+            ? `Visitation schedule updated to ${payload.schedule}. Assigned to ${assignedPriestName}.`
+            : `Visitation schedule updated to ${payload.schedule}.`;
         } else {
           nextVisitations = [
             {
               id: crypto.randomUUID(),
               scheduledAt: payload.schedule,
+              assignedPriestSk: assignedPriestSk || undefined,
+              assignedPriestName: assignedPriestName || undefined,
               updatedAt: time,
             },
             ...existingVisitations,
           ];
-          historyMessage = `Visitation scheduled for ${payload.schedule}.`;
+          historyMessage = assignedPriestName
+            ? `Visitation scheduled for ${payload.schedule}. Assigned to ${assignedPriestName}.`
+            : `Visitation scheduled for ${payload.schedule}.`;
         }
       }
 
@@ -969,6 +1035,17 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         }
       }
 
+      if (
+        payload.role === "Priest" &&
+        existingData.role !== "Priest" &&
+        !isAdminUser(requestGroups)
+      ) {
+        return forbiddenResponse(
+          time,
+          "Only admins can assign the Priest role to a member.",
+        );
+      }
+
       const data = JSON.stringify({
         ...existingData,
         history: prependHistoryEntry(existingData.history, {
@@ -1054,6 +1131,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           time,
         }),
       };
+    }
+
+    if (payload.role === "Priest" && !isAdminUser(requestGroups)) {
+      return forbiddenResponse(
+        time,
+        "Only admins can assign the Priest role to a member.",
+      );
     }
 
     const memberId = crypto.randomUUID();

@@ -323,6 +323,25 @@ test("creates a congregation member", async () => {
   assert.equal(body.message, "Congregation member created.");
 });
 
+test("forbids regular users from creating a priest member", async () => {
+  const response = await invokeHandler(
+    createEvent({
+      path: "/congregation/member",
+      method: "POST",
+      groups: ["regular_user"],
+      body: {
+        firstName: "Mark",
+        lastName: "Priest",
+        role: "Priest",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(body.message, "Only admins can assign the Priest role to a member.");
+});
+
 test("imports VCF contacts and skips existing members", async () => {
   const dynamo = createMockClient((command) => {
     if (command.constructor.name === "QueryCommand") {
@@ -453,6 +472,49 @@ test("updates a congregation member", async () => {
   assert.equal(body.message, "Congregation member updated.");
 });
 
+test("forbids regular users from promoting a member to priest", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "CONGREGATION",
+          sk: "MEMBER#1",
+          data: JSON.stringify({
+            firstName: "John",
+            lastName: "Smith",
+            role: "Member",
+            history: [],
+            createdAt: "2026-01-01T00:00:00.000Z",
+          }),
+        },
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/congregation/member/update",
+      method: "POST",
+      groups: ["regular_user"],
+      body: {
+        pk: "CONGREGATION",
+        sk: "MEMBER#1",
+        firstName: "John",
+        lastName: "Smith",
+        role: "Priest",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(body.message, "Only admins can assign the Priest role to a member.");
+});
+
 test("removes a congregation member", async () => {
   const dynamo = createMockClient((command) => {
     assert.equal(command.constructor.name, "DeleteCommand");
@@ -476,13 +538,23 @@ test("removes a congregation member", async () => {
 });
 
 test("schedules a visitation", async () => {
-  const dynamo = createMockClient((command) => {
+  const dynamo = createMockClient((command, index) => {
     if (command.constructor.name === "GetCommand") {
+      if (index === 0) {
+        return {
+          Item: {
+            pk: "CONGREGATION",
+            sk: "MEMBER#1",
+            data: JSON.stringify({ firstName: "John", lastName: "Smith", visitations: [] }),
+          },
+        };
+      }
+
       return {
         Item: {
           pk: "CONGREGATION",
-          sk: "MEMBER#1",
-          data: JSON.stringify({ firstName: "John", lastName: "Smith", visitations: [] }),
+          sk: "MEMBER#PRIEST",
+          data: JSON.stringify({ firstName: "Paul", lastName: "Priest", role: "Priest" }),
         },
       };
     }
@@ -506,13 +578,69 @@ test("schedules a visitation", async () => {
         sk: "MEMBER#1",
         action: "schedule",
         schedule: "2026-04-01T10:00:00.000Z",
+        assignedPriestSk: "MEMBER#PRIEST",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+  const putCommand = dynamo.commands.find(
+    (command) => command.constructor.name === "PutCommand",
+  );
+  const savedItem = putCommand?.input?.Item as { data: string } | undefined;
+  const savedData = savedItem ? JSON.parse(savedItem.data) : null;
+  const savedVisit = savedData?.visitations?.[0];
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Visitation updated.");
+  assert.equal(savedVisit?.assignedPriestSk, "MEMBER#PRIEST");
+  assert.equal(savedVisit?.assignedPriestName, "Paul Priest");
+});
+
+test("rejects assigning a visitation to a non-priest member", async () => {
+  const dynamo = createMockClient((command, index) => {
+    if (command.constructor.name === "GetCommand") {
+      if (index === 0) {
+        return {
+          Item: {
+            pk: "CONGREGATION",
+            sk: "MEMBER#1",
+            data: JSON.stringify({ firstName: "John", lastName: "Smith", visitations: [] }),
+          },
+        };
+      }
+
+      return {
+        Item: {
+          pk: "CONGREGATION",
+          sk: "MEMBER#2",
+          data: JSON.stringify({ firstName: "Sam", lastName: "Servant", role: "Servant" }),
+        },
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/congregation/member/visitation",
+      method: "POST",
+      groups: ["regular_user"],
+      body: {
+        pk: "CONGREGATION",
+        sk: "MEMBER#1",
+        action: "schedule",
+        schedule: "2026-04-01T10:00:00.000Z",
+        assignedPriestSk: "MEMBER#2",
       },
     }),
   );
   const body = parseBody(response.body);
 
-  assert.equal(response.statusCode, 200);
-  assert.equal(body.message, "Visitation updated.");
+  assert.equal(response.statusCode, 400);
+  assert.equal(body.message, "Assigned member must be a priest.");
 });
 
 test("adds a visitation note to an existing visit", async () => {
