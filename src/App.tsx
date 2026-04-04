@@ -1831,7 +1831,7 @@ export default function App() {
                     onClick={() => {
                       navigateToState({
                         activePage: "member-details-beta",
-                        betaMemberTab: "visitations",
+                        betaMemberTab: "details",
                       });
                     }}
                   >
@@ -2086,7 +2086,7 @@ export default function App() {
                                   )
                                 }
                               >
-                                <span>Edit Visit</span>
+                                <span>Edit</span>
                               </button>
 
                               <button
@@ -3389,7 +3389,7 @@ export default function App() {
                                       )
                                     }
                                   >
-                                    <span>Edit Visit</span>
+                                    <span>Edit</span>
                                   </button>
 
                                   <button
