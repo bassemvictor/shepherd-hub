@@ -2366,9 +2366,15 @@ button {
 }
 
 .visit-entry-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.55rem;
   margin-top: 0.75rem;
+}
+
+.visit-entry-actions .visitation-action-button {
+  width: 100%;
+  min-width: 0;
 }
 
 [data-theme="dark"] .visitation-card {
