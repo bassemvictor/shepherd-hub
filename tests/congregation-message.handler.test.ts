@@ -224,6 +224,23 @@ test("forbids announcement writes for regular users", async () => {
   assert.equal(body.message, "You do not have access to add or edit announcements.");
 });
 
+test("forbids contacts import for regular users", async () => {
+  const response = await invokeHandler(
+    createEvent({
+      path: "/contacts/import",
+      method: "POST",
+      groups: ["regular_user"],
+      body: {
+        content: "BEGIN:VCARD\nFN:John Smith\nEND:VCARD",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(body.message, "You do not have access to import contacts.");
+});
+
 test("creates an announcement week", async () => {
   const dynamo = createMockClient((command) => {
     if (command.constructor.name === "GetCommand") {
@@ -304,6 +321,90 @@ test("creates a congregation member", async () => {
 
   assert.equal(response.statusCode, 201);
   assert.equal(body.message, "Congregation member created.");
+});
+
+test("imports VCF contacts and skips existing members", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "QueryCommand") {
+      return {
+        Items: [
+          {
+            pk: "CONGREGATION",
+            sk: "MEMBER#existing",
+            data: JSON.stringify({
+              firstName: "John",
+              lastName: "Smith",
+              email: "john@example.com",
+              phone: "6137004486",
+            }),
+          },
+        ],
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/contacts/import",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        fileName: "contacts.vcf",
+        content: `BEGIN:VCARD
+VERSION:3.0
+FN:John Smith
+N:Smith;John;;;
+EMAIL:john@example.com
+TEL:6137004486
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:Jane Doe
+N:Doe;Jane;;;
+EMAIL:jane@example.com
+TEL:+1 (613) 555-0123
+ADR:;;123 Example Street;Sample City;ON;A1A 1A1;Canada
+NOTE:Imported from phone
+END:VCARD`,
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+  const putInput = dynamo.commands[1]?.input as { Item?: Record<string, unknown> };
+  const importedData = JSON.parse(String(putInput.Item?.data ?? "{}")) as Record<
+    string,
+    unknown
+  >;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.processedCount, 2);
+  assert.equal(body.importedCount, 1);
+  assert.equal(body.skippedCount, 1);
+  assert.deepEqual(body.importedMembers, ["Jane Doe"]);
+  assert.deepEqual(body.skippedMembers, ["John Smith"]);
+  assert.deepEqual(
+    dynamo.commands.map((command) => command.constructor.name),
+    ["QueryCommand", "PutCommand"],
+  );
+  assert.equal(putInput.Item?.pk, "CONGREGATION");
+  assert.equal(typeof putInput.Item?.sk, "string");
+  assert.equal(importedData.firstName, "Jane");
+  assert.equal(importedData.lastName, "Doe");
+  assert.equal(importedData.email, "jane@example.com");
+  assert.equal(importedData.phone, "+1 (613) 555-0123");
+  assert.equal(
+    importedData.address,
+    "123 Example Street, Sample City, ON, A1A 1A1, Canada",
+  );
+  assert.equal(importedData.notes, "Imported from phone");
 });
 
 test("updates a congregation member", async () => {

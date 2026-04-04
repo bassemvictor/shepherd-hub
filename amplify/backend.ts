@@ -148,6 +148,15 @@ congregationApi.addRoutes({
 });
 
 congregationApi.addRoutes({
+  path: "/contacts/import",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "ContactsImportIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
   path: "/admin/users",
   methods: [HttpMethod.GET],
   integration: new HttpLambdaIntegration(

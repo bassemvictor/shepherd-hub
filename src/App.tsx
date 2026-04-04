@@ -15,6 +15,7 @@ type PageKey =
   | "new-member"
   | "member-details"
   | "member-details-beta"
+  | "contacts-import"
   | "announcement-week"
   | "user-access"
   | "events"
@@ -47,6 +48,10 @@ const pageContent: Record<
   },
   "member-details-beta": {
     eyebrow: "Member Details Beta",
+    description: "",
+  },
+  "contacts-import": {
+    eyebrow: "Contacts Import",
     description: "",
   },
   "announcement-week": {
@@ -102,7 +107,10 @@ const navSections: Array<{
   },
   {
     label: "Manage",
-    items: [{ key: "user-access", label: "User Access" }],
+    items: [
+      { key: "user-access", label: "User Access" },
+      { key: "contacts-import", label: "Contacts Import" },
+    ],
   },
 ];
 
@@ -224,6 +232,16 @@ type UserDirectoryResponse = {
   time: string;
   groupOptions: string[];
   items: UserDirectoryItem[];
+};
+
+type ContactsImportResponse = {
+  message: string;
+  time: string;
+  processedCount: number;
+  importedCount: number;
+  skippedCount: number;
+  importedMembers: string[];
+  skippedMembers: string[];
 };
 
 const manageableGroups = ["admin", "super_user", "regular_user"] as const;
@@ -387,6 +405,7 @@ const initialAnnouncementWeekForm: AnnouncementWeekFormState = {
 export default function App() {
   const sidePanelRef = useRef<HTMLElement | null>(null);
   const betaMemberMenuRef = useRef<HTMLDivElement | null>(null);
+  const contactsImportInputRef = useRef<HTMLInputElement | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
   const [challengeResponse, setChallengeResponse] = useState("");
@@ -450,6 +469,11 @@ export default function App() {
   const [userDirectoryError, setUserDirectoryError] = useState<string | null>(null);
   const [savingUserGroups, setSavingUserGroups] = useState<string | null>(null);
   const [userDirectoryStatus, setUserDirectoryStatus] = useState<string | null>(null);
+  const [contactsImportFile, setContactsImportFile] = useState<File | null>(null);
+  const [contactsImportStatus, setContactsImportStatus] = useState<string | null>(null);
+  const [contactsImportSummary, setContactsImportSummary] =
+    useState<ContactsImportResponse | null>(null);
+  const [isContactsImporting, setIsContactsImporting] = useState(false);
   const currentPage = pageContent[activePage];
   const isEditingMember = editingMember !== null;
   const canManageUsers =
@@ -465,7 +489,8 @@ export default function App() {
     deletingMemberKey !== null ||
     isVisitationSubmitting ||
     isUserDirectoryLoading ||
-    savingUserGroups !== null;
+    savingUserGroups !== null ||
+    isContactsImporting;
   const selectedMemberItem =
     selectedMember && backendMessage
       ? backendMessage.items.find(
@@ -731,6 +756,55 @@ export default function App() {
     }
   };
 
+  const handleContactsImportSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!congregationApiName) {
+      setContactsImportStatus("Backend API is not configured yet.");
+      return;
+    }
+
+    if (!canManageUsers) {
+      setContactsImportStatus("You do not have access to import contacts.");
+      return;
+    }
+
+    if (!contactsImportFile) {
+      setContactsImportStatus("Choose a .vcf file to import.");
+      return;
+    }
+
+    if (!contactsImportFile.name.toLowerCase().endsWith(".vcf")) {
+      setContactsImportStatus("Only .vcf contact files are supported.");
+      return;
+    }
+
+    setIsContactsImporting(true);
+    setContactsImportStatus(null);
+    setContactsImportSummary(null);
+
+    try {
+      const content = await contactsImportFile.text();
+      const response = await authorizedPost("/contacts/import", {
+        fileName: contactsImportFile.name,
+        content,
+      });
+      const payload = (await response.body.json()) as ContactsImportResponse;
+
+      setContactsImportSummary(payload);
+      setContactsImportStatus(payload.message);
+      setContactsImportFile(null);
+      if (contactsImportInputRef.current) {
+        contactsImportInputRef.current.value = "";
+      }
+      await loadBackendMessage();
+    } catch {
+      setContactsImportStatus("Unable to import contacts.");
+    } finally {
+      setIsContactsImporting(false);
+    }
+  };
+
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("shepherd-hub-theme");
 
@@ -793,6 +867,12 @@ export default function App() {
       setActivePage("announcements");
     }
   }, [activePage, canManageAnnouncements]);
+
+  useEffect(() => {
+    if (activePage === "contacts-import" && !canManageUsers) {
+      setActivePage("congregation");
+    }
+  }, [activePage, canManageUsers]);
 
   useEffect(() => {
     if (!isMobileMenuOpen) {
@@ -1217,6 +1297,9 @@ export default function App() {
     setGroupAssignments({});
     setUserDirectoryError(null);
     setUserDirectoryStatus(null);
+    setContactsImportFile(null);
+    setContactsImportStatus(null);
+    setContactsImportSummary(null);
   };
 
   const toggleTheme = () => {
@@ -1418,7 +1501,9 @@ export default function App() {
             .map((section) => ({
               ...section,
               items: section.items.filter(
-                (item) => item.key !== "user-access" || canManageUsers,
+                (item) =>
+                  !["user-access", "contacts-import"].includes(item.key) ||
+                  canManageUsers,
               ),
             }))
             .filter((section) => section.items.length > 0)
@@ -1625,14 +1710,6 @@ export default function App() {
                     ) : null}
                   </div>
 
-                  <button
-                    type="button"
-                    className="mobile-fab-button"
-                    onClick={openNewMemberPage}
-                    aria-label="Add member"
-                  >
-                    +
-                  </button>
                 </>
               ) : null}
             </div>
@@ -2199,6 +2276,142 @@ export default function App() {
                   </div>
                 )}
               </div>
+            </div>
+          ) : null}
+
+          {activePage === "contacts-import" ? (
+            <div className="contacts-import-page">
+              <form
+                className="member-form-card contacts-import-card"
+                onSubmit={handleContactsImportSubmit}
+              >
+                <div className="member-form-header">
+                  <p className="member-form-mode">Import Members from Contacts</p>
+                </div>
+
+                <div className="member-form-grid">
+                  <label className="member-field member-field-full">
+                    <span>VCF file</span>
+                    <input
+                      ref={contactsImportInputRef}
+                      className="contacts-import-file-input"
+                      type="file"
+                      accept=".vcf,text/vcard"
+                      onChange={(event) => {
+                        const nextFile = event.target.files?.[0] ?? null;
+                        setContactsImportFile(nextFile);
+                        setContactsImportStatus(null);
+                        setContactsImportSummary(null);
+                      }}
+                    />
+                    <div className="contacts-import-picker">
+                      <button
+                        type="button"
+                        className="contacts-import-picker-button"
+                        onClick={() => contactsImportInputRef.current?.click()}
+                      >
+                        Choose File
+                      </button>
+                      <span
+                        className={`contacts-import-picker-name${
+                          contactsImportFile ? "" : " empty"
+                        }`}
+                      >
+                        {contactsImportFile ? contactsImportFile.name : "No file selected"}
+                      </span>
+                    </div>
+                    <p className="contacts-import-hint">
+                      Upload a <code>.vcf</code> file. Members with the same email,
+                      phone, or exact name are skipped.
+                    </p>
+                  </label>
+                </div>
+
+                {contactsImportStatus ? (
+                  <p className="member-submit-message">{contactsImportStatus}</p>
+                ) : null}
+
+                {contactsImportSummary ? (
+                  <div className="contacts-import-summary">
+                    <div className="contacts-import-stats">
+                      <div className="contacts-import-stat">
+                        <p className="contacts-import-stat-label">Processed</p>
+                        <p className="contacts-import-stat-value">
+                          {contactsImportSummary.processedCount}
+                        </p>
+                      </div>
+                      <div className="contacts-import-stat">
+                        <p className="contacts-import-stat-label">Imported</p>
+                        <p className="contacts-import-stat-value">
+                          {contactsImportSummary.importedCount}
+                        </p>
+                      </div>
+                      <div className="contacts-import-stat">
+                        <p className="contacts-import-stat-label">Skipped</p>
+                        <p className="contacts-import-stat-value">
+                          {contactsImportSummary.skippedCount}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="contacts-import-lists">
+                      <div className="contacts-import-list-block">
+                        <p className="contacts-import-list-title">Imported members</p>
+                        {contactsImportSummary.importedMembers.length > 0 ? (
+                          <ul>
+                            {contactsImportSummary.importedMembers.map((memberName) => (
+                              <li key={`imported-${memberName}`}>{memberName}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="contacts-import-empty">
+                            No new members were imported.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="contacts-import-list-block">
+                        <p className="contacts-import-list-title">Skipped members</p>
+                        {contactsImportSummary.skippedMembers.length > 0 ? (
+                          <ul>
+                            {contactsImportSummary.skippedMembers.map((memberName) => (
+                              <li key={`skipped-${memberName}`}>{memberName}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="contacts-import-empty">
+                            No duplicates were found.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="member-form-actions">
+                  <button
+                    type="button"
+                    className="member-cancel-button"
+                    onClick={() => {
+                      setContactsImportFile(null);
+                      setContactsImportStatus(null);
+                      setContactsImportSummary(null);
+                      if (contactsImportInputRef.current) {
+                        contactsImportInputRef.current.value = "";
+                      }
+                    }}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="submit"
+                    className="member-submit-button"
+                    disabled={isContactsImporting}
+                  >
+                    {isContactsImporting ? "Importing..." : "Import Contacts"}
+                  </button>
+                </div>
+              </form>
             </div>
           ) : null}
 
@@ -2898,6 +3111,17 @@ export default function App() {
             </div>
           ) : null}
         </section>
+
+        {activePage === "congregation" ? (
+          <button
+            type="button"
+            className="mobile-fab-button"
+            onClick={openNewMemberPage}
+            aria-label="Add member"
+          >
+            +
+          </button>
+        ) : null}
       </main>
 
       {visitationModal ? (

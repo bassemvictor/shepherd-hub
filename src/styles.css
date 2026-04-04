@@ -852,6 +852,10 @@ button {
   margin-top: 1.5rem;
 }
 
+.contacts-import-page {
+  margin-top: 1.5rem;
+}
+
 .user-access-page {
   margin-top: 1.5rem;
 }
@@ -862,6 +866,146 @@ button {
   background: var(--dark-card-bg);
   border: 1px solid rgba(233, 201, 112, 0.2);
   color: var(--dark-card-text);
+}
+
+.contacts-import-card code {
+  font-family: inherit;
+  font-weight: 700;
+}
+
+.contacts-import-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.contacts-import-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem;
+  border-radius: 16px;
+  border: 1px solid rgba(219, 183, 86, 0.24);
+  background: rgba(255, 255, 255, 0.92);
+  min-height: 3.5rem;
+}
+
+.contacts-import-picker-button {
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f4c430, #e6a30c);
+  color: #16191f;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.72rem 1rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.contacts-import-picker-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--dark-card-text);
+  font-size: 0.95rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contacts-import-picker-name.empty {
+  color: var(--muted-light);
+  font-weight: 500;
+}
+
+[data-theme="dark"] .contacts-import-picker {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .contacts-import-picker-button {
+  background: linear-gradient(135deg, #ffb84d, #ff9900);
+  color: #16191f;
+}
+
+[data-theme="dark"] .contacts-import-picker-name {
+  color: #f8fafc;
+}
+
+.contacts-import-hint,
+.contacts-import-filename,
+.contacts-import-empty,
+.contacts-import-stat-label,
+.contacts-import-list-title {
+  margin: 0;
+}
+
+.contacts-import-hint,
+.contacts-import-filename,
+.contacts-import-empty {
+  color: var(--muted-light);
+  font-size: 0.88rem;
+}
+
+.contacts-import-filename {
+  font-weight: 700;
+}
+
+.contacts-import-summary {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.contacts-import-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.contacts-import-stat,
+.contacts-import-list-block {
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  background: var(--soft-card-bg);
+  border: 1px solid rgba(219, 183, 86, 0.16);
+}
+
+.contacts-import-stat-label,
+.contacts-import-list-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-light);
+}
+
+.contacts-import-stat-value {
+  margin: 0.3rem 0 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--dark-card-text);
+}
+
+.contacts-import-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.contacts-import-list-block ul {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--dark-card-text);
+}
+
+.contacts-import-list-block li + li {
+  margin-top: 0.35rem;
 }
 
 .user-access-header {
@@ -2532,6 +2676,21 @@ button {
     width: 100%;
   }
 
+  .contacts-import-stats,
+  .contacts-import-lists {
+    grid-template-columns: 1fr;
+  }
+
+  .contacts-import-picker {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .contacts-import-picker-button,
+  .contacts-import-picker-name {
+    width: 100%;
+  }
+
   .user-access-top {
     flex-direction: column;
   }
@@ -2746,9 +2905,9 @@ button {
 
   .mobile-fab-button {
     position: fixed;
-    right: 1rem;
-    bottom: 1rem;
-    z-index: 14;
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+    z-index: 24;
     display: grid;
     place-items: center;
     width: 3.5rem;

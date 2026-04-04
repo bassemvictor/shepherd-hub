@@ -38,7 +38,7 @@ The `data` attribute is a JSON string. It stores the member profile plus visitat
   "phone": "6130000000",
   "role": "Member",
   "status": "Active",
-  "address": "121 Hollowbrook Drive",
+  "address": "123 Example Street",
   "notes": "General member notes",
   "createdAt": "2026-03-28T12:00:00.000Z",
   "updatedAt": "2026-03-28T14:30:00.000Z",

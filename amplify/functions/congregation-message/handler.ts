@@ -69,6 +69,11 @@ type UpdateUserGroupsPayload = {
   groups: string[];
 };
 
+type ImportContactsPayload = {
+  fileName?: string;
+  content: string;
+};
+
 type StoredMemberData = {
   history?: Array<{
     timestamp: string;
@@ -109,6 +114,16 @@ type CognitoUserDirectoryItem = {
   groups: string[];
 };
 
+type ParsedVcfContact = {
+  displayName: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address: string;
+  notes: string;
+};
+
 type AwsCommandClient = {
   send: any;
 };
@@ -117,6 +132,172 @@ const prependHistoryEntry = (
   history: StoredMemberData["history"],
   entry: NonNullable<StoredMemberData["history"]>[number],
 ) => [entry, ...(history ?? [])];
+
+const normalizeWhitespace = (value?: string) => value?.replace(/\s+/g, " ").trim() ?? "";
+const normalizeEmail = (value?: string) => normalizeWhitespace(value).toLowerCase();
+const normalizePhone = (value?: string) =>
+  (value ?? "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
+const normalizeName = (
+  firstName?: string,
+  lastName?: string,
+  displayName?: string,
+) =>
+  normalizeWhitespace(
+    [firstName, lastName].filter(Boolean).join(" ") || displayName || "",
+  ).toLowerCase();
+
+const decodeVcfValue = (value: string) =>
+  value
+    .replace(/\\n/gi, "\n")
+    .replace(/\\,/g, ",")
+    .replace(/\\;/g, ";")
+    .replace(/\\\\/g, "\\")
+    .trim();
+
+const parseVcfAddress = (value: string) =>
+  value
+    .split(";")
+    .map((part) => decodeVcfValue(part))
+    .filter(Boolean)
+    .join(", ");
+
+const splitDisplayName = (value: string) => {
+  const cleaned = normalizeWhitespace(value);
+
+  if (!cleaned) {
+    return {
+      firstName: "",
+      lastName: "",
+    };
+  }
+
+  const parts = cleaned.split(" ");
+
+  return {
+    firstName: parts.shift() ?? "",
+    lastName: parts.join(" "),
+  };
+};
+
+const parseVcfCard = (cardContent: string): ParsedVcfContact | null => {
+  let fullName = "";
+  let firstName = "";
+  let lastName = "";
+  let email = "";
+  let phone = "";
+  let address = "";
+  let notes = "";
+
+  for (const rawLine of cardContent.split("\n")) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf(":");
+
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const descriptor = line.slice(0, separatorIndex);
+    const rawValue = line.slice(separatorIndex + 1);
+    const propertyName = descriptor.split(";")[0]?.split(".").pop()?.toUpperCase();
+
+    if (!propertyName) {
+      continue;
+    }
+
+    if (propertyName === "FN" && !fullName) {
+      fullName = decodeVcfValue(rawValue);
+    }
+
+    if (propertyName === "N" && (!firstName || !lastName)) {
+      const parts = rawValue.split(";").map((part) => decodeVcfValue(part));
+      lastName ||= parts[0] ?? "";
+      firstName ||= parts[1] ?? "";
+    }
+
+    if (propertyName === "EMAIL" && !email) {
+      email = decodeVcfValue(rawValue);
+    }
+
+    if (propertyName === "TEL" && !phone) {
+      phone = decodeVcfValue(rawValue);
+    }
+
+    if (propertyName === "ADR" && !address) {
+      address = parseVcfAddress(rawValue);
+    }
+
+    if (propertyName === "NOTE") {
+      notes = notes
+        ? `${notes}\n${decodeVcfValue(rawValue)}`
+        : decodeVcfValue(rawValue);
+    }
+  }
+
+  let resolvedFirstName = normalizeWhitespace(firstName);
+  let resolvedLastName = normalizeWhitespace(lastName);
+  let resolvedDisplayName = normalizeWhitespace(fullName);
+
+  if ((!resolvedFirstName && !resolvedLastName) && resolvedDisplayName) {
+    const splitName = splitDisplayName(resolvedDisplayName);
+    resolvedFirstName = splitName.firstName;
+    resolvedLastName = splitName.lastName;
+  }
+
+  if (!resolvedDisplayName) {
+    resolvedDisplayName = normalizeWhitespace(
+      [resolvedFirstName, resolvedLastName].filter(Boolean).join(" "),
+    );
+  }
+
+  if (!resolvedFirstName && !resolvedLastName) {
+    const fallbackName = normalizeWhitespace(email || phone);
+
+    if (fallbackName) {
+      const splitName = splitDisplayName(fallbackName);
+      resolvedFirstName = splitName.firstName;
+      resolvedLastName = splitName.lastName;
+      resolvedDisplayName ||= fallbackName;
+    }
+  }
+
+  if (!resolvedFirstName && !resolvedLastName && !resolvedDisplayName) {
+    return null;
+  }
+
+  return {
+    displayName:
+      resolvedDisplayName ||
+      normalizeWhitespace([resolvedFirstName, resolvedLastName].join(" ")) ||
+      "Imported contact",
+    firstName: resolvedFirstName || resolvedDisplayName || "Imported",
+    lastName: resolvedLastName,
+    email: normalizeWhitespace(email),
+    phone: normalizeWhitespace(phone),
+    address: normalizeWhitespace(address),
+    notes: normalizeWhitespace(notes),
+  };
+};
+
+const parseVcfContacts = (content: string) => {
+  const unfoldedContent = content.replace(/\r\n/g, "\n").replace(/\n[ \t]/g, "");
+  const contacts: ParsedVcfContact[] = [];
+
+  for (const match of unfoldedContent.matchAll(/BEGIN:VCARD\s*([\s\S]*?)END:VCARD/gi)) {
+    const cardContent = match[1] ?? "";
+    const parsedContact = parseVcfCard(cardContent);
+
+    if (parsedContact) {
+      contacts.push(parsedContact);
+    }
+  }
+
+  return contacts;
+};
 
 const defaultDynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({})) as AwsCommandClient;
 const defaultCognitoClient = new CognitoIdentityProviderClient({}) as AwsCommandClient;
@@ -232,6 +413,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     );
   }
 
+  if (requestPath.endsWith("/contacts/import") && !isUserManager(requestGroups)) {
+    return forbiddenResponse(time, "You do not have access to import contacts.");
+  }
+
   if (
     (requestPath.endsWith("/admin/users") ||
       requestPath.endsWith("/admin/users/groups")) &&
@@ -248,6 +433,152 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   }
 
   if (event.requestContext.http.method === "POST") {
+    if (requestPath.endsWith("/contacts/import")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<ImportContactsPayload>;
+
+      if (!payload.content || typeof payload.content !== "string") {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A VCF file content payload is required.",
+            time,
+          }),
+        };
+      }
+
+      const parsedContacts = parseVcfContacts(payload.content);
+      const existingMembersResponse = await dynamoClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk",
+          ExpressionAttributeValues: {
+            ":pk": "CONGREGATION",
+          },
+        }),
+      );
+      const existingMembers = (existingMembersResponse.Items ?? []) as TableRow[];
+      const emailKeys = new Set<string>();
+      const phoneKeys = new Set<string>();
+      const nameKeys = new Set<string>();
+
+      for (const item of existingMembers) {
+        let memberData: StoredMemberData = {};
+
+        try {
+          memberData = JSON.parse(item.data) as StoredMemberData;
+        } catch {
+          memberData = {};
+        }
+
+        const emailKey = normalizeEmail(memberData.email);
+        const phoneKey = normalizePhone(memberData.phone);
+        const nameKey = normalizeName(
+          memberData.firstName,
+          memberData.lastName,
+        );
+
+        if (emailKey) {
+          emailKeys.add(emailKey);
+        }
+
+        if (phoneKey) {
+          phoneKeys.add(phoneKey);
+        }
+
+        if (nameKey) {
+          nameKeys.add(nameKey);
+        }
+      }
+
+      const importedMembers: string[] = [];
+      const skippedMembers: string[] = [];
+
+      for (const contact of parsedContacts) {
+        const emailKey = normalizeEmail(contact.email);
+        const phoneKey = normalizePhone(contact.phone);
+        const nameKey = normalizeName(
+          contact.firstName,
+          contact.lastName,
+          contact.displayName,
+        );
+        const contactLabel =
+          contact.displayName ||
+          normalizeWhitespace([contact.firstName, contact.lastName].join(" ")) ||
+          contact.email ||
+          contact.phone ||
+          "Imported contact";
+        const alreadyExists =
+          (emailKey && emailKeys.has(emailKey)) ||
+          (phoneKey && phoneKeys.has(phoneKey)) ||
+          (nameKey && nameKeys.has(nameKey));
+
+        if (alreadyExists) {
+          skippedMembers.push(contactLabel);
+          continue;
+        }
+
+        await dynamoClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              pk: "CONGREGATION",
+              sk: `MEMBER#${crypto.randomUUID()}`,
+              data: JSON.stringify({
+                history: prependHistoryEntry(undefined, {
+                  timestamp: time,
+                  action: "member_created",
+                  message: "Member imported from contacts file.",
+                }),
+                firstName: contact.firstName,
+                lastName: contact.lastName,
+                email: contact.email,
+                phone: contact.phone,
+                role: "",
+                status: "",
+                address: contact.address,
+                notes: contact.notes,
+                createdAt: time,
+              }),
+            },
+          }),
+        );
+
+        importedMembers.push(contactLabel);
+
+        if (emailKey) {
+          emailKeys.add(emailKey);
+        }
+
+        if (phoneKey) {
+          phoneKeys.add(phoneKey);
+        }
+
+        if (nameKey) {
+          nameKeys.add(nameKey);
+        }
+      }
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message:
+            importedMembers.length > 0
+              ? `Imported ${importedMembers.length} contact${
+                  importedMembers.length === 1 ? "" : "s"
+                }.`
+              : "No new contacts were imported.",
+          time,
+          processedCount: parsedContacts.length,
+          importedCount: importedMembers.length,
+          skippedCount: skippedMembers.length,
+          importedMembers,
+          skippedMembers,
+        }),
+      };
+    }
+
     if (requestPath.endsWith("/admin/users/groups")) {
       const payload = JSON.parse(event.body ?? "{}") as Partial<UpdateUserGroupsPayload>;
 

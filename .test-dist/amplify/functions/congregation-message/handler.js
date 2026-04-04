@@ -2,6 +2,128 @@ import { AdminAddUserToGroupCommand, AdminListGroupsForUserCommand, AdminRemoveU
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DeleteCommand, GetCommand, DynamoDBDocumentClient, PutCommand, QueryCommand, } from "@aws-sdk/lib-dynamodb";
 const prependHistoryEntry = (history, entry) => [entry, ...(history ?? [])];
+const normalizeWhitespace = (value) => value?.replace(/\s+/g, " ").trim() ?? "";
+const normalizeEmail = (value) => normalizeWhitespace(value).toLowerCase();
+const normalizePhone = (value) => (value ?? "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
+const normalizeName = (firstName, lastName, displayName) => normalizeWhitespace([firstName, lastName].filter(Boolean).join(" ") || displayName || "").toLowerCase();
+const decodeVcfValue = (value) => value
+    .replace(/\\n/gi, "\n")
+    .replace(/\\,/g, ",")
+    .replace(/\\;/g, ";")
+    .replace(/\\\\/g, "\\")
+    .trim();
+const parseVcfAddress = (value) => value
+    .split(";")
+    .map((part) => decodeVcfValue(part))
+    .filter(Boolean)
+    .join(", ");
+const splitDisplayName = (value) => {
+    const cleaned = normalizeWhitespace(value);
+    if (!cleaned) {
+        return {
+            firstName: "",
+            lastName: "",
+        };
+    }
+    const parts = cleaned.split(" ");
+    return {
+        firstName: parts.shift() ?? "",
+        lastName: parts.join(" "),
+    };
+};
+const parseVcfCard = (cardContent) => {
+    let fullName = "";
+    let firstName = "";
+    let lastName = "";
+    let email = "";
+    let phone = "";
+    let address = "";
+    let notes = "";
+    for (const rawLine of cardContent.split("\n")) {
+        const line = rawLine.trim();
+        if (!line) {
+            continue;
+        }
+        const separatorIndex = line.indexOf(":");
+        if (separatorIndex === -1) {
+            continue;
+        }
+        const descriptor = line.slice(0, separatorIndex);
+        const rawValue = line.slice(separatorIndex + 1);
+        const propertyName = descriptor.split(";")[0]?.split(".").pop()?.toUpperCase();
+        if (!propertyName) {
+            continue;
+        }
+        if (propertyName === "FN" && !fullName) {
+            fullName = decodeVcfValue(rawValue);
+        }
+        if (propertyName === "N" && (!firstName || !lastName)) {
+            const parts = rawValue.split(";").map((part) => decodeVcfValue(part));
+            lastName ||= parts[0] ?? "";
+            firstName ||= parts[1] ?? "";
+        }
+        if (propertyName === "EMAIL" && !email) {
+            email = decodeVcfValue(rawValue);
+        }
+        if (propertyName === "TEL" && !phone) {
+            phone = decodeVcfValue(rawValue);
+        }
+        if (propertyName === "ADR" && !address) {
+            address = parseVcfAddress(rawValue);
+        }
+        if (propertyName === "NOTE") {
+            notes = notes
+                ? `${notes}\n${decodeVcfValue(rawValue)}`
+                : decodeVcfValue(rawValue);
+        }
+    }
+    let resolvedFirstName = normalizeWhitespace(firstName);
+    let resolvedLastName = normalizeWhitespace(lastName);
+    let resolvedDisplayName = normalizeWhitespace(fullName);
+    if ((!resolvedFirstName && !resolvedLastName) && resolvedDisplayName) {
+        const splitName = splitDisplayName(resolvedDisplayName);
+        resolvedFirstName = splitName.firstName;
+        resolvedLastName = splitName.lastName;
+    }
+    if (!resolvedDisplayName) {
+        resolvedDisplayName = normalizeWhitespace([resolvedFirstName, resolvedLastName].filter(Boolean).join(" "));
+    }
+    if (!resolvedFirstName && !resolvedLastName) {
+        const fallbackName = normalizeWhitespace(email || phone);
+        if (fallbackName) {
+            const splitName = splitDisplayName(fallbackName);
+            resolvedFirstName = splitName.firstName;
+            resolvedLastName = splitName.lastName;
+            resolvedDisplayName ||= fallbackName;
+        }
+    }
+    if (!resolvedFirstName && !resolvedLastName && !resolvedDisplayName) {
+        return null;
+    }
+    return {
+        displayName: resolvedDisplayName ||
+            normalizeWhitespace([resolvedFirstName, resolvedLastName].join(" ")) ||
+            "Imported contact",
+        firstName: resolvedFirstName || resolvedDisplayName || "Imported",
+        lastName: resolvedLastName,
+        email: normalizeWhitespace(email),
+        phone: normalizeWhitespace(phone),
+        address: normalizeWhitespace(address),
+        notes: normalizeWhitespace(notes),
+    };
+};
+const parseVcfContacts = (content) => {
+    const unfoldedContent = content.replace(/\r\n/g, "\n").replace(/\n[ \t]/g, "");
+    const contacts = [];
+    for (const match of unfoldedContent.matchAll(/BEGIN:VCARD\s*([\s\S]*?)END:VCARD/gi)) {
+        const cardContent = match[1] ?? "";
+        const parsedContact = parseVcfCard(cardContent);
+        if (parsedContact) {
+            contacts.push(parsedContact);
+        }
+    }
+    return contacts;
+};
 const defaultDynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const defaultCognitoClient = new CognitoIdentityProviderClient({});
 const allowedUserGroups = ["admin", "super_user", "regular_user"];
@@ -87,6 +209,9 @@ export const handler = async (event) => {
         !isUserManager(requestGroups)) {
         return forbiddenResponse(time, "You do not have access to add or edit announcements.");
     }
+    if (requestPath.endsWith("/contacts/import") && !isUserManager(requestGroups)) {
+        return forbiddenResponse(time, "You do not have access to import contacts.");
+    }
     if ((requestPath.endsWith("/admin/users") ||
         requestPath.endsWith("/admin/users/groups")) &&
         !userPoolId) {
@@ -100,6 +225,119 @@ export const handler = async (event) => {
         };
     }
     if (event.requestContext.http.method === "POST") {
+        if (requestPath.endsWith("/contacts/import")) {
+            const payload = JSON.parse(event.body ?? "{}");
+            if (!payload.content || typeof payload.content !== "string") {
+                return {
+                    statusCode: 400,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: "A VCF file content payload is required.",
+                        time,
+                    }),
+                };
+            }
+            const parsedContacts = parseVcfContacts(payload.content);
+            const existingMembersResponse = await dynamoClient.send(new QueryCommand({
+                TableName: tableName,
+                KeyConditionExpression: "pk = :pk",
+                ExpressionAttributeValues: {
+                    ":pk": "CONGREGATION",
+                },
+            }));
+            const existingMembers = (existingMembersResponse.Items ?? []);
+            const emailKeys = new Set();
+            const phoneKeys = new Set();
+            const nameKeys = new Set();
+            for (const item of existingMembers) {
+                let memberData = {};
+                try {
+                    memberData = JSON.parse(item.data);
+                }
+                catch {
+                    memberData = {};
+                }
+                const emailKey = normalizeEmail(memberData.email);
+                const phoneKey = normalizePhone(memberData.phone);
+                const nameKey = normalizeName(memberData.firstName, memberData.lastName);
+                if (emailKey) {
+                    emailKeys.add(emailKey);
+                }
+                if (phoneKey) {
+                    phoneKeys.add(phoneKey);
+                }
+                if (nameKey) {
+                    nameKeys.add(nameKey);
+                }
+            }
+            const importedMembers = [];
+            const skippedMembers = [];
+            for (const contact of parsedContacts) {
+                const emailKey = normalizeEmail(contact.email);
+                const phoneKey = normalizePhone(contact.phone);
+                const nameKey = normalizeName(contact.firstName, contact.lastName, contact.displayName);
+                const contactLabel = contact.displayName ||
+                    normalizeWhitespace([contact.firstName, contact.lastName].join(" ")) ||
+                    contact.email ||
+                    contact.phone ||
+                    "Imported contact";
+                const alreadyExists = (emailKey && emailKeys.has(emailKey)) ||
+                    (phoneKey && phoneKeys.has(phoneKey)) ||
+                    (nameKey && nameKeys.has(nameKey));
+                if (alreadyExists) {
+                    skippedMembers.push(contactLabel);
+                    continue;
+                }
+                await dynamoClient.send(new PutCommand({
+                    TableName: tableName,
+                    Item: {
+                        pk: "CONGREGATION",
+                        sk: `MEMBER#${crypto.randomUUID()}`,
+                        data: JSON.stringify({
+                            history: prependHistoryEntry(undefined, {
+                                timestamp: time,
+                                action: "member_created",
+                                message: "Member imported from contacts file.",
+                            }),
+                            firstName: contact.firstName,
+                            lastName: contact.lastName,
+                            email: contact.email,
+                            phone: contact.phone,
+                            role: "",
+                            status: "",
+                            address: contact.address,
+                            notes: contact.notes,
+                            createdAt: time,
+                        }),
+                    },
+                }));
+                importedMembers.push(contactLabel);
+                if (emailKey) {
+                    emailKeys.add(emailKey);
+                }
+                if (phoneKey) {
+                    phoneKeys.add(phoneKey);
+                }
+                if (nameKey) {
+                    nameKeys.add(nameKey);
+                }
+            }
+            return {
+                statusCode: 200,
+                headers: responseHeaders,
+                body: JSON.stringify({
+                    message: importedMembers.length > 0
+                        ? `Imported ${importedMembers.length} contact${importedMembers.length === 1 ? "" : "s"}.`
+                        : "No new contacts were imported.",
+                    time,
+                    processedCount: parsedContacts.length,
+                    importedCount: importedMembers.length,
+                    skippedCount: skippedMembers.length,
+                    importedMembers,
+                    skippedMembers,
+                }),
+            };
+        }
         if (requestPath.endsWith("/admin/users/groups")) {
             const payload = JSON.parse(event.body ?? "{}");
             if (!payload.username || !Array.isArray(payload.groups)) {

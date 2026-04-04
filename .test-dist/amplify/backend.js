@@ -91,6 +91,11 @@ congregationApi.addRoutes({
     integration: new HttpLambdaIntegration("AnnouncementsWeekRemoveIntegration", backend.congregationMessage.resources.lambda),
 });
 congregationApi.addRoutes({
+    path: "/contacts/import",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("ContactsImportIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
     path: "/admin/users",
     methods: [HttpMethod.GET],
     integration: new HttpLambdaIntegration("AdminUsersListIntegration", backend.congregationMessage.resources.lambda),
