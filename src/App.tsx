@@ -166,7 +166,7 @@ type StoredMemberData = Partial<MemberFormState> & {
 };
 
 type VisitationModalState = {
-  action: "schedule" | "note" | "complete";
+  action: "schedule" | "note" | "complete" | "delete";
   pk: string;
   sk: string;
   memberName: string;
@@ -362,13 +362,35 @@ const formatAnnouncementWeekLabel = (value: string | undefined) => {
   mondayOfWeekOne.setUTCDate(januaryFourth.getUTCDate() - januaryFourthDay + 1);
   const mondayOfTargetWeek = new Date(mondayOfWeekOne);
   mondayOfTargetWeek.setUTCDate(mondayOfWeekOne.getUTCDate() + (week - 1) * 7);
+  const sundayOfTargetWeek = new Date(mondayOfTargetWeek);
+  sundayOfTargetWeek.setUTCDate(mondayOfTargetWeek.getUTCDate() + 6);
 
-  return `Week of ${mondayOfTargetWeek.toLocaleDateString(undefined, {
+  const startMonth = mondayOfTargetWeek.toLocaleDateString(undefined, {
     month: "short",
+    timeZone: "UTC",
+  });
+  const startDay = mondayOfTargetWeek.toLocaleDateString(undefined, {
     day: "numeric",
+    timeZone: "UTC",
+  });
+  const endMonth = sundayOfTargetWeek.toLocaleDateString(undefined, {
+    month: "short",
+    timeZone: "UTC",
+  });
+  const endDay = sundayOfTargetWeek.toLocaleDateString(undefined, {
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  const endYear = sundayOfTargetWeek.toLocaleDateString(undefined, {
     year: "numeric",
     timeZone: "UTC",
-  })}`;
+  });
+
+  if (startMonth === endMonth) {
+    return `${startMonth} ${startDay} - ${endDay}, ${endYear}`;
+  }
+
+  return `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${endYear}`;
 };
 
 const getCurrentIsoWeekLabel = () => {
@@ -473,7 +495,7 @@ export default function App() {
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [betaMemberTab, setBetaMemberTab] = useState<
     "details" | "visitations" | "activity"
-  >("visitations");
+  >("details");
   const [isBetaMemberMenuOpen, setIsBetaMemberMenuOpen] = useState(false);
   const [memberSubmitState, setMemberSubmitState] = useState<string | null>(null);
   const [isMemberSubmitting, setIsMemberSubmitting] = useState(false);
@@ -483,6 +505,9 @@ export default function App() {
   const [visitationNote, setVisitationNote] = useState("");
   const [visitationAssignedPriestSk, setVisitationAssignedPriestSk] = useState("");
   const [visitationAssignedPriestName, setVisitationAssignedPriestName] = useState("");
+  const [visitationReportPriestFilter, setVisitationReportPriestFilter] = useState("all");
+  const [showCompletedVisitationsInReport, setShowCompletedVisitationsInReport] =
+    useState(true);
   const [visitationSubmitState, setVisitationSubmitState] = useState<string | null>(
     null,
   );
@@ -624,6 +649,7 @@ export default function App() {
           priestName: string;
           priestSk?: string;
           visits: Array<{
+            memberPk: string;
             memberName: string;
             memberSk: string;
             scheduledAt: string;
@@ -652,6 +678,7 @@ export default function App() {
         }
 
         groups[groupKey].visits.push({
+          memberPk: item.pk,
           memberName,
           memberSk: item.sk,
           scheduledAt: visit.scheduledAt,
@@ -677,6 +704,20 @@ export default function App() {
         sensitivity: "base",
       }),
     );
+  const filteredVisitationReportGroups = (
+    visitationReportPriestFilter === "all"
+      ? visitationReportGroups
+      : visitationReportGroups.filter(
+          (group) => group.priestSk === visitationReportPriestFilter,
+        )
+  )
+    .map((group) => ({
+      ...group,
+      visits: showCompletedVisitationsInReport
+        ? group.visits
+        : group.visits.filter((visit) => !visit.completedAt),
+    }))
+    .filter((group) => group.visits.length > 0);
   const announcementWeeks =
     announcements?.items
       .slice()
@@ -1116,7 +1157,7 @@ export default function App() {
   }, [selectedMember?.pk, selectedMember?.sk]);
 
   useEffect(() => {
-    setBetaMemberTab("visitations");
+    setBetaMemberTab("details");
     setIsBetaMemberMenuOpen(false);
   }, [selectedMember?.pk, selectedMember?.sk]);
 
@@ -2088,6 +2129,24 @@ export default function App() {
                               >
                                 <span>{visit.completedAt ? "Completed" : "Mark Done"}</span>
                               </button>
+
+                              <button
+                                type="button"
+                                className="visitation-action-button visitation-action-delete"
+                                onClick={() =>
+                                  openVisitationModal(
+                                    "delete",
+                                    item.pk,
+                                    item.sk,
+                                    fullName || "Unnamed member",
+                                    {
+                                      visitationId: visit.id,
+                                    },
+                                  )
+                                }
+                              >
+                                <span>Delete</span>
+                              </button>
                             </div>
                           </div>
                         ))}
@@ -2103,8 +2162,36 @@ export default function App() {
 
           {activePage === "visitation-report" ? (
             <div className="visitation-report-board">
-              {visitationReportGroups.length > 0 ? (
-                visitationReportGroups.map((group) => (
+              <div className="visitation-report-toolbar">
+                <label className="visitation-report-filter">
+                  <span>Priest</span>
+                  <select
+                    value={visitationReportPriestFilter}
+                    onChange={(event) => setVisitationReportPriestFilter(event.target.value)}
+                  >
+                    <option value="all">All priests</option>
+                    {priestMembers.map((priest) => (
+                      <option key={priest.sk} value={priest.sk}>
+                        {priest.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="visitation-report-toggle">
+                  <input
+                    type="checkbox"
+                    checked={showCompletedVisitationsInReport}
+                    onChange={(event) =>
+                      setShowCompletedVisitationsInReport(event.target.checked)
+                    }
+                  />
+                  <span>Show completed</span>
+                </label>
+              </div>
+
+              {filteredVisitationReportGroups.length > 0 ? (
+                filteredVisitationReportGroups.map((group) => (
                   <section
                     className="visitation-report-group"
                     key={group.priestSk || group.priestName}
@@ -2122,7 +2209,9 @@ export default function App() {
                     <div className="visitation-report-list">
                       {group.visits.map((visit) => (
                         <article
-                          className="visitation-report-item"
+                          className={`visitation-report-item${
+                            visit.completedAt ? " completed" : ""
+                          }`}
                           key={`${group.priestSk || group.priestName}-${visit.memberSk}-${visit.scheduledAt}`}
                         >
                           <div className="visitation-report-item-top">
@@ -2147,6 +2236,22 @@ export default function App() {
                               Note: {visit.note || "No note yet"}
                             </p>
                           </div>
+
+                          <div className="visitation-report-actions">
+                            <button
+                              type="button"
+                              className="visitation-action-button visitation-action-schedule"
+                              onClick={() =>
+                                openMemberVisitationPage(
+                                  visit.memberPk,
+                                  visit.memberSk,
+                                  visit.memberName,
+                                )
+                              }
+                            >
+                              <span>Details</span>
+                            </button>
+                          </div>
                         </article>
                       ))}
                     </div>
@@ -2155,7 +2260,13 @@ export default function App() {
               ) : (
                 <div className="visitation-report-empty">
                   <p className="member-detail-value">
-                    No scheduled visitations are currently assigned to priests.
+                    {visitationReportPriestFilter === "all"
+                      ? showCompletedVisitationsInReport
+                        ? "No scheduled visitations are currently assigned to priests."
+                        : "No pending scheduled visitations are currently assigned to priests."
+                      : showCompletedVisitationsInReport
+                        ? "No scheduled visitations were found for the selected priest."
+                        : "No pending scheduled visitations were found for the selected priest."}
                   </p>
                 </div>
               )}
@@ -3321,6 +3432,24 @@ export default function App() {
                                   >
                                     <span>{visit.completedAt ? "Completed" : "Mark Done"}</span>
                                   </button>
+
+                                  <button
+                                    type="button"
+                                    className="visitation-action-button visitation-action-delete"
+                                    onClick={() =>
+                                      openVisitationModal(
+                                        "delete",
+                                        selectedMemberItem.pk,
+                                        selectedMemberItem.sk,
+                                        selectedMemberName,
+                                        {
+                                          visitationId: visit.id,
+                                        },
+                                      )
+                                    }
+                                  >
+                                    <span>Delete</span>
+                                  </button>
                                 </div>
                               </div>
                             ))}
@@ -3421,7 +3550,9 @@ export default function App() {
       {visitationModal ? (
         <div className="modal-overlay" role="presentation" onClick={closeVisitationModal}>
           <div
-            className="modal-card"
+            className={`modal-card${
+              visitationModal.action === "delete" ? " modal-card-danger" : ""
+            }`}
             role="dialog"
             aria-modal="true"
             aria-label="Visitation action"
@@ -3435,7 +3566,9 @@ export default function App() {
                   : "Schedule visitation"
                 : visitationModal.action === "note"
                   ? "Add visitation note"
-                  : "Mark visitation done"}
+                  : visitationModal.action === "complete"
+                    ? "Mark visitation done"
+                    : "Delete visitation"}
             </h2>
 
             <form className="modal-form" onSubmit={handleVisitationModalSubmit}>
@@ -3505,6 +3638,13 @@ export default function App() {
                 </p>
               ) : null}
 
+              {visitationModal.action === "delete" ? (
+                <p className="modal-copy">
+                  Remove this specific visitation for {visitationModal.memberName}? This
+                  action cannot be undone.
+                </p>
+              ) : null}
+
               <div className="modal-actions">
                 {visitationSubmitState ? (
                   <p className="modal-submit-message">{visitationSubmitState}</p>
@@ -3518,14 +3658,20 @@ export default function App() {
                 </button>
                 <button
                   type="submit"
-                  className="member-submit-button"
+                  className={
+                    visitationModal.action === "delete"
+                      ? "modal-danger-button"
+                      : "member-submit-button"
+                  }
                   disabled={isVisitationSubmitting}
                 >
                   {isVisitationSubmitting
                     ? "Saving..."
                     : visitationModal.action === "complete"
                       ? "Confirm"
-                      : "Save"}
+                      : visitationModal.action === "delete"
+                        ? "Delete"
+                        : "Save"}
                 </button>
               </div>
             </form>
@@ -3536,7 +3682,7 @@ export default function App() {
       {deleteModal ? (
         <div className="modal-overlay" role="presentation" onClick={closeDeleteModal}>
           <div
-            className="modal-card"
+            className="modal-card modal-card-danger"
             role="dialog"
             aria-modal="true"
             aria-label="Delete member confirmation"
@@ -3579,7 +3725,7 @@ export default function App() {
           onClick={closeAnnouncementDeleteModal}
         >
           <div
-            className="modal-card"
+            className="modal-card modal-card-danger"
             role="dialog"
             aria-modal="true"
             aria-label="Delete announcement week confirmation"
@@ -3622,7 +3768,7 @@ export default function App() {
           onClick={closeAnnouncementItemDeleteModal}
         >
           <div
-            className="modal-card"
+            className="modal-card modal-card-danger"
             role="dialog"
             aria-modal="true"
             aria-label="Delete announcement item confirmation"

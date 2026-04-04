@@ -728,6 +728,58 @@ test("marks a visitation as complete", async () => {
   assert.equal(body.message, "Visitation updated.");
 });
 
+test("deletes a visitation", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "CONGREGATION",
+          sk: "MEMBER#1",
+          data: JSON.stringify({
+            visitations: [
+              { id: "visit-1", scheduledAt: "2026-04-01T10:00:00.000Z" },
+              { id: "visit-2", scheduledAt: "2026-04-02T10:00:00.000Z" },
+            ],
+          }),
+        },
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/congregation/member/visitation",
+      method: "POST",
+      groups: ["regular_user"],
+      body: {
+        pk: "CONGREGATION",
+        sk: "MEMBER#1",
+        action: "delete",
+        visitationId: "visit-1",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+  const putCommand = dynamo.commands.find(
+    (command) => command.constructor.name === "PutCommand",
+  );
+  const savedItem = putCommand?.input?.Item as { data: string } | undefined;
+  const savedData = savedItem ? JSON.parse(savedItem.data) : null;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Visitation updated.");
+  assert.equal(savedData?.visitations?.length, 1);
+  assert.equal(savedData?.visitations?.[0]?.id, "visit-2");
+});
+
 test("lists announcement weeks", async () => {
   const dynamo = createMockClient((command) => {
     assert.equal(command.constructor.name, "QueryCommand");

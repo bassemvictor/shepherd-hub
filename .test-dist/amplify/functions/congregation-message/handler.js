@@ -510,12 +510,15 @@ export const handler = async (event) => {
                     }),
                 };
             }
-            if ((payload.action === "note" || payload.action === "complete") && !payload.visitationId) {
+            if ((payload.action === "note" ||
+                payload.action === "complete" ||
+                payload.action === "delete") &&
+                !payload.visitationId) {
                 return {
                     statusCode: 400,
                     headers: responseHeaders,
                     body: JSON.stringify({
-                        message: "visitationId is required for note and complete actions.",
+                        message: "visitationId is required for note, complete, and delete actions.",
                         time,
                     }),
                 };
@@ -643,6 +646,21 @@ export const handler = async (event) => {
                     }
                     : visitation);
                 historyMessage = "Visitation marked as done.";
+            }
+            if (payload.action === "delete") {
+                const targetVisit = existingVisitations.find((visitation) => visitation.id === payload.visitationId);
+                if (!targetVisit) {
+                    return {
+                        statusCode: 404,
+                        headers: responseHeaders,
+                        body: JSON.stringify({
+                            message: "Visitation not found.",
+                            time,
+                        }),
+                    };
+                }
+                nextVisitations = existingVisitations.filter((visitation) => visitation.id !== payload.visitationId);
+                historyMessage = "Visitation deleted.";
             }
             await dynamoClient.send(new PutCommand({
                 TableName: tableName,
