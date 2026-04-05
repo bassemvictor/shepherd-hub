@@ -13,6 +13,7 @@ type PageKey =
   | "congregation"
   | "visitation"
   | "visitation-report"
+  | "visitation-calendar"
   | "new-member"
   | "member-details"
   | "member-details-beta"
@@ -40,6 +41,10 @@ const pageContent: Record<
   },
   "visitation-report": {
     eyebrow: "Visitation Report",
+    description: "",
+  },
+  "visitation-calendar": {
+    eyebrow: "Visitation Calendar",
     description: "",
   },
   "new-member": {
@@ -103,6 +108,7 @@ const navSections: Array<{
       { key: "congregation", label: "Congregation" },
       { key: "visitation", label: "Visitation" },
       { key: "visitation-report", label: "Visitation Report" },
+      { key: "visitation-calendar", label: "Visitation Calendar" },
       { key: "announcements", label: "Announcements" },
     ],
   },
@@ -429,6 +435,27 @@ const getCurrentIsoWeekLabel = () => {
   return `${year}-W${String(week).padStart(2, "0")}`;
 };
 
+const startOfMonth = (value = new Date()) =>
+  new Date(value.getFullYear(), value.getMonth(), 1);
+
+const isSameDay = (left: Date, right: Date) =>
+  left.getFullYear() === right.getFullYear() &&
+  left.getMonth() === right.getMonth() &&
+  left.getDate() === right.getDate();
+
+const buildCalendarDays = (monthDate: Date) => {
+  const firstDayOfMonth = startOfMonth(monthDate);
+  const startWeekday = firstDayOfMonth.getDay();
+  const gridStart = new Date(firstDayOfMonth);
+  gridStart.setDate(firstDayOfMonth.getDate() - startWeekday);
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(gridStart);
+    day.setDate(gridStart.getDate() + index);
+    return day;
+  });
+};
+
 const extractGroupsFromClaim = (value: unknown) => {
   if (Array.isArray(value)) {
     return value.map(String);
@@ -531,6 +558,10 @@ export default function App() {
   const [visitationAssignedPriestSk, setVisitationAssignedPriestSk] = useState("");
   const [visitationAssignedPriestName, setVisitationAssignedPriestName] = useState("");
   const [visitationReportPriestFilter, setVisitationReportPriestFilter] = useState("all");
+  const [visitationCalendarPriestFilter, setVisitationCalendarPriestFilter] = useState("all");
+  const [visitationCalendarMonth, setVisitationCalendarMonth] = useState(() =>
+    startOfMonth(new Date()),
+  );
   const [showCompletedVisitationsInReport, setShowCompletedVisitationsInReport] =
     useState(true);
   const [visitationSubmitState, setVisitationSubmitState] = useState<string | null>(
@@ -743,6 +774,43 @@ export default function App() {
         : group.visits.filter((visit) => !visit.completedAt),
     }))
     .filter((group) => group.visits.length > 0);
+  const visitationCalendarEvents = (backendMessage?.items ?? [])
+    .flatMap((item) => {
+      const memberData = parseMemberData(item.data);
+      const memberName = getMemberName(memberData?.firstName, memberData?.lastName, item.sk);
+
+      return (memberData?.visitations ?? [])
+        .filter((visit) => visit.scheduledAt)
+        .map((visit) => ({
+          id: visit.id,
+          memberPk: item.pk,
+          memberSk: item.sk,
+          memberName,
+          scheduledAt: visit.scheduledAt!,
+          scheduledDate: new Date(visit.scheduledAt!),
+          assignedPriestSk: visit.assignedPriestSk,
+          assignedPriestName: visit.assignedPriestName || "Unassigned",
+          completedAt: visit.completedAt,
+          note: visit.note,
+        }));
+    })
+    .sort(
+      (left, right) => left.scheduledDate.getTime() - right.scheduledDate.getTime(),
+    );
+  const filteredVisitationCalendarEvents =
+    visitationCalendarPriestFilter === "all"
+      ? visitationCalendarEvents
+      : visitationCalendarEvents.filter(
+          (event) => event.assignedPriestSk === visitationCalendarPriestFilter,
+        );
+  const visitationCalendarDays = buildCalendarDays(visitationCalendarMonth);
+  const visitationCalendarMonthLabel = visitationCalendarMonth.toLocaleDateString(
+    undefined,
+    {
+      month: "long",
+      year: "numeric",
+    },
+  );
   const announcementWeeks =
     announcements?.items
       .slice()
@@ -2313,6 +2381,129 @@ export default function App() {
                   </p>
                 </div>
               )}
+            </div>
+          ) : null}
+
+          {activePage === "visitation-calendar" ? (
+            <div className="visitation-calendar-board">
+              <div className="visitation-calendar-toolbar">
+                <div className="visitation-calendar-month-nav">
+                  <button
+                    type="button"
+                    className="member-cancel-button visitation-calendar-nav-button"
+                    onClick={() =>
+                      setVisitationCalendarMonth(
+                        (current) => new Date(current.getFullYear(), current.getMonth() - 1, 1),
+                      )
+                    }
+                    aria-label="Previous month"
+                  >
+                    ←
+                  </button>
+                  <p className="visitation-calendar-month-label">
+                    {visitationCalendarMonthLabel}
+                  </p>
+                  <button
+                    type="button"
+                    className="member-cancel-button visitation-calendar-nav-button"
+                    onClick={() =>
+                      setVisitationCalendarMonth(
+                        (current) => new Date(current.getFullYear(), current.getMonth() + 1, 1),
+                      )
+                    }
+                    aria-label="Next month"
+                  >
+                    →
+                  </button>
+                </div>
+
+                <label className="visitation-report-filter">
+                  <span>Priest</span>
+                  <select
+                    value={visitationCalendarPriestFilter}
+                    onChange={(event) =>
+                      setVisitationCalendarPriestFilter(event.target.value)
+                    }
+                  >
+                    <option value="all">All priests</option>
+                    {priestMembers.map((priest) => (
+                      <option key={priest.sk} value={priest.sk}>
+                        {priest.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="visitation-calendar-weekdays" aria-hidden="true">
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((dayLabel) => (
+                  <p key={dayLabel}>{dayLabel}</p>
+                ))}
+              </div>
+
+              <div className="visitation-calendar-grid">
+                {visitationCalendarDays.map((day) => {
+                  const dayEvents = filteredVisitationCalendarEvents.filter((event) =>
+                    isSameDay(event.scheduledDate, day),
+                  );
+                  const isOutsideMonth = day.getMonth() !== visitationCalendarMonth.getMonth();
+                  const isToday = isSameDay(day, new Date());
+
+                  return (
+                    <article
+                      key={day.toISOString()}
+                      className={`visitation-calendar-day${
+                        isOutsideMonth ? " outside-month" : ""
+                      }${isToday ? " today" : ""}`}
+                    >
+                      <div className="visitation-calendar-day-header">
+                        <p className="visitation-calendar-day-number">{day.getDate()}</p>
+                        {dayEvents.length > 0 ? (
+                          <p className="visitation-calendar-day-count">
+                            {dayEvents.length}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="visitation-calendar-events">
+                        {dayEvents.length > 0 ? (
+                          dayEvents.map((event) => (
+                            <button
+                              type="button"
+                              className={`visitation-calendar-event${
+                                event.completedAt ? " completed" : ""
+                              }`}
+                              key={event.id}
+                              onClick={() =>
+                                openMemberVisitationPage(
+                                  event.memberPk,
+                                  event.memberSk,
+                                  event.memberName,
+                                )
+                              }
+                            >
+                              <span className="visitation-calendar-event-time">
+                                {event.scheduledDate.toLocaleTimeString(undefined, {
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                              <span className="visitation-calendar-event-name">
+                                {event.memberName}
+                              </span>
+                              <span className="visitation-calendar-event-priest">
+                                {event.assignedPriestName}
+                              </span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="visitation-calendar-empty-slot" />
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
 

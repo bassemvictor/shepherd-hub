@@ -2450,6 +2450,152 @@ button {
   margin-top: 1.5rem;
 }
 
+.visitation-calendar-board {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.visitation-calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.visitation-calendar-month-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.visitation-calendar-nav-button {
+  width: 2.5rem;
+  min-width: 2.5rem;
+  padding: 0;
+  justify-content: center;
+}
+
+.visitation-calendar-month-label {
+  margin: 0;
+  min-width: 11rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--heading-text);
+  text-align: center;
+}
+
+.visitation-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.visitation-calendar-weekdays p {
+  margin: 0;
+  padding: 0 0.25rem;
+  color: var(--muted-light);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.visitation-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.visitation-calendar-day {
+  min-height: 9.5rem;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border-radius: 18px;
+  background: var(--dark-card-bg);
+  border: 1px solid rgba(233, 201, 112, 0.2);
+  box-shadow: 0 14px 32px rgba(148, 163, 184, 0.12);
+}
+
+.visitation-calendar-day.outside-month {
+  opacity: 0.55;
+}
+
+.visitation-calendar-day.today {
+  border-color: rgba(37, 99, 235, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
+}
+
+.visitation-calendar-day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.visitation-calendar-day-number,
+.visitation-calendar-day-count {
+  margin: 0;
+}
+
+.visitation-calendar-day-number {
+  color: var(--dark-card-text);
+  font-weight: 700;
+}
+
+.visitation-calendar-day-count {
+  color: var(--muted-light);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.visitation-calendar-events {
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+}
+
+.visitation-calendar-event {
+  width: 100%;
+  display: grid;
+  gap: 0.12rem;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 14px;
+  padding: 0.5rem 0.55rem;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--dark-card-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.visitation-calendar-event.completed {
+  border-color: rgba(34, 197, 94, 0.24);
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.visitation-calendar-event-time {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted-light);
+}
+
+.visitation-calendar-event-name {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.visitation-calendar-event-priest {
+  font-size: 0.72rem;
+  color: var(--content-text);
+}
+
+.visitation-calendar-empty-slot {
+  min-height: 0.2rem;
+}
+
 .visitation-report-toolbar {
   display: flex;
   align-items: center;
@@ -2968,6 +3114,14 @@ button {
   .announcement-week-header {
     flex-direction: column;
   }
+
+  .visitation-calendar-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .visitation-calendar-weekdays {
+    display: none;
+  }
 }
 
 @media (max-width: 640px) {
@@ -3189,6 +3343,28 @@ button {
     font-size: 2rem;
     line-height: 1;
     box-shadow: 0 16px 28px rgba(15, 23, 42, 0.32);
+  }
+
+  .visitation-calendar-toolbar {
+    align-items: stretch;
+  }
+
+  .visitation-calendar-month-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .visitation-calendar-month-label {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .visitation-calendar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .visitation-calendar-day {
+    min-height: auto;
   }
 
   .member-detail-header {
