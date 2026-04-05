@@ -287,6 +287,28 @@ const parseMemberData = (value: string): StoredMemberData | null => {
   }
 };
 
+const memberDetailsViewCookieName = "shepherd_hub_member_details_view";
+
+const getCookieValue = (name: string) => {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const match = document.cookie.match(
+    new RegExp(`(?:^|; )${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]*)`),
+  );
+
+  return match ? decodeURIComponent(match[1]) : null;
+};
+
+const setCookieValue = (name: string, value: string, maxAgeSeconds: number) => {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeSeconds}; SameSite=Lax`;
+};
+
 const formatMemberKeyLabel = (pk: string, sk: string) => `${pk} / ${sk}`;
 
 const formatCompactMemberKey = (sk: string) => {
@@ -465,6 +487,9 @@ export default function App() {
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [currentUserLabel, setCurrentUserLabel] = useState<string>("");
   const [currentUserGroups, setCurrentUserGroups] = useState<string[]>([]);
+  const [preferredMemberDetailsPage, setPreferredMemberDetailsPage] = useState<
+    "member-details" | "member-details-beta"
+  >("member-details");
   const [activePage, setActivePage] = useState<PageKey>("congregation");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
@@ -996,6 +1021,14 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    const savedView = getCookieValue(memberDetailsViewCookieName);
+
+    if (savedView === "member-details" || savedView === "member-details-beta") {
+      setPreferredMemberDetailsPage(savedView);
+    }
+  }, []);
+
+  useEffect(() => {
     void checkAuthSession();
   }, []);
 
@@ -1169,6 +1202,13 @@ export default function App() {
       ...current,
       [field]: value,
     }));
+  };
+
+  const setMemberDetailsViewPreference = (
+    nextView: "member-details" | "member-details-beta",
+  ) => {
+    setPreferredMemberDetailsPage(nextView);
+    setCookieValue(memberDetailsViewCookieName, nextView, 60 * 60 * 24 * 365);
   };
 
   const updateAnnouncementWeekField = (
@@ -1424,8 +1464,10 @@ export default function App() {
 
   const openMemberDetailsPage = (pk: string, sk: string) => {
     navigateToState({
-      activePage: "member-details",
+      activePage: preferredMemberDetailsPage,
       selectedMember: { pk, sk },
+      betaMemberTab:
+        preferredMemberDetailsPage === "member-details-beta" ? "details" : undefined,
     });
   };
 
@@ -1829,6 +1871,7 @@ export default function App() {
                     type="button"
                     className="hero-inline-link"
                     onClick={() => {
+                      setMemberDetailsViewPreference("member-details-beta");
                       navigateToState({
                         activePage: "member-details-beta",
                         betaMemberTab: "details",
@@ -3115,14 +3158,29 @@ export default function App() {
               {selectedMemberItem && selectedMemberData ? (
                 <div className="member-detail-beta-card">
                   <div className="member-detail-beta-header">
-                    <button
-                      type="button"
-                      className="member-detail-beta-back"
-                      onClick={() => setActivePage("member-details")}
-                    >
-                      <span aria-hidden="true">←</span>
-                      <span>Back</span>
-                    </button>
+                    <div className="member-detail-beta-header-actions">
+                      <button
+                        type="button"
+                        className="member-detail-beta-back"
+                        onClick={() => {
+                          setMemberDetailsViewPreference("member-details");
+                          setActivePage("member-details");
+                        }}
+                      >
+                        <span aria-hidden="true">←</span>
+                        <span>Back</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="member-detail-beta-legacy-link"
+                        onClick={() => {
+                          setMemberDetailsViewPreference("member-details");
+                          setActivePage("member-details");
+                        }}
+                      >
+                        Legacy View
+                      </button>
+                    </div>
                     <div className="member-detail-beta-menu" ref={betaMemberMenuRef}>
                       <button
                         type="button"
@@ -3524,7 +3582,10 @@ export default function App() {
                     <button
                       type="button"
                       className="member-cancel-button"
-                      onClick={() => setActivePage("member-details")}
+                      onClick={() => {
+                        setMemberDetailsViewPreference("member-details");
+                        setActivePage("member-details");
+                      }}
                     >
                       Back to Details
                     </button>
