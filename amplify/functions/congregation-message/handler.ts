@@ -26,6 +26,7 @@ type CreateMemberPayload = {
   lastName: string;
   email: string;
   phone: string;
+  photoDataUrl: string;
   role: string;
   status: string;
   address: string;
@@ -85,6 +86,7 @@ type StoredMemberData = {
   lastName?: string;
   email?: string;
   phone?: string;
+  photoDataUrl?: string;
   role?: string;
   status?: string;
   address?: string;
@@ -1084,6 +1086,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         lastName: payload.lastName ?? "",
         email: payload.email ?? "",
         phone: payload.phone ?? "",
+        photoDataUrl: payload.photoDataUrl ?? "",
         role: payload.role ?? "",
         status: payload.status ?? "",
         address: payload.address ?? "",
@@ -1178,6 +1181,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       lastName: payload.lastName ?? "",
       email: payload.email ?? "",
       phone: payload.phone ?? "",
+      photoDataUrl: payload.photoDataUrl ?? "",
       role: payload.role ?? "",
       status: payload.status ?? "",
       address: payload.address ?? "",

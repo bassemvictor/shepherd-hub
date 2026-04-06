@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { get, post } from "aws-amplify/api";
 import {
   confirmSignIn,
@@ -146,6 +146,7 @@ type MemberFormState = {
   lastName: string;
   email: string;
   phone: string;
+  photoDataUrl: string;
   role: string;
   status: string;
   address: string;
@@ -279,6 +280,7 @@ const initialMemberForm: MemberFormState = {
   lastName: "",
   email: "",
   phone: "",
+  photoDataUrl: "",
   role: "",
   status: "",
   address: "",
@@ -361,6 +363,39 @@ const getMemberName = (
   lastName?: string,
   fallback = "",
 ) => [firstName, lastName].filter(Boolean).join(" ").trim() || fallback;
+
+const resizeMemberPhoto = async (file: File) => {
+  const imageDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Unable to read the selected image."));
+    reader.readAsDataURL(file);
+  });
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const nextImage = new Image();
+    nextImage.onload = () => resolve(nextImage);
+    nextImage.onerror = () => reject(new Error("Unable to load the selected image."));
+    nextImage.src = imageDataUrl;
+  });
+
+  const maxSize = 256;
+  const scale = Math.min(maxSize / image.width, maxSize / image.height, 1);
+  const targetWidth = Math.max(1, Math.round(image.width * scale));
+  const targetHeight = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Unable to prepare the selected image.");
+  }
+
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+  return canvas.toDataURL("image/jpeg", 0.82);
+};
 
 const parseAnnouncementWeekData = (value: string): AnnouncementWeekData | null => {
   try {
@@ -499,6 +534,7 @@ export default function App() {
   const sidePanelRef = useRef<HTMLElement | null>(null);
   const betaMemberMenuRef = useRef<HTMLDivElement | null>(null);
   const contactsImportInputRef = useRef<HTMLInputElement | null>(null);
+  const memberPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const isApplyingPopStateRef = useRef(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
@@ -541,6 +577,7 @@ export default function App() {
   const [memberSearch, setMemberSearch] = useState("");
   const [memberSortOrder, setMemberSortOrder] = useState<MemberSortOrder>("name-asc");
   const [memberForm, setMemberForm] = useState<MemberFormState>(initialMemberForm);
+  const [memberPhotoStatus, setMemberPhotoStatus] = useState<string | null>(null);
   const [editingMember, setEditingMember] = useState<EditingMemberState>(null);
   const [selectedMember, setSelectedMember] = useState<SelectedMemberState>(null);
   const [visitationFocus, setVisitationFocus] = useState<VisitationFocusState>(null);
@@ -619,6 +656,7 @@ export default function App() {
     selectedMemberData?.lastName,
     selectedMemberName,
   );
+  const selectedMemberPhotoDataUrl = selectedMemberData?.photoDataUrl;
   const selectedMemberHistory =
     selectedMemberData?.history && selectedMemberData.history.length > 0
       ? selectedMemberData.history
@@ -1272,6 +1310,38 @@ export default function App() {
     }));
   };
 
+  const handleMemberPhotoChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setMemberPhotoStatus("Choose an image file for the member photo.");
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      const resizedPhoto = await resizeMemberPhoto(file);
+      updateMemberForm("photoDataUrl", resizedPhoto);
+      setMemberPhotoStatus("Photo ready to save.");
+    } catch {
+      setMemberPhotoStatus("Unable to prepare the selected photo.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const clearMemberPhoto = () => {
+    updateMemberForm("photoDataUrl", "");
+    setMemberPhotoStatus("Photo removed.");
+    if (memberPhotoInputRef.current) {
+      memberPhotoInputRef.current.value = "";
+    }
+  };
+
   const setMemberDetailsViewPreference = (
     nextView: "member-details" | "member-details-beta",
   ) => {
@@ -1469,8 +1539,12 @@ export default function App() {
         requestBody,
       );
       setMemberSubmitState(editingMember ? "Member updated." : "Member saved.");
+      setMemberPhotoStatus(null);
       setMemberForm(initialMemberForm);
       setEditingMember(null);
+      if (memberPhotoInputRef.current) {
+        memberPhotoInputRef.current.value = "";
+      }
       await loadBackendMessage();
       setActivePage("congregation");
     } catch (error) {
@@ -1486,6 +1560,10 @@ export default function App() {
     setEditingMember(null);
     setMemberForm(initialMemberForm);
     setMemberSubmitState(null);
+    setMemberPhotoStatus(null);
+    if (memberPhotoInputRef.current) {
+      memberPhotoInputRef.current.value = "";
+    }
     navigateToState({
       activePage: "new-member",
       editingMember: null,
@@ -1507,12 +1585,17 @@ export default function App() {
       lastName: memberData?.lastName ?? "",
       email: memberData?.email ?? "",
       phone: memberData?.phone ?? "",
+      photoDataUrl: memberData?.photoDataUrl ?? "",
       role: memberData?.role ?? "",
       status: memberData?.status ?? "",
       address: memberData?.address ?? "",
       notes: memberData?.notes ?? "",
     });
     setMemberSubmitState(null);
+    setMemberPhotoStatus(null);
+    if (memberPhotoInputRef.current) {
+      memberPhotoInputRef.current.value = "";
+    }
     navigateToState({
       activePage: "new-member",
       editingMember: {
@@ -1527,6 +1610,10 @@ export default function App() {
     setEditingMember(null);
     setMemberForm(initialMemberForm);
     setMemberSubmitState(null);
+    setMemberPhotoStatus(null);
+    if (memberPhotoInputRef.current) {
+      memberPhotoInputRef.current.value = "";
+    }
     setActivePage("congregation");
   };
 
@@ -2018,6 +2105,7 @@ export default function App() {
                         memberData?.lastName,
                         memberLabel,
                       );
+                      const memberPhotoDataUrl = memberData?.photoDataUrl;
 
                       return (
                         <article
@@ -2030,8 +2118,16 @@ export default function App() {
                                 className="api-data-layout"
                                 onClick={() => openMemberDetailsPage(item.pk, item.sk)}
                               >
-                                <div className="api-data-avatar" aria-hidden="true">
-                                  {memberInitials}
+                                <div className="api-data-avatar">
+                                  {memberPhotoDataUrl ? (
+                                    <img
+                                      src={memberPhotoDataUrl}
+                                      alt={`${memberLabel} photo`}
+                                      className="member-avatar-image"
+                                    />
+                                  ) : (
+                                    <span aria-hidden="true">{memberInitials}</span>
+                                  )}
                                 </div>
 
                                 <div className="api-data-content">
@@ -2563,6 +2659,55 @@ export default function App() {
                     }
                   />
                 </label>
+
+                <div className="member-field member-field-full">
+                  <span>Photo</span>
+                  <input
+                    ref={memberPhotoInputRef}
+                    className="member-photo-input"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleMemberPhotoChange}
+                  />
+                  <div className="member-photo-picker">
+                    <button
+                      type="button"
+                      className="member-photo-picker-button"
+                      onClick={() => memberPhotoInputRef.current?.click()}
+                    >
+                      Choose Photo
+                    </button>
+                    <p
+                      className={`member-photo-picker-name${
+                        memberForm.photoDataUrl ? "" : " empty"
+                      }`}
+                    >
+                      {memberForm.photoDataUrl ? "Photo selected" : "No photo selected"}
+                    </p>
+                  </div>
+                  {memberForm.photoDataUrl ? (
+                    <div className="member-photo-preview">
+                      <img
+                        src={memberForm.photoDataUrl}
+                        alt="Member preview"
+                        className="member-photo-preview-image"
+                      />
+                      <button
+                        type="button"
+                        className="member-photo-remove-button"
+                        onClick={clearMemberPhoto}
+                      >
+                        Remove Photo
+                      </button>
+                    </div>
+                  ) : null}
+                  <p className="member-photo-hint">
+                    Upload a headshot or profile photo. Large images are resized automatically.
+                  </p>
+                  {memberPhotoStatus ? (
+                    <p className="member-photo-status">{memberPhotoStatus}</p>
+                  ) : null}
+                </div>
 
                 <label className="member-field">
                   <span>Role</span>
@@ -3421,7 +3566,15 @@ export default function App() {
                   <div className="member-detail-beta-hero">
                     <div className="member-detail-beta-avatar-wrap">
                       <div className="member-detail-beta-avatar">
-                        {selectedMemberInitials}
+                        {selectedMemberPhotoDataUrl ? (
+                          <img
+                            src={selectedMemberPhotoDataUrl}
+                            alt={`${selectedMemberName} photo`}
+                            className="member-avatar-image"
+                          />
+                        ) : (
+                          <span aria-hidden="true">{selectedMemberInitials}</span>
+                        )}
                       </div>
                     </div>
                     <h2 className="member-detail-beta-name">{selectedMemberName}</h2>
