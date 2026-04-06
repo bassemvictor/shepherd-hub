@@ -128,6 +128,7 @@ type BackendMessage = {
     pk: string;
     sk: string;
     data: string;
+    photo?: string;
   }>;
 };
 
@@ -146,7 +147,7 @@ type MemberFormState = {
   lastName: string;
   email: string;
   phone: string;
-  photoDataUrl: string;
+  photo: string;
   role: string;
   status: string;
   address: string;
@@ -154,6 +155,7 @@ type MemberFormState = {
 };
 
 type StoredMemberData = Partial<MemberFormState> & {
+  photoDataUrl?: string;
   createdAt?: string;
   updatedAt?: string;
   history?: Array<{
@@ -280,7 +282,7 @@ const initialMemberForm: MemberFormState = {
   lastName: "",
   email: "",
   phone: "",
-  photoDataUrl: "",
+  photo: "",
   role: "",
   status: "",
   address: "",
@@ -656,7 +658,8 @@ export default function App() {
     selectedMemberData?.lastName,
     selectedMemberName,
   );
-  const selectedMemberPhotoDataUrl = selectedMemberData?.photoDataUrl;
+  const selectedMemberPhotoDataUrl =
+    selectedMemberItem?.photo ?? selectedMemberData?.photo ?? selectedMemberData?.photoDataUrl;
   const selectedMemberHistory =
     selectedMemberData?.history && selectedMemberData.history.length > 0
       ? selectedMemberData.history
@@ -1325,7 +1328,7 @@ export default function App() {
 
     try {
       const resizedPhoto = await resizeMemberPhoto(file);
-      updateMemberForm("photoDataUrl", resizedPhoto);
+      updateMemberForm("photo", resizedPhoto);
       setMemberPhotoStatus("Photo ready to save.");
     } catch {
       setMemberPhotoStatus("Unable to prepare the selected photo.");
@@ -1335,7 +1338,7 @@ export default function App() {
   };
 
   const clearMemberPhoto = () => {
-    updateMemberForm("photoDataUrl", "");
+    updateMemberForm("photo", "");
     setMemberPhotoStatus("Photo removed.");
     if (memberPhotoInputRef.current) {
       memberPhotoInputRef.current.value = "";
@@ -1574,6 +1577,7 @@ export default function App() {
     pk: string,
     sk: string,
     memberData: StoredMemberData | null,
+    memberPhoto?: string,
   ) => {
     setEditingMember({
       pk,
@@ -1585,7 +1589,7 @@ export default function App() {
       lastName: memberData?.lastName ?? "",
       email: memberData?.email ?? "",
       phone: memberData?.phone ?? "",
-      photoDataUrl: memberData?.photoDataUrl ?? "",
+      photo: memberPhoto ?? memberData?.photo ?? memberData?.photoDataUrl ?? "",
       role: memberData?.role ?? "",
       status: memberData?.status ?? "",
       address: memberData?.address ?? "",
@@ -2105,7 +2109,8 @@ export default function App() {
                         memberData?.lastName,
                         memberLabel,
                       );
-                      const memberPhotoDataUrl = memberData?.photoDataUrl;
+                      const memberPhotoDataUrl =
+                        item.photo ?? memberData?.photo ?? memberData?.photoDataUrl;
 
                       return (
                         <article
@@ -2679,16 +2684,16 @@ export default function App() {
                     </button>
                     <p
                       className={`member-photo-picker-name${
-                        memberForm.photoDataUrl ? "" : " empty"
+                        memberForm.photo ? "" : " empty"
                       }`}
                     >
-                      {memberForm.photoDataUrl ? "Photo selected" : "No photo selected"}
+                      {memberForm.photo ? "Photo selected" : "No photo selected"}
                     </p>
                   </div>
-                  {memberForm.photoDataUrl ? (
+                  {memberForm.photo ? (
                     <div className="member-photo-preview">
                       <img
-                        src={memberForm.photoDataUrl}
+                        src={memberForm.photo}
                         alt="Member preview"
                         className="member-photo-preview-image"
                       />
@@ -3308,6 +3313,7 @@ export default function App() {
                                 selectedMemberItem.pk,
                                 selectedMemberItem.sk,
                                 selectedMemberData,
+                                selectedMemberItem.photo,
                               )
                             }
                           >
@@ -3539,6 +3545,7 @@ export default function App() {
                                 selectedMemberItem.pk,
                                 selectedMemberItem.sk,
                                 selectedMemberData,
+                                selectedMemberItem.photo,
                               );
                             }}
                           >

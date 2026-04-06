@@ -19,6 +19,7 @@ type TableRow = {
   pk: string;
   sk: string;
   data: string;
+  photo?: string;
 };
 
 type CreateMemberPayload = {
@@ -26,7 +27,7 @@ type CreateMemberPayload = {
   lastName: string;
   email: string;
   phone: string;
-  photoDataUrl: string;
+  photo?: string;
   role: string;
   status: string;
   address: string;
@@ -86,6 +87,7 @@ type StoredMemberData = {
   lastName?: string;
   email?: string;
   phone?: string;
+  photo?: string;
   photoDataUrl?: string;
   role?: string;
   status?: string;
@@ -1086,7 +1088,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         lastName: payload.lastName ?? "",
         email: payload.email ?? "",
         phone: payload.phone ?? "",
-        photoDataUrl: payload.photoDataUrl ?? "",
         role: payload.role ?? "",
         status: payload.status ?? "",
         address: payload.address ?? "",
@@ -1102,6 +1103,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             pk: payload.pk,
             sk: payload.sk,
             data,
+            photo: payload.photo ?? existingItem?.photo ?? "",
           },
         }),
       );
@@ -1181,7 +1183,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       lastName: payload.lastName ?? "",
       email: payload.email ?? "",
       phone: payload.phone ?? "",
-      photoDataUrl: payload.photoDataUrl ?? "",
       role: payload.role ?? "",
       status: payload.status ?? "",
       address: payload.address ?? "",
@@ -1196,6 +1197,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           pk: "CONGREGATION",
           sk: `MEMBER#${memberId}`,
           data,
+          photo: payload.photo ?? "",
         },
       }),
     );

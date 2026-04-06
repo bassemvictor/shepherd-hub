@@ -733,7 +733,6 @@ export const handler = async (event) => {
                 lastName: payload.lastName ?? "",
                 email: payload.email ?? "",
                 phone: payload.phone ?? "",
-                photoDataUrl: payload.photoDataUrl ?? "",
                 role: payload.role ?? "",
                 status: payload.status ?? "",
                 address: payload.address ?? "",
@@ -747,6 +746,7 @@ export const handler = async (event) => {
                     pk: payload.pk,
                     sk: payload.sk,
                     data,
+                    photo: payload.photo ?? existingItem?.photo ?? "",
                 },
             }));
             return {
@@ -811,7 +811,6 @@ export const handler = async (event) => {
             lastName: payload.lastName ?? "",
             email: payload.email ?? "",
             phone: payload.phone ?? "",
-            photoDataUrl: payload.photoDataUrl ?? "",
             role: payload.role ?? "",
             status: payload.status ?? "",
             address: payload.address ?? "",
@@ -824,6 +823,7 @@ export const handler = async (event) => {
                 pk: "CONGREGATION",
                 sk: `MEMBER#${memberId}`,
                 data,
+                photo: payload.photo ?? "",
             },
         }));
         return {

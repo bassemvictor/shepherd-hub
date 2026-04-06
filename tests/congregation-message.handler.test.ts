@@ -314,17 +314,16 @@ test("creates a congregation member", async () => {
         firstName: "John",
         lastName: "Smith",
         email: "john@example.com",
-        photoDataUrl: "data:image/jpeg;base64,abc123",
+        photo: "data:image/jpeg;base64,abc123",
       },
     }),
   );
   const body = parseBody(response.body);
   const putInput = dynamo.commands[0]?.input as { Item?: Record<string, unknown> };
-  const savedData = JSON.parse(String(putInput.Item?.data ?? "{}")) as Record<string, unknown>;
 
   assert.equal(response.statusCode, 201);
   assert.equal(body.message, "Congregation member created.");
-  assert.equal(savedData.photoDataUrl, "data:image/jpeg;base64,abc123");
+  assert.equal(putInput.Item?.photo, "data:image/jpeg;base64,abc123");
 });
 
 test("forbids regular users from creating a priest member", async () => {
@@ -467,7 +466,7 @@ test("updates a congregation member", async () => {
         sk: "MEMBER#1",
         firstName: "John",
         lastName: "Updated",
-        photoDataUrl: "data:image/jpeg;base64,updated-photo",
+        photo: "data:image/jpeg;base64,updated-photo",
       },
     }),
   );
@@ -475,12 +474,13 @@ test("updates a congregation member", async () => {
   const putCommand = dynamo.commands.find(
     (command) => command.constructor.name === "PutCommand",
   );
-  const savedItem = putCommand?.input?.Item as { data: string } | undefined;
-  const savedData = savedItem ? JSON.parse(savedItem.data) : null;
+  const savedItem = putCommand?.input?.Item as
+    | { data: string; photo?: string }
+    | undefined;
 
   assert.equal(response.statusCode, 200);
   assert.equal(body.message, "Congregation member updated.");
-  assert.equal(savedData?.photoDataUrl, "data:image/jpeg;base64,updated-photo");
+  assert.equal(savedItem?.photo, "data:image/jpeg;base64,updated-photo");
 });
 
 test("forbids regular users from promoting a member to priest", async () => {
