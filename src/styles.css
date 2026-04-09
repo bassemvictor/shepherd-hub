@@ -109,6 +109,283 @@ button {
   color: var(--muted-light);
 }
 
+.auth-inline-link {
+  align-self: flex-start;
+  margin-top: 0.25rem;
+}
+
+.public-page-card {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.15rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.public-page-title {
+  margin: 0;
+  font-size: 1.6rem;
+  color: var(--panel-text);
+}
+
+.public-page-back {
+  justify-self: start;
+}
+
+.parking-registration-page {
+  width: 100%;
+}
+
+.parking-registration-card {
+  width: 100%;
+}
+
+.parking-registration-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.parking-registration-copy {
+  margin: 0.35rem 0 0;
+  color: var(--muted-light);
+  font-size: 0.95rem;
+}
+
+.parking-registration-back {
+  flex-shrink: 0;
+}
+
+.parking-registration-grid .member-field {
+  min-width: 0;
+}
+
+.parking-management-page {
+  width: 100%;
+}
+
+.parking-page,
+.parking-management-card {
+  width: 100%;
+}
+
+.parking-list-card {
+  width: 100%;
+}
+
+.parking-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.parking-tabs {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.parking-tab {
+  border: 1px solid rgba(219, 183, 86, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #172033;
+  font-weight: 700;
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+}
+
+.parking-tab.active {
+  background: linear-gradient(135deg, #f4c430, #f59e0b);
+  border-color: transparent;
+  color: #111827;
+}
+
+.parking-list-summary,
+.parking-management-summary,
+.parking-management-meta {
+  margin: 0.35rem 0 0;
+  color: var(--muted-light);
+}
+
+.parking-list-summary,
+.parking-management-summary {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.parking-list-items {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.parking-registration-item {
+  padding: 1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(219, 183, 86, 0.2);
+}
+
+.parking-registration-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.parking-registration-name,
+.parking-registration-meta,
+.parking-registration-label,
+.parking-registration-value {
+  margin: 0;
+}
+
+.parking-registration-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--dark-card-text);
+}
+
+.parking-registration-meta,
+.parking-registration-label {
+  color: var(--muted-light);
+  font-size: 0.8rem;
+}
+
+.parking-registration-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.45rem 0.7rem;
+}
+
+.parking-registration-status.assigned {
+  background: rgba(34, 197, 94, 0.16);
+  color: #166534;
+}
+
+.parking-registration-status.waiting {
+  background: rgba(245, 158, 11, 0.16);
+  color: #a16207;
+}
+
+.parking-registration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+  margin-top: 0.95rem;
+}
+
+.parking-registration-value {
+  color: var(--dark-card-text);
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.parking-registration-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-top: 0.95rem;
+}
+
+.parking-registration-actions .member-contact-button {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.parking-registration-actions .member-contact-button.email {
+  border-color: rgba(9, 114, 211, 0.22);
+  background: rgba(9, 114, 211, 0.1);
+  color: #0972d3;
+}
+
+.parking-registration-actions .parking-status-button {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(255, 255, 255, 0.72);
+  color: #475569;
+}
+
+.parking-registration-actions .parking-status-button.active {
+  border-color: rgba(34, 197, 94, 0.24);
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.parking-registration-actions .parking-status-button.inactive {
+  border-color: rgba(209, 50, 18, 0.24);
+  background: rgba(209, 50, 18, 0.1);
+  color: #d13212;
+}
+
+.parking-registration-actions .parking-print-button {
+  border-color: rgba(124, 58, 237, 0.22);
+  background: rgba(124, 58, 237, 0.1);
+  color: #7c3aed;
+}
+
+.parking-management-meta {
+  font-size: 0.9rem;
+}
+
+[data-theme="dark"] .parking-tab {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+[data-theme="dark"] .parking-registration-item {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+[data-theme="dark"] .parking-registration-actions .member-contact-button.email {
+  border-color: rgba(66, 153, 225, 0.32);
+  background: rgba(9, 114, 211, 0.2);
+  color: #9fd3ff;
+}
+
+[data-theme="dark"] .parking-registration-actions .parking-status-button {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(30, 41, 59, 0.88);
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .parking-registration-actions .parking-status-button.active {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+}
+
+[data-theme="dark"] .parking-registration-actions .parking-status-button.inactive {
+  border-color: rgba(242, 78, 30, 0.3);
+  background: rgba(209, 50, 18, 0.2);
+  color: #fecaca;
+}
+
+[data-theme="dark"] .parking-registration-actions .parking-print-button {
+  border-color: rgba(167, 139, 250, 0.28);
+  background: rgba(124, 58, 237, 0.2);
+  color: #ddd6fe;
+}
+
+[data-theme="dark"] .parking-registration-status.assigned {
+  background: rgba(34, 197, 94, 0.2);
+  color: #bbf7d0;
+}
+
+[data-theme="dark"] .parking-registration-status.waiting {
+  background: rgba(245, 158, 11, 0.22);
+  color: #fde68a;
+}
+
 .auth-field {
   display: grid;
   gap: 0.45rem;
@@ -3208,6 +3485,21 @@ button {
 
   .announcement-week-header {
     flex-direction: column;
+  }
+
+  .parking-registration-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .parking-list-header,
+  .parking-registration-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .parking-registration-grid {
+    grid-template-columns: 1fr;
   }
 
   .visitation-calendar-grid {

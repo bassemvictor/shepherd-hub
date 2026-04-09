@@ -241,6 +241,407 @@ test("forbids contacts import for regular users", async () => {
   assert.equal(body.message, "You do not have access to import contacts.");
 });
 
+test("creates a parking registration", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "QueryCommand") {
+      return { Items: [] };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/parking/registration",
+      method: "POST",
+      body: {
+        firstName: "Jane",
+        lastName: "Driver",
+        licensePlate: "abc 123",
+        personalEmail: "jane@example.com",
+        workEmail: "jane@work.example.com",
+        placeOfWork: "General Hospital",
+        cellPhone: "6135550101",
+        workPhone: "6135550102",
+        durationFrom: "2026-04-09T08:00",
+        durationTo: "2026-04-09T17:00",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+  const putCommand = dynamo.commands.find(
+    (command) => command.constructor.name === "PutCommand",
+  );
+  const putInput = putCommand?.input as { Item?: Record<string, unknown> };
+  const storedData = JSON.parse(String(putInput.Item?.data ?? "{}")) as Record<string, unknown>;
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(putInput.Item?.pk, "PARKING_REGISTRATION");
+  assert.equal(typeof putInput.Item?.sk, "string");
+  assert.equal(storedData.firstName, "Jane");
+  assert.equal(storedData.lastName, "Driver");
+  assert.equal(storedData.licensePlate, "ABC 123");
+  assert.equal(storedData.personalEmail, "jane@example.com");
+  assert.equal(storedData.workEmail, "jane@work.example.com");
+  assert.equal(storedData.placeOfWork, "General Hospital");
+  assert.equal(storedData.cellPhone, "6135550101");
+  assert.equal(storedData.workPhone, "6135550102");
+  assert.equal(storedData.durationFrom, "2026-04-09T08:00");
+  assert.equal(storedData.durationTo, "2026-04-09T17:00");
+  assert.equal(storedData.isActive, true);
+  assert.equal(storedData.placementStatus, "waiting-list");
+  assert.equal(typeof storedData.registeredAt, "string");
+});
+
+test("blocks parking registration when license plate already exists", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "QueryCommand") {
+      return {
+        Items: [
+          {
+            pk: "PARKING_REGISTRATION",
+            sk: "REGISTRATION#existing",
+            data: JSON.stringify({
+              firstName: "Existing",
+              lastName: "Driver",
+              licensePlate: "ABC123",
+              personalEmail: "existing@example.com",
+              workEmail: "",
+              placeOfWork: "",
+              cellPhone: "6135550000",
+              workPhone: "",
+              durationFrom: "2026-04-01T08:00",
+              durationTo: "2026-04-01T17:00",
+              registeredAt: "2026-04-01T08:00:00.000Z",
+              isActive: true,
+              placementStatus: "waiting-list",
+            }),
+          },
+        ],
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/parking/registration",
+      method: "POST",
+      body: {
+        firstName: "Jane",
+        lastName: "Driver",
+        licensePlate: "ABC 123",
+        personalEmail: "jane@example.com",
+        workEmail: "",
+        placeOfWork: "",
+        cellPhone: "6135550101",
+        workPhone: "",
+        durationFrom: "2026-04-09T08:00",
+        durationTo: "2026-04-09T17:00",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(
+    body.message,
+    "A parking registration already exists for that license plate.",
+  );
+});
+
+test("loads and updates parking management", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "QueryCommand") {
+      const values = command.input?.ExpressionAttributeValues as Record<string, string>;
+      if (values?.[":pk"] === "CONGREGATION") {
+        return {
+          Items: [
+            {
+              pk: "CONGREGATION",
+              sk: "MEMBER#parking-admin",
+              data: JSON.stringify({
+                firstName: "Lot",
+                lastName: "Admin",
+                email: "lot@example.com",
+                role: "parking-admin",
+              }),
+            },
+          ],
+        };
+      }
+
+      return {
+        Items: [
+          {
+            pk: "PARKING_REGISTRATION",
+            sk: "REGISTRATION#1",
+            data: JSON.stringify({
+              isActive: true,
+              placementStatus: "waiting-list",
+            }),
+          },
+          {
+            pk: "PARKING_REGISTRATION",
+            sk: "REGISTRATION#2",
+            data: JSON.stringify({
+              isActive: true,
+              placementStatus: "assigned",
+            }),
+          },
+        ],
+      };
+    }
+
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "PARKING_SETTINGS",
+          sk: "CONFIG",
+          data: JSON.stringify({
+            maxSpots: 50,
+            updatedAt: "2026-04-09T10:00:00.000Z",
+          }),
+        },
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const getResponse = await invokeHandler({
+    ...createEvent({
+      path: "/parking/management",
+      method: "GET",
+    }),
+    requestContext: {
+      ...createEvent({
+        path: "/parking/management",
+        method: "GET",
+      }).requestContext,
+      authorizer: {
+        jwt: {
+          claims: {
+            email: "lot@example.com",
+          },
+        },
+      },
+    },
+  } as APIGatewayProxyEventV2);
+  const getBody = parseBody(getResponse.body);
+
+  assert.equal(getResponse.statusCode, 200);
+  assert.equal(getBody.maxSpots, 50);
+  assert.equal(getBody.activeRegistrationCount, 2);
+  assert.equal(getBody.waitingListCount, 1);
+
+  const postResponse = await invokeHandler({
+    ...createEvent({
+      path: "/parking/management",
+      method: "POST",
+      body: { maxSpots: 75 },
+    }),
+    requestContext: {
+      ...createEvent({
+        path: "/parking/management",
+        method: "POST",
+        body: { maxSpots: 75 },
+      }).requestContext,
+      authorizer: {
+        jwt: {
+          claims: {
+            email: "lot@example.com",
+          },
+        },
+      },
+    },
+  } as APIGatewayProxyEventV2);
+  const postBody = parseBody(postResponse.body);
+
+  assert.equal(postResponse.statusCode, 200);
+  assert.equal(postBody.message, "Parking capacity updated.");
+});
+
+test("lists parking registrations for parking admin", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "QueryCommand") {
+      const values = command.input?.ExpressionAttributeValues as Record<string, string>;
+      if (values?.[":pk"] === "CONGREGATION") {
+        return {
+          Items: [
+            {
+              pk: "CONGREGATION",
+              sk: "MEMBER#parking-admin",
+              data: JSON.stringify({
+                email: "lot@example.com",
+                role: "parking-admin",
+              }),
+            },
+          ],
+        };
+      }
+
+      return {
+        Items: [
+          {
+            pk: "PARKING_REGISTRATION",
+            sk: "REGISTRATION#1",
+            data: JSON.stringify({
+              firstName: "A",
+              lastName: "One",
+              registeredAt: "2026-04-01T08:00:00.000Z",
+              isActive: true,
+              placementStatus: "waiting-list",
+            }),
+          },
+          {
+            pk: "PARKING_REGISTRATION",
+            sk: "REGISTRATION#2",
+            data: JSON.stringify({
+              firstName: "B",
+              lastName: "Two",
+              registeredAt: "2026-03-01T08:00:00.000Z",
+              isActive: true,
+              placementStatus: "assigned",
+            }),
+          },
+        ],
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler({
+    ...createEvent({
+      path: "/parking/registrations",
+      method: "GET",
+    }),
+    requestContext: {
+      ...createEvent({
+        path: "/parking/registrations",
+        method: "GET",
+      }).requestContext,
+      authorizer: {
+        jwt: {
+          claims: {
+            email: "lot@example.com",
+          },
+        },
+      },
+    },
+  } as APIGatewayProxyEventV2);
+  const body = parseBody(response.body) as {
+    message: string;
+    items: Array<{ sk: string }>;
+  };
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Parking registrations loaded.");
+  assert.equal(body.items[0].sk, "REGISTRATION#2");
+  assert.equal(body.items[1].sk, "REGISTRATION#1");
+});
+
+test("updates parking registration active status", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "QueryCommand") {
+      return {
+        Items: [
+          {
+            pk: "CONGREGATION",
+            sk: "MEMBER#parking-admin",
+            data: JSON.stringify({
+              email: "lot@example.com",
+              role: "parking-admin",
+            }),
+          },
+        ],
+      };
+    }
+
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "PARKING_REGISTRATION",
+          sk: "REGISTRATION#1",
+          data: JSON.stringify({
+            firstName: "Jane",
+            lastName: "Driver",
+            licensePlate: "ABC123",
+            personalEmail: "jane@example.com",
+            workEmail: "",
+            placeOfWork: "",
+            cellPhone: "6135550101",
+            workPhone: "",
+            durationFrom: "2026-04-09T08:00",
+            durationTo: "2026-04-09T17:00",
+            registeredAt: "2026-04-01T08:00:00.000Z",
+            isActive: true,
+            placementStatus: "waiting-list",
+          }),
+        },
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler({
+    ...createEvent({
+      path: "/parking/registrations/status",
+      method: "POST",
+      body: {
+        sk: "REGISTRATION#1",
+        isActive: false,
+      },
+    }),
+    requestContext: {
+      ...createEvent({
+        path: "/parking/registrations/status",
+        method: "POST",
+        body: {
+          sk: "REGISTRATION#1",
+          isActive: false,
+        },
+      }).requestContext,
+      authorizer: {
+        jwt: {
+          claims: {
+            email: "lot@example.com",
+          },
+        },
+      },
+    },
+  } as APIGatewayProxyEventV2);
+  const body = parseBody(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Parking registration deactivated.");
+});
+
 test("creates an announcement week", async () => {
   const dynamo = createMockClient((command) => {
     if (command.constructor.name === "GetCommand") {

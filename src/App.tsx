@@ -7,6 +7,7 @@ import {
   signIn,
   signOut,
 } from "aws-amplify/auth";
+import QRCode from "qrcode";
 import outputs from "../amplify_outputs.json";
 
 type PageKey =
@@ -14,6 +15,9 @@ type PageKey =
   | "visitation"
   | "visitation-report"
   | "visitation-calendar"
+  | "parling"
+  | "parking-management"
+  | "parking-registration"
   | "new-member"
   | "member-details"
   | "member-details-beta"
@@ -45,6 +49,18 @@ const pageContent: Record<
   },
   "visitation-calendar": {
     eyebrow: "Visitation Calendar",
+    description: "",
+  },
+  parling: {
+    eyebrow: "Parking",
+    description: "",
+  },
+  "parking-management": {
+    eyebrow: "Parking Management",
+    description: "",
+  },
+  "parking-registration": {
+    eyebrow: "Parking Registration",
     description: "",
   },
   "new-member": {
@@ -117,6 +133,14 @@ const navSections: Array<{
     items: [
       { key: "user-access", label: "User Access" },
       { key: "contacts-import", label: "Contacts Import" },
+    ],
+  },
+  {
+    label: "Parking",
+    items: [
+      { key: "parking-registration", label: "Parking Registration" },
+      { key: "parling", label: "Parking" },
+      { key: "parking-management", label: "Parking Management" },
     ],
   },
 ];
@@ -261,6 +285,59 @@ type ContactsImportResponse = {
   skippedMembers: string[];
 };
 
+type ParkingRegistrationFormState = {
+  firstName: string;
+  lastName: string;
+  licensePlate: string;
+  personalEmail: string;
+  workEmail: string;
+  placeOfWork: string;
+  cellPhone: string;
+  workPhone: string;
+  durationFrom: string;
+  durationTo: string;
+};
+
+type ParkingRegistrationResponse = {
+  message: string;
+  time: string;
+  pk: string;
+  sk: string;
+};
+
+type ParkingManagementResponse = {
+  message: string;
+  time: string;
+  maxSpots: number;
+  activeRegistrationCount: number;
+  waitingListCount: number;
+  updatedAt?: string;
+};
+
+type ParkingRegistrationItem = {
+  pk: string;
+  sk: string;
+  firstName: string;
+  lastName: string;
+  licensePlate: string;
+  personalEmail: string;
+  workEmail: string;
+  placeOfWork: string;
+  cellPhone: string;
+  workPhone: string;
+  durationFrom: string;
+  durationTo: string;
+  registeredAt: string;
+  isActive: boolean;
+  placementStatus: "waiting-list" | "assigned";
+};
+
+type ParkingRegistrationsResponse = {
+  message: string;
+  time: string;
+  items: ParkingRegistrationItem[];
+};
+
 type AppNavigationState = {
   activePage: PageKey;
   selectedMember: SelectedMemberState | null;
@@ -338,6 +415,8 @@ const normalizePhoneForLink = (value?: string) => {
 
   return cleaned.replace(/[^\d]/g, "");
 };
+
+const normalizeEmailValue = (value?: string) => value?.trim().toLowerCase() ?? "";
 
 const getMemberInitials = (
   firstName?: string,
@@ -527,9 +606,30 @@ const placeholderPages: PageKey[] = [
   "board-meeting",
 ];
 
+const getInitialActivePage = (): PageKey => {
+  if (typeof window !== "undefined" && window.location.hash === "#parking-registration") {
+    return "parking-registration";
+  }
+
+  return "congregation";
+};
+
 const initialAnnouncementWeekForm: AnnouncementWeekFormState = {
   weekLabel: "",
   items: [""],
+};
+
+const initialParkingRegistrationForm: ParkingRegistrationFormState = {
+  firstName: "",
+  lastName: "",
+  licensePlate: "",
+  personalEmail: "",
+  workEmail: "",
+  placeOfWork: "",
+  cellPhone: "",
+  workPhone: "",
+  durationFrom: "",
+  durationTo: "",
 };
 
 export default function App() {
@@ -555,7 +655,7 @@ export default function App() {
   const [preferredMemberDetailsPage, setPreferredMemberDetailsPage] = useState<
     "member-details" | "member-details-beta"
   >("member-details");
-  const [activePage, setActivePage] = useState<PageKey>("congregation");
+  const [activePage, setActivePage] = useState<PageKey>(getInitialActivePage);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
@@ -619,13 +719,57 @@ export default function App() {
   const [contactsImportSummary, setContactsImportSummary] =
     useState<ContactsImportResponse | null>(null);
   const [isContactsImporting, setIsContactsImporting] = useState(false);
+  const [parkingRegistrationForm, setParkingRegistrationForm] =
+    useState<ParkingRegistrationFormState>(initialParkingRegistrationForm);
+  const [parkingRegistrationStatus, setParkingRegistrationStatus] = useState<string | null>(
+    null,
+  );
+  const [isParkingRegistrationSubmitting, setIsParkingRegistrationSubmitting] =
+    useState(false);
+  const [parkingManagement, setParkingManagement] =
+    useState<ParkingManagementResponse | null>(null);
+  const [parkingManagementStatus, setParkingManagementStatus] = useState<string | null>(null);
+  const [parkingManagementError, setParkingManagementError] = useState<string | null>(null);
+  const [parkingMaxSpotsInput, setParkingMaxSpotsInput] = useState("0");
+  const [isParkingManagementLoading, setIsParkingManagementLoading] = useState(false);
+  const [isParkingManagementSaving, setIsParkingManagementSaving] = useState(false);
+  const [parkingRegistrations, setParkingRegistrations] = useState<ParkingRegistrationItem[]>([]);
+  const [parkingRegistrationsError, setParkingRegistrationsError] = useState<string | null>(null);
+  const [isParkingRegistrationsLoading, setIsParkingRegistrationsLoading] = useState(false);
+  const [parkingTab, setParkingTab] = useState<"active" | "waiting-list">("active");
+  const [updatingParkingRegistrationSk, setUpdatingParkingRegistrationSk] = useState<
+    string | null
+  >(null);
+  const [printingParkingRegistrationSk, setPrintingParkingRegistrationSk] = useState<
+    string | null
+  >(null);
   const currentPage = pageContent[activePage];
   const isEditingMember = editingMember !== null;
   const isAdminUser = currentUserGroups.includes("admin");
   const canManageUsers =
     currentUserGroups.includes("admin") || currentUserGroups.includes("super_user");
   const canManageAnnouncements = canManageUsers;
+  const currentUserEmail = normalizeEmailValue(currentUserLabel);
+  const canManageParking =
+    isAdminUser ||
+    Boolean(
+      currentUserEmail &&
+        (backendMessage?.items ?? []).some((item) => {
+          const memberData = parseMemberData(item.data);
+          return (
+            normalizeEmailValue(memberData?.email) === currentUserEmail &&
+            memberData?.role === "parking-admin"
+          );
+        }),
+    );
   const currentAnnouncementWeekLabel = getCurrentIsoWeekLabel();
+  const activeParkingRegistrations = parkingRegistrations.filter(
+    (registration) => registration.isActive && registration.placementStatus !== "waiting-list",
+  );
+  const waitingListRegistrations = parkingRegistrations
+    .filter((registration) => registration.placementStatus === "waiting-list")
+    .slice()
+    .sort((left, right) => left.registeredAt.localeCompare(right.registeredAt));
   const isBackendRequestInFlight =
     isBackendLoading ||
     isAnnouncementsLoading ||
@@ -636,7 +780,13 @@ export default function App() {
     isVisitationSubmitting ||
     isUserDirectoryLoading ||
     savingUserGroups !== null ||
-    isContactsImporting;
+    isContactsImporting ||
+    isParkingRegistrationSubmitting ||
+    isParkingManagementLoading ||
+    isParkingManagementSaving ||
+    isParkingRegistrationsLoading ||
+    updatingParkingRegistrationSk !== null ||
+    printingParkingRegistrationSk !== null;
   const selectedMemberItem =
     selectedMember && backendMessage
       ? backendMessage.items.find(
@@ -908,6 +1058,18 @@ export default function App() {
     return restOperation.response;
   };
 
+  const publicPost = async (path: string, body: unknown) => {
+    const restOperation = post({
+      apiName: congregationApiName,
+      path,
+      options: {
+        body: body as never,
+      },
+    });
+
+    return restOperation.response;
+  };
+
   const createNavigationState = (
     overrides: Partial<AppNavigationState> = {},
   ): AppNavigationState => ({
@@ -1117,6 +1279,257 @@ export default function App() {
     }
   };
 
+  const handleParkingRegistrationSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!congregationApiName) {
+      setParkingRegistrationStatus("Backend API is not configured yet.");
+      return;
+    }
+
+    if (
+      !parkingRegistrationForm.firstName.trim() ||
+      !parkingRegistrationForm.lastName.trim() ||
+      !parkingRegistrationForm.licensePlate.trim() ||
+      !parkingRegistrationForm.personalEmail.trim() ||
+      !parkingRegistrationForm.cellPhone.trim() ||
+      !parkingRegistrationForm.durationFrom ||
+      !parkingRegistrationForm.durationTo
+    ) {
+      setParkingRegistrationStatus(
+        "Complete the required fields before submitting the registration.",
+      );
+      return;
+    }
+
+    setIsParkingRegistrationSubmitting(true);
+    setParkingRegistrationStatus(null);
+
+    try {
+      const response = await publicPost("/parking/registration", parkingRegistrationForm);
+      const payload = (await response.body.json()) as ParkingRegistrationResponse;
+      setParkingRegistrationStatus(payload.message);
+      setParkingRegistrationForm(initialParkingRegistrationForm);
+    } catch {
+      setParkingRegistrationStatus("Unable to submit parking registration.");
+    } finally {
+      setIsParkingRegistrationSubmitting(false);
+    }
+  };
+
+  const loadParkingManagement = async () => {
+    if (!congregationApiName || !canManageParking) {
+      return;
+    }
+
+    setIsParkingManagementLoading(true);
+    setParkingManagementError(null);
+
+    try {
+      const response = await authorizedGet<ParkingManagementResponse>("/parking/management");
+      setParkingManagement(response);
+      setParkingMaxSpotsInput(String(response.maxSpots));
+    } catch {
+      setParkingManagementError("Unable to load parking management.");
+    } finally {
+      setIsParkingManagementLoading(false);
+    }
+  };
+
+  const handleParkingManagementSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!congregationApiName || !canManageParking) {
+      return;
+    }
+
+    const maxSpots = Number(parkingMaxSpotsInput);
+
+    if (!Number.isFinite(maxSpots) || maxSpots < 0) {
+      setParkingManagementStatus("Enter a valid non-negative number of parking spots.");
+      return;
+    }
+
+    setIsParkingManagementSaving(true);
+    setParkingManagementStatus(null);
+
+    try {
+      const response = await authorizedPost("/parking/management", { maxSpots });
+      const payload = (await response.body.json()) as { message: string };
+      setParkingManagementStatus(payload.message);
+      await loadParkingManagement();
+    } catch {
+      setParkingManagementStatus("Unable to update parking capacity.");
+    } finally {
+      setIsParkingManagementSaving(false);
+    }
+  };
+
+  const loadParkingRegistrations = async () => {
+    if (!congregationApiName || !canManageParking) {
+      return;
+    }
+
+    setIsParkingRegistrationsLoading(true);
+    setParkingRegistrationsError(null);
+
+    try {
+      const response =
+        await authorizedGet<ParkingRegistrationsResponse>("/parking/registrations");
+      setParkingRegistrations(response.items);
+    } catch {
+      setParkingRegistrationsError("Unable to load parking registrations.");
+    } finally {
+      setIsParkingRegistrationsLoading(false);
+    }
+  };
+
+  const handleParkingRegistrationStatusToggle = async (
+    registration: ParkingRegistrationItem,
+  ) => {
+    if (!congregationApiName || !canManageParking) {
+      return;
+    }
+
+    setUpdatingParkingRegistrationSk(registration.sk);
+
+    try {
+      await authorizedPost("/parking/registrations/status", {
+        sk: registration.sk,
+        isActive: !registration.isActive,
+      });
+      await loadParkingRegistrations();
+      if (activePage === "parking-management") {
+        await loadParkingManagement();
+      }
+    } finally {
+      setUpdatingParkingRegistrationSk(null);
+    }
+  };
+
+  const handlePrintParkingPermit = async (registration: ParkingRegistrationItem) => {
+    setPrintingParkingRegistrationSk(registration.sk);
+    setParkingRegistrationsError(null);
+
+    try {
+      const qrPayload = JSON.stringify({
+        type: "parking-permit",
+        sk: registration.sk,
+        licensePlate: registration.licensePlate,
+        firstName: registration.firstName,
+        lastName: registration.lastName,
+        durationFrom: registration.durationFrom,
+        durationTo: registration.durationTo,
+        registeredAt: registration.registeredAt,
+      });
+      const qrCodeDataUrl = await QRCode.toDataURL(qrPayload, {
+        width: 320,
+        margin: 1,
+        color: {
+          dark: "#111827",
+          light: "#ffffff",
+        },
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = 1120;
+      canvas.height = 760;
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        throw new Error("Unable to prepare permit image.");
+      }
+
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#111827";
+      context.font = '700 56px "Avenir Next", "Segoe UI", sans-serif';
+      context.fillText("Parking Permit", 72, 100);
+      context.fillStyle = "#6b7280";
+      context.font = '500 26px "Avenir Next", "Segoe UI", sans-serif';
+      context.fillText("Place behind windshield", 72, 142);
+
+      context.fillStyle = "#111827";
+      context.font = '700 72px "Avenir Next", "Segoe UI", sans-serif';
+      context.fillText(registration.licensePlate, 72, 260);
+
+      context.font = '600 34px "Avenir Next", "Segoe UI", sans-serif';
+      context.fillText(
+        `${registration.firstName} ${registration.lastName}`,
+        72,
+        340,
+      );
+
+      context.fillStyle = "#4b5563";
+      context.font = '500 26px "Avenir Next", "Segoe UI", sans-serif';
+      context.fillText(
+        `Valid from: ${new Date(registration.durationFrom).toLocaleString()}`,
+        72,
+        420,
+      );
+      context.fillText(
+        `Valid to: ${new Date(registration.durationTo).toLocaleString()}`,
+        72,
+        466,
+      );
+      context.fillText(
+        `Registered: ${new Date(registration.registeredAt).toLocaleString()}`,
+        72,
+        512,
+      );
+
+      const qrImage = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Unable to load QR code image."));
+        image.src = qrCodeDataUrl;
+      });
+
+      context.drawImage(qrImage, 760, 116, 280, 280);
+
+      context.strokeStyle = "#e5e7eb";
+      context.lineWidth = 2;
+      context.strokeRect(742, 98, 316, 316);
+
+      context.fillStyle = "#6b7280";
+      context.font = '500 22px "Avenir Next", "Segoe UI", sans-serif';
+      context.fillText(`Permit ID: ${registration.sk}`, 72, 640);
+
+      const permitImageDataUrl = canvas.toDataURL("image/png");
+      const printWindow = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
+
+      if (!printWindow) {
+        throw new Error("Unable to open print window.");
+      }
+
+      printWindow.document.write(`<!doctype html>
+<html>
+  <head>
+    <title>Parking Permit</title>
+    <style>
+      body { margin: 0; display: grid; place-items: center; min-height: 100vh; background: #f3f4f6; }
+      img { max-width: 100%; height: auto; display: block; }
+      @media print {
+        body { background: #fff; }
+      }
+    </style>
+  </head>
+  <body>
+    <img src="${permitImageDataUrl}" alt="Parking permit" />
+    <script>
+      window.onload = function () {
+        window.print();
+      };
+    </script>
+  </body>
+</html>`);
+      printWindow.document.close();
+    } catch {
+      setParkingRegistrationsError("Unable to generate the printable parking permit.");
+    } finally {
+      setPrintingParkingRegistrationSk(null);
+    }
+  };
+
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("shepherd-hub-theme");
 
@@ -1175,6 +1588,26 @@ export default function App() {
 
     void loadUserDirectory();
   }, [activePage, authStatus, canManageUsers]);
+
+  useEffect(() => {
+    if (
+      authStatus !== "signed-in" ||
+      activePage !== "parking-management" ||
+      !canManageParking
+    ) {
+      return;
+    }
+
+    void loadParkingManagement();
+  }, [activePage, authStatus, canManageParking]);
+
+  useEffect(() => {
+    if (authStatus !== "signed-in" || activePage !== "parling" || !canManageParking) {
+      return;
+    }
+
+    void loadParkingRegistrations();
+  }, [activePage, authStatus, canManageParking]);
 
   useEffect(() => {
     if (authStatus !== "signed-in" || typeof window === "undefined") {
@@ -1241,6 +1674,25 @@ export default function App() {
       setActivePage("congregation");
     }
   }, [activePage, canManageUsers]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextUrl =
+      activePage === "parking-registration"
+        ? `${window.location.pathname}${window.location.search}#parking-registration`
+        : `${window.location.pathname}${window.location.search}`;
+
+    window.history.replaceState(window.history.state, "", nextUrl);
+  }, [activePage]);
+
+  useEffect(() => {
+    if ((activePage === "parling" || activePage === "parking-management") && !canManageParking) {
+      setActivePage("congregation");
+    }
+  }, [activePage, canManageParking]);
 
   useEffect(() => {
     if (!isMobileMenuOpen) {
@@ -1826,6 +2278,311 @@ export default function App() {
     }
   };
 
+  const renderParkingRegistrationPage = ({
+    showBackButton = false,
+  }: {
+    showBackButton?: boolean;
+  }) => (
+    <div className="parking-registration-page">
+      <form
+        className="member-form-card parking-registration-card"
+        onSubmit={handleParkingRegistrationSubmit}
+      >
+        <div className="member-form-header parking-registration-header">
+          <div>
+            <p className="member-form-mode">Parking Registration</p>
+            <p className="parking-registration-copy">
+              Provide the contact and vehicle details needed for parking coordination.
+            </p>
+          </div>
+
+          {showBackButton ? (
+            <button
+              type="button"
+              className="member-cancel-button parking-registration-back"
+              onClick={() => setActivePage("congregation")}
+            >
+              Back to Sign In
+            </button>
+          ) : null}
+        </div>
+
+        <div className="member-form-grid parking-registration-grid">
+          <label className="member-field">
+            <span>First name</span>
+            <input
+              type="text"
+              value={parkingRegistrationForm.firstName}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  firstName: event.target.value,
+                }))
+              }
+              placeholder="Enter first name"
+            />
+          </label>
+
+          <label className="member-field">
+            <span>Last name</span>
+            <input
+              type="text"
+              value={parkingRegistrationForm.lastName}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  lastName: event.target.value,
+                }))
+              }
+              placeholder="Enter last name"
+            />
+          </label>
+
+          <label className="member-field">
+            <span>License plate</span>
+            <input
+              type="text"
+              value={parkingRegistrationForm.licensePlate}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  licensePlate: event.target.value.toUpperCase(),
+                }))
+              }
+              placeholder="ABC 123"
+            />
+          </label>
+
+          <label className="member-field">
+            <span>Personal email address</span>
+            <input
+              type="email"
+              value={parkingRegistrationForm.personalEmail}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  personalEmail: event.target.value,
+                }))
+              }
+              placeholder="name@example.com"
+            />
+          </label>
+
+          <label className="member-field">
+            <span>Work email</span>
+            <input
+              type="email"
+              value={parkingRegistrationForm.workEmail}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  workEmail: event.target.value,
+                }))
+              }
+              placeholder="Use for work-hour notifications"
+            />
+          </label>
+
+          <label className="member-field">
+            <span>Place of work</span>
+            <input
+              type="text"
+              value={parkingRegistrationForm.placeOfWork}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  placeOfWork: event.target.value,
+                }))
+              }
+              placeholder="Enter place of work"
+            />
+          </label>
+
+          <label className="member-field">
+            <span>Telephone cell</span>
+            <input
+              type="tel"
+              value={parkingRegistrationForm.cellPhone}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  cellPhone: event.target.value,
+                }))
+              }
+              placeholder="Enter cell number"
+            />
+          </label>
+
+          <label className="member-field">
+            <span>Work phone</span>
+            <input
+              type="tel"
+              value={parkingRegistrationForm.workPhone}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  workPhone: event.target.value,
+                }))
+              }
+              placeholder="Enter work phone"
+            />
+          </label>
+
+          <label className="member-field">
+            <span>Duration from</span>
+            <input
+              type="datetime-local"
+              value={parkingRegistrationForm.durationFrom}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  durationFrom: event.target.value,
+                }))
+              }
+            />
+          </label>
+
+          <label className="member-field">
+            <span>Duration to</span>
+            <input
+              type="datetime-local"
+              value={parkingRegistrationForm.durationTo}
+              onChange={(event) =>
+                setParkingRegistrationForm((current) => ({
+                  ...current,
+                  durationTo: event.target.value,
+                }))
+              }
+            />
+          </label>
+        </div>
+
+        <div className="member-form-actions">
+          <p className="member-submit-message">{parkingRegistrationStatus}</p>
+          <button
+            type="button"
+            className="member-cancel-button"
+            onClick={() => {
+              setParkingRegistrationForm(initialParkingRegistrationForm);
+              setParkingRegistrationStatus(null);
+            }}
+          >
+            Clear
+          </button>
+          <button
+            type="submit"
+            className="member-submit-button"
+            disabled={isParkingRegistrationSubmitting}
+          >
+            {isParkingRegistrationSubmitting
+              ? "Submitting..."
+              : "Submit Registration"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  const renderParkingRegistrationActions = (registration: ParkingRegistrationItem) => {
+    const normalizedCellPhone = normalizePhoneForLink(registration.cellPhone);
+    const normalizedWhatsappPhone = normalizedCellPhone.replace(/[^\d]/g, "");
+    const normalizedEmail = registration.personalEmail.trim();
+
+    return (
+      <div className="parking-registration-actions">
+        <a
+          className={`member-contact-button phone${normalizedCellPhone ? "" : " disabled"}`}
+          href={normalizedCellPhone ? `tel:${normalizedCellPhone}` : undefined}
+          aria-label={`Call ${registration.firstName} ${registration.lastName}`}
+          onClick={(event) => {
+            if (!normalizedCellPhone) {
+              event.preventDefault();
+            }
+          }}
+        >
+          <img src="/phone-ios.png" alt="" className="member-contact-icon member-contact-icon-image" />
+        </a>
+        <a
+          className={`member-contact-button imessage${normalizedCellPhone ? "" : " disabled"}`}
+          href={normalizedCellPhone ? `sms:${normalizedCellPhone}` : undefined}
+          aria-label={`Message ${registration.firstName} ${registration.lastName}`}
+          onClick={(event) => {
+            if (!normalizedCellPhone) {
+              event.preventDefault();
+            }
+          }}
+        >
+          <img src="/imessage.png" alt="" className="member-contact-icon member-contact-icon-image" />
+        </a>
+        <a
+          className={`member-contact-button whatsapp${
+            normalizedWhatsappPhone ? "" : " disabled"
+          }`}
+          href={normalizedWhatsappPhone ? `https://wa.me/${normalizedWhatsappPhone}` : undefined}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`WhatsApp ${registration.firstName} ${registration.lastName}`}
+          onClick={(event) => {
+            if (!normalizedWhatsappPhone) {
+              event.preventDefault();
+            }
+          }}
+        >
+          <img src="/whatsapp.png" alt="" className="member-contact-icon member-contact-icon-image" />
+        </a>
+        <a
+          className={`member-contact-button email${normalizedEmail ? "" : " disabled"}`}
+          href={normalizedEmail ? `mailto:${normalizedEmail}` : undefined}
+          aria-label={`Email ${registration.firstName} ${registration.lastName}`}
+          onClick={(event) => {
+            if (!normalizedEmail) {
+              event.preventDefault();
+            }
+          }}
+        >
+          <svg viewBox="0 0 24 24" className="member-contact-icon" aria-hidden="true">
+            <path
+              d="M4 6.75h16A1.25 1.25 0 0 1 21.25 8v8A1.25 1.25 0 0 1 20 17.25H4A1.25 1.25 0 0 1 2.75 16V8A1.25 1.25 0 0 1 4 6.75Zm0 1.5a.25.25 0 0 0-.25.25v.27l8.03 5.18a.5.5 0 0 0 .44 0l8.03-5.18V8.5a.25.25 0 0 0-.25-.25H4Zm16.25 2.31-7.22 4.66a2 2 0 0 1-2.16 0L3.75 10.56V16c0 .14.11.25.25.25h16a.25.25 0 0 0 .25-.25v-5.44Z"
+              fill="currentColor"
+            />
+          </svg>
+        </a>
+        <button
+          type="button"
+          className={`member-contact-button parking-status-button${
+            registration.isActive ? " active" : " inactive"
+          }`}
+          aria-label={`${registration.isActive ? "Deactivate" : "Activate"} ${registration.firstName} ${registration.lastName}`}
+          onClick={() => void handleParkingRegistrationStatusToggle(registration)}
+          disabled={updatingParkingRegistrationSk === registration.sk}
+        >
+          <svg viewBox="0 0 24 24" className="member-contact-icon" aria-hidden="true">
+            <path
+              d="M11.25 3.5a.75.75 0 0 1 1.5 0v8a.75.75 0 0 1-1.5 0v-8Zm5.66 2.14a.75.75 0 0 1 1.06.03 8 8 0 1 1-11.94 0 .75.75 0 1 1 1.1 1.02 6.5 6.5 0 1 0 9.72 0 .75.75 0 0 1 .06-1.05Z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
+        {parkingTab === "active" ? (
+          <button
+            type="button"
+            className="member-contact-button parking-print-button"
+            aria-label={`Print parking permit for ${registration.firstName} ${registration.lastName}`}
+            onClick={() => void handlePrintParkingPermit(registration)}
+            disabled={printingParkingRegistrationSk === registration.sk}
+          >
+            <svg viewBox="0 0 24 24" className="member-contact-icon" aria-hidden="true">
+              <path
+                d="M6 8V4.75c0-.41.34-.75.75-.75h10.5c.41 0 .75.34.75.75V8h.75A2.25 2.25 0 0 1 21 10.25v4.5A2.25 2.25 0 0 1 18.75 17H18v2.25a.75.75 0 0 1-.75.75H6.75a.75.75 0 0 1-.75-.75V17h-.75A2.25 2.25 0 0 1 3 14.75v-4.5A2.25 2.25 0 0 1 5.25 8H6Zm1.5 0h9V5.5h-9V8Zm9 5.5h-9v5h9v-5ZM17.5 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+        ) : null}
+      </div>
+    );
+  };
+
   if (authStatus !== "signed-in") {
     const challengeLabel =
       pendingSignInStep === "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED"
@@ -1840,50 +2597,60 @@ export default function App() {
 
     return (
       <div className="auth-shell" data-theme={theme}>
-        <form
-          className="auth-card"
-          onSubmit={pendingSignInStep ? handleConfirmSignIn : handleSignIn}
-        >
-          <p className="eyebrow">Shepherd Hub</p>
-          <h1 className="auth-title">Sign in to continue</h1>
-          <p className="auth-copy">
-            Use your Cognito username and password to access Shephed Hub.
-          </p>
+        {activePage === "parking-registration" ? (
+          <div className="auth-card">{renderParkingRegistrationPage({ showBackButton: true })}</div>
+        ) : (
+          <form
+            className="auth-card"
+            onSubmit={pendingSignInStep ? handleConfirmSignIn : handleSignIn}
+          >
+            <p className="eyebrow">Shepherd Hub</p>
+            <h1 className="auth-title">Sign in to continue</h1>
+            <p className="auth-copy">
+              Use your Cognito username and password to access Shephed Hub.
+            </p>
 
-          {!pendingSignInStep ? (
-            <>
-              <label className="auth-field">
-                <span>Username</span>
-                <input
-                  type="text"
-                  value={authForm.username}
-                  onChange={(event) =>
-                    setAuthForm((current) => ({
-                      ...current,
-                      username: event.target.value,
-                    }))
-                  }
-                  placeholder="Enter your username"
-                />
-              </label>
+            <button
+              type="button"
+              className="hero-inline-link auth-inline-link"
+              onClick={() => setActivePage("parking-registration")}
+            >
+              Open Parking Registration
+            </button>
 
-              <label className="auth-field">
-                <span>Password</span>
-                <input
-                  type="password"
-                  value={authForm.password}
-                  onChange={(event) =>
-                    setAuthForm((current) => ({
-                      ...current,
-                      password: event.target.value,
-                    }))
-                  }
-                  placeholder="Enter your password"
-                />
-              </label>
-            </>
-          ) : (
-            <>
+            {!pendingSignInStep ? (
+              <>
+                <label className="auth-field">
+                  <span>Username</span>
+                  <input
+                    type="text"
+                    value={authForm.username}
+                    onChange={(event) =>
+                      setAuthForm((current) => ({
+                        ...current,
+                        username: event.target.value,
+                      }))
+                    }
+                    placeholder="Enter your username"
+                  />
+                </label>
+
+                <label className="auth-field">
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    value={authForm.password}
+                    onChange={(event) =>
+                      setAuthForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                    placeholder="Enter your password"
+                  />
+                </label>
+              </>
+            ) : (
               <label className="auth-field">
                 <span>{challengeLabel}</span>
                 <input
@@ -1897,23 +2664,23 @@ export default function App() {
                   placeholder={`Enter ${challengeLabel.toLowerCase()}`}
                 />
               </label>
-            </>
-          )}
+            )}
 
-          {authError ? <p className="auth-error">{authError}</p> : null}
+            {authError ? <p className="auth-error">{authError}</p> : null}
 
-          <button
-            type="submit"
-            className="auth-submit-button"
-            disabled={isSigningIn || authStatus === "checking"}
-          >
-            {authStatus === "checking" || isSigningIn
-              ? "Signing in..."
-              : pendingSignInStep
-                ? "Continue Sign In"
-                : "Sign In"}
-          </button>
-        </form>
+            <button
+              type="submit"
+              className="auth-submit-button"
+              disabled={isSigningIn || authStatus === "checking"}
+            >
+              {authStatus === "checking" || isSigningIn
+                ? "Signing in..."
+                : pendingSignInStep
+                  ? "Continue Sign In"
+                  : "Sign In"}
+            </button>
+          </form>
+        )}
       </div>
     );
   }
@@ -1953,8 +2720,10 @@ export default function App() {
               ...section,
               items: section.items.filter(
                 (item) =>
-                  !["user-access", "contacts-import"].includes(item.key) ||
-                  canManageUsers,
+                  ((!["user-access", "contacts-import"].includes(item.key) ||
+                    canManageUsers) &&
+                    (!["parling", "parking-management"].includes(item.key) ||
+                      canManageParking)),
               ),
             }))
             .filter((section) => section.items.length > 0)
@@ -2727,6 +3496,7 @@ export default function App() {
                       <option>Priest</option>
                     ) : null}
                     <option>Member</option>
+                    <option>parking-admin</option>
                     <option>Servant</option>
                     <option>Visitor</option>
                     <option>Sector coordinator</option>
@@ -3187,6 +3957,210 @@ export default function App() {
                     disabled={isContactsImporting}
                   >
                     {isContactsImporting ? "Importing..." : "Import Contacts"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : null}
+
+          {activePage === "parking-registration" ? renderParkingRegistrationPage({}) : null}
+
+          {activePage === "parling" ? (
+            <div className="parking-page">
+              <div className="member-form-card parking-list-card">
+                <div className="member-form-header parking-list-header">
+                  <p className="member-form-mode">Parking Registrations</p>
+                  <div className="parking-tabs" role="tablist" aria-label="Parking registration tabs">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={parkingTab === "active"}
+                      className={`parking-tab${parkingTab === "active" ? " active" : ""}`}
+                      onClick={() => setParkingTab("active")}
+                    >
+                      Current Active
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={parkingTab === "waiting-list"}
+                      className={`parking-tab${parkingTab === "waiting-list" ? " active" : ""}`}
+                      onClick={() => setParkingTab("waiting-list")}
+                    >
+                      Waiting List
+                    </button>
+                  </div>
+                </div>
+
+                {parkingRegistrationsError ? (
+                  <p className="member-submit-message">{parkingRegistrationsError}</p>
+                ) : null}
+
+                {parkingTab === "active" ? (
+                  <p className="parking-list-summary">
+                    {activeParkingRegistrations.length} current active registration
+                    {activeParkingRegistrations.length === 1 ? "" : "s"}
+                  </p>
+                ) : (
+                  <p className="parking-list-summary">
+                    {waitingListRegistrations.length} waiting list registration
+                    {waitingListRegistrations.length === 1 ? "" : "s"}, sorted by earliest
+                    registration
+                  </p>
+                )}
+
+                <div className="parking-list-items">
+                  {(parkingTab === "active"
+                    ? activeParkingRegistrations
+                    : waitingListRegistrations
+                  ).map((registration) => (
+                    <article className="parking-registration-item" key={registration.sk}>
+                      <div className="parking-registration-top">
+                        <div>
+                          <p className="parking-registration-name">
+                            {registration.firstName} {registration.lastName}
+                          </p>
+                          <p className="parking-registration-meta">{registration.sk}</p>
+                        </div>
+                        <span
+                          className={`parking-registration-status${
+                            registration.placementStatus === "waiting-list"
+                              ? " waiting"
+                              : " assigned"
+                          }`}
+                        >
+                          {registration.placementStatus === "waiting-list"
+                            ? "Waiting List"
+                            : "Assigned"}
+                        </span>
+                      </div>
+
+                      <div className="parking-registration-grid">
+                        <div>
+                          <p className="parking-registration-label">License plate</p>
+                          <p className="parking-registration-value">{registration.licensePlate}</p>
+                        </div>
+                        <div>
+                          <p className="parking-registration-label">Registered</p>
+                          <p className="parking-registration-value">
+                            {new Date(registration.registeredAt).toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="parking-registration-label">Duration</p>
+                          <p className="parking-registration-value">
+                            {new Date(registration.durationFrom).toLocaleString()} to{" "}
+                            {new Date(registration.durationTo).toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="parking-registration-label">Personal email</p>
+                          <p className="parking-registration-value">
+                            {registration.personalEmail || "Not set"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="parking-registration-label">Work email</p>
+                          <p className="parking-registration-value">
+                            {registration.workEmail || "Not set"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="parking-registration-label">Place of work</p>
+                          <p className="parking-registration-value">
+                            {registration.placeOfWork || "Not set"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="parking-registration-label">Telephone cell</p>
+                          <p className="parking-registration-value">
+                            {registration.cellPhone || "Not set"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="parking-registration-label">Work phone</p>
+                          <p className="parking-registration-value">
+                            {registration.workPhone || "Not set"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {renderParkingRegistrationActions(registration)}
+                    </article>
+                  ))}
+                </div>
+
+                {(parkingTab === "active"
+                  ? activeParkingRegistrations.length === 0
+                  : waitingListRegistrations.length === 0) ? (
+                  <p className="api-message-text">
+                    {parkingTab === "active"
+                      ? "No active assigned registrations."
+                      : "No waiting list registrations."}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {activePage === "parking-management" ? (
+            <div className="parking-management-page">
+              <form
+                className="member-form-card parking-management-card"
+                onSubmit={handleParkingManagementSubmit}
+              >
+                <div className="member-form-header">
+                  <p className="member-form-mode">Parking Capacity</p>
+                  <p className="parking-management-summary">
+                    {(parkingManagement?.activeRegistrationCount ?? 0).toLocaleString()} active
+                    registration
+                    {(parkingManagement?.activeRegistrationCount ?? 0) === 1 ? "" : "s"} /{" "}
+                    {(parkingManagement?.maxSpots ?? 0).toLocaleString()} available spots
+                  </p>
+                  {parkingManagement ? (
+                    <p className="parking-management-meta">
+                      Waiting list: {parkingManagement.waitingListCount}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="member-form-grid parking-management-grid">
+                  <label className="member-field">
+                    <span>Max parking spots</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={parkingMaxSpotsInput}
+                      onChange={(event) => setParkingMaxSpotsInput(event.target.value)}
+                      placeholder="Enter total available spots"
+                    />
+                  </label>
+                </div>
+
+                {parkingManagementError ? (
+                  <p className="member-submit-message">{parkingManagementError}</p>
+                ) : null}
+                {parkingManagementStatus ? (
+                  <p className="member-submit-message">{parkingManagementStatus}</p>
+                ) : null}
+
+                <div className="member-form-actions">
+                  <button
+                    type="button"
+                    className="member-cancel-button"
+                    onClick={() =>
+                      setParkingMaxSpotsInput(String(parkingManagement?.maxSpots ?? 0))
+                    }
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="submit"
+                    className="member-submit-button"
+                    disabled={isParkingManagementSaving || isParkingManagementLoading}
+                  >
+                    {isParkingManagementSaving ? "Saving..." : "Update Spots"}
                   </button>
                 </div>
               </form>

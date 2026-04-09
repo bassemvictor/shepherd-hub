@@ -77,6 +77,28 @@ type ImportContactsPayload = {
   content: string;
 };
 
+type ParkingRegistrationPayload = {
+  firstName: string;
+  lastName: string;
+  licensePlate: string;
+  personalEmail: string;
+  workEmail: string;
+  placeOfWork: string;
+  cellPhone: string;
+  workPhone: string;
+  durationFrom: string;
+  durationTo: string;
+};
+
+type ParkingManagementPayload = {
+  maxSpots: number;
+};
+
+type UpdateParkingRegistrationStatusPayload = {
+  sk: string;
+  isActive: boolean;
+};
+
 type StoredMemberData = {
   history?: Array<{
     timestamp: string;
@@ -113,6 +135,38 @@ type StoredAnnouncementWeekData = {
   updatedAt?: string;
 };
 
+type StoredParkingRegistrationData = {
+  firstName: string;
+  lastName: string;
+  licensePlate: string;
+  personalEmail: string;
+  workEmail: string;
+  placeOfWork: string;
+  cellPhone: string;
+  workPhone: string;
+  durationFrom: string;
+  durationTo: string;
+  registeredAt: string;
+  isActive: boolean;
+  placementStatus: "waiting-list" | "assigned";
+};
+
+type StoredParkingSettingsData = {
+  maxSpots: number;
+  updatedAt: string;
+};
+
+type ParkingRegistrationsResponse = {
+  message: string;
+  time: string;
+  items: Array<
+    StoredParkingRegistrationData & {
+      pk: string;
+      sk: string;
+    }
+  >;
+};
+
 type CognitoUserDirectoryItem = {
   username: string;
   email: string;
@@ -144,6 +198,8 @@ const normalizeWhitespace = (value?: string) => value?.replace(/\s+/g, " ").trim
 const normalizeEmail = (value?: string) => normalizeWhitespace(value).toLowerCase();
 const normalizePhone = (value?: string) =>
   (value ?? "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
+const normalizeLicensePlate = (value?: string) =>
+  normalizeWhitespace(value).replace(/[\s-]+/g, "").toUpperCase();
 const normalizeName = (
   firstName?: string,
   lastName?: string,
@@ -359,6 +415,16 @@ const isUserManager = (groups: string[]) =>
   groups.includes("admin") || groups.includes("super_user");
 const isAdminUser = (groups: string[]) => groups.includes("admin");
 
+const getRequestEmail = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
+  const claims =
+    ((event.requestContext as { authorizer?: { jwt?: { claims?: Record<string, unknown> } } })
+      .authorizer?.jwt?.claims as Record<string, unknown> | undefined) ?? {};
+
+  const email = claims.email;
+
+  return typeof email === "string" ? normalizeEmail(email) : "";
+};
+
 const forbiddenResponse = (time: string, message: string) => ({
   statusCode: 403,
   headers: responseHeaders,
@@ -392,6 +458,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const userPoolId = process.env.USER_POOL_ID;
   const requestPath = event.requestContext.http.path;
   const requestGroups = getRequestGroups(event);
+  const requestEmail = getRequestEmail(event);
 
   if (!tableName) {
     return {
@@ -403,6 +470,44 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         items: [],
       }),
     };
+  }
+
+  if (
+    (requestPath.endsWith("/parking/management") ||
+      requestPath.endsWith("/parking/registrations")) &&
+    !isAdminUser(requestGroups)
+  ) {
+    const congregationResponse = await dynamoClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: {
+          ":pk": "CONGREGATION",
+        },
+      }),
+    );
+    const congregationItems = (congregationResponse.Items ?? []) as TableRow[];
+    const hasParkingAdminRole = congregationItems.some((item) => {
+      let memberData: StoredMemberData = {};
+
+      try {
+        memberData = JSON.parse(item.data) as StoredMemberData;
+      } catch {
+        memberData = {};
+      }
+
+      return (
+        normalizeEmail(memberData.email) === requestEmail &&
+        memberData.role === "parking-admin"
+      );
+    });
+
+    if (!hasParkingAdminRole) {
+      return forbiddenResponse(
+        time,
+        "You do not have access to manage parking settings.",
+      );
+    }
   }
 
   if (
@@ -444,6 +549,217 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   }
 
   if (event.requestContext.http.method === "POST") {
+    if (requestPath.endsWith("/parking/registration")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<ParkingRegistrationPayload>;
+
+      if (
+        !payload.firstName ||
+        !payload.lastName ||
+        !payload.licensePlate ||
+        !payload.personalEmail ||
+        !payload.cellPhone ||
+        !payload.durationFrom ||
+        !payload.durationTo
+      ) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message:
+              "First name, last name, license plate, personal email, telephone cell, and duration fields are required.",
+            time,
+          }),
+        };
+      }
+
+      const normalizedLicensePlate = normalizeLicensePlate(payload.licensePlate);
+      const existingRegistrationsResponse = await dynamoClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk",
+          ExpressionAttributeValues: {
+            ":pk": "PARKING_REGISTRATION",
+          },
+        }),
+      );
+      const existingRegistrations = (existingRegistrationsResponse.Items ?? []) as TableRow[];
+      const duplicateRegistration = existingRegistrations.some((item) => {
+        try {
+          const existingData = JSON.parse(item.data) as StoredParkingRegistrationData;
+          return normalizeLicensePlate(existingData.licensePlate) === normalizedLicensePlate;
+        } catch {
+          return false;
+        }
+      });
+
+      if (duplicateRegistration) {
+        return {
+          statusCode: 409,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A parking registration already exists for that license plate.",
+            time,
+          }),
+        };
+      }
+
+      const registrationId = crypto.randomUUID();
+      const data: StoredParkingRegistrationData = {
+        firstName: payload.firstName.trim(),
+        lastName: payload.lastName.trim(),
+        licensePlate: payload.licensePlate.trim().toUpperCase(),
+        personalEmail: payload.personalEmail.trim(),
+        workEmail: payload.workEmail?.trim() ?? "",
+        placeOfWork: payload.placeOfWork?.trim() ?? "",
+        cellPhone: payload.cellPhone.trim(),
+        workPhone: payload.workPhone?.trim() ?? "",
+        durationFrom: payload.durationFrom,
+        durationTo: payload.durationTo,
+        registeredAt: time,
+        isActive: true,
+        placementStatus: "waiting-list",
+      };
+
+      await dynamoClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            pk: "PARKING_REGISTRATION",
+            sk: `REGISTRATION#${registrationId}`,
+            data: JSON.stringify(data),
+          },
+        }),
+      );
+
+      return {
+        statusCode: 201,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message:
+            "Parking registration submitted. Status is active and currently marked as waiting list until a place is assigned.",
+          time,
+          pk: "PARKING_REGISTRATION",
+          sk: `REGISTRATION#${registrationId}`,
+        }),
+      };
+    }
+
+    if (requestPath.endsWith("/parking/management")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<ParkingManagementPayload>;
+      const maxSpots = Number(payload.maxSpots);
+
+      if (!Number.isFinite(maxSpots) || maxSpots < 0) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "maxSpots must be a non-negative number.",
+            time,
+          }),
+        };
+      }
+
+      await dynamoClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            pk: "PARKING_SETTINGS",
+            sk: "CONFIG",
+            data: JSON.stringify({
+              maxSpots,
+              updatedAt: time,
+            } satisfies StoredParkingSettingsData),
+          },
+        }),
+      );
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Parking capacity updated.",
+          time,
+          maxSpots,
+        }),
+      };
+    }
+
+    if (requestPath.endsWith("/parking/registrations/status")) {
+      const payload = JSON.parse(event.body ?? "{}") as Partial<UpdateParkingRegistrationStatusPayload>;
+
+      if (!payload.sk || typeof payload.isActive !== "boolean") {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "sk and isActive are required.",
+            time,
+          }),
+        };
+      }
+
+      const existingResponse = await dynamoClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            pk: "PARKING_REGISTRATION",
+            sk: payload.sk,
+          },
+        }),
+      );
+
+      if (!existingResponse.Item?.data) {
+        return {
+          statusCode: 404,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Parking registration not found.",
+            time,
+          }),
+        };
+      }
+
+      let existingData: StoredParkingRegistrationData;
+
+      try {
+        existingData = JSON.parse(String(existingResponse.Item.data)) as StoredParkingRegistrationData;
+      } catch {
+        return {
+          statusCode: 500,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Parking registration data is invalid.",
+            time,
+          }),
+        };
+      }
+
+      await dynamoClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            pk: "PARKING_REGISTRATION",
+            sk: payload.sk,
+            data: JSON.stringify({
+              ...existingData,
+              isActive: payload.isActive,
+            } satisfies StoredParkingRegistrationData),
+          },
+        }),
+      );
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: payload.isActive
+            ? "Parking registration activated."
+            : "Parking registration deactivated.",
+          time,
+        }),
+      };
+    }
+
     if (requestPath.endsWith("/contacts/import")) {
       const payload = JSON.parse(event.body ?? "{}") as Partial<ImportContactsPayload>;
 
@@ -1287,6 +1603,112 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         time,
         items,
       }),
+    };
+  }
+
+  if (requestPath.endsWith("/parking/management")) {
+    const [settingsResponse, registrationsResponse] = await Promise.all([
+      dynamoClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            pk: "PARKING_SETTINGS",
+            sk: "CONFIG",
+          },
+        }),
+      ),
+      dynamoClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk",
+          ExpressionAttributeValues: {
+            ":pk": "PARKING_REGISTRATION",
+          },
+        }),
+      ),
+    ]);
+
+    let settingsData: StoredParkingSettingsData = {
+      maxSpots: 0,
+      updatedAt: "",
+    };
+
+    try {
+      if (settingsResponse.Item?.data) {
+        settingsData = JSON.parse(String(settingsResponse.Item.data)) as StoredParkingSettingsData;
+      }
+    } catch {
+      settingsData = {
+        maxSpots: 0,
+        updatedAt: "",
+      };
+    }
+
+    const registrations = ((registrationsResponse.Items ?? []) as TableRow[]).map((item) => {
+      try {
+        return JSON.parse(item.data) as StoredParkingRegistrationData;
+      } catch {
+        return null;
+      }
+    }).filter(Boolean) as StoredParkingRegistrationData[];
+
+    const activeRegistrationCount = registrations.filter(
+      (registration) => registration.isActive,
+    ).length;
+    const waitingListCount = registrations.filter(
+      (registration) => registration.placementStatus === "waiting-list",
+    ).length;
+
+    return {
+      statusCode: 200,
+      headers: responseHeaders,
+      body: JSON.stringify({
+        message: "Parking management loaded.",
+        time,
+        maxSpots: settingsData.maxSpots ?? 0,
+        activeRegistrationCount,
+        waitingListCount,
+        updatedAt: settingsData.updatedAt ?? "",
+      }),
+    };
+  }
+
+  if (requestPath.endsWith("/parking/registrations")) {
+    const registrationsResponse = await dynamoClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: {
+          ":pk": "PARKING_REGISTRATION",
+        },
+      }),
+    );
+
+    const items = ((registrationsResponse.Items ?? []) as TableRow[])
+      .map((item) => {
+        try {
+          return {
+            pk: item.pk,
+            sk: item.sk,
+            ...(JSON.parse(item.data) as StoredParkingRegistrationData),
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((left, right) =>
+        String(left?.registeredAt ?? "").localeCompare(String(right?.registeredAt ?? "")),
+      ) as ParkingRegistrationsResponse["items"];
+
+    return {
+      statusCode: 200,
+      headers: responseHeaders,
+      body: JSON.stringify({
+        message: "Parking registrations loaded.",
+        time,
+        items,
+      } satisfies ParkingRegistrationsResponse),
     };
   }
 

@@ -1,6 +1,6 @@
 import { defineBackend } from "@aws-amplify/backend";
 import { Stack } from "aws-cdk-lib";
-import { CorsHttpMethod, HttpApi, HttpMethod, } from "aws-cdk-lib/aws-apigatewayv2";
+import { CorsHttpMethod, HttpApi, HttpMethod, HttpNoneAuthorizer, } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpUserPoolAuthorizer } from "aws-cdk-lib/aws-apigatewayv2-authorizers";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { AttributeType, BillingMode, Table, } from "aws-cdk-lib/aws-dynamodb";
@@ -94,6 +94,27 @@ congregationApi.addRoutes({
     path: "/contacts/import",
     methods: [HttpMethod.POST],
     integration: new HttpLambdaIntegration("ContactsImportIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/parking/registration",
+    methods: [HttpMethod.POST],
+    authorizer: new HttpNoneAuthorizer(),
+    integration: new HttpLambdaIntegration("ParkingRegistrationIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/parking/management",
+    methods: [HttpMethod.GET, HttpMethod.POST],
+    integration: new HttpLambdaIntegration("ParkingManagementIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/parking/registrations",
+    methods: [HttpMethod.GET],
+    integration: new HttpLambdaIntegration("ParkingRegistrationsIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/parking/registrations/status",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("ParkingRegistrationsStatusIntegration", backend.congregationMessage.resources.lambda),
 });
 congregationApi.addRoutes({
     path: "/admin/users",
