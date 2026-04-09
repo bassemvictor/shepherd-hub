@@ -148,7 +148,7 @@ type StoredParkingRegistrationData = {
   durationTo: string;
   registeredAt: string;
   isActive: boolean;
-  placementStatus: "waiting-list" | "assigned";
+  placementStatus: "waiting-list" | "active" | "assigned";
 };
 
 type StoredParkingSettingsData = {
@@ -211,6 +211,8 @@ const normalizeName = (
 
 const getStoredMemberName = (firstName?: string, lastName?: string) =>
   [firstName, lastName].filter(Boolean).join(" ").trim();
+const isActiveParkingPlacementStatus = (value?: string) =>
+  value === "active" || value === "assigned";
 
 const decodeVcfValue = (value: string) =>
   value
@@ -603,6 +605,59 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         };
       }
 
+      const [settingsResponse, registrationsResponse] = await Promise.all([
+        dynamoClient.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: {
+              pk: "PARKING_SETTINGS",
+              sk: "CONFIG",
+            },
+          }),
+        ),
+        dynamoClient.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "pk = :pk",
+            ExpressionAttributeValues: {
+              ":pk": "PARKING_REGISTRATION",
+            },
+          }),
+        ),
+      ]);
+
+      let settingsData: StoredParkingSettingsData = {
+        maxSpots: 0,
+        updatedAt: "",
+      };
+
+      try {
+        if (settingsResponse.Item?.data) {
+          settingsData = JSON.parse(String(settingsResponse.Item.data)) as StoredParkingSettingsData;
+        }
+      } catch {
+        settingsData = {
+          maxSpots: 0,
+          updatedAt: "",
+        };
+      }
+
+      const existingParkingRegistrations = ((registrationsResponse.Items ?? []) as TableRow[])
+        .map((item) => {
+          try {
+            return JSON.parse(item.data) as StoredParkingRegistrationData;
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean) as StoredParkingRegistrationData[];
+      const currentActiveCount = existingParkingRegistrations.filter(
+        (registration) =>
+          registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus),
+      ).length;
+      const placementStatus =
+        settingsData.maxSpots > currentActiveCount ? "active" : "waiting-list";
+
       const registrationId = crypto.randomUUID();
       const data: StoredParkingRegistrationData = {
         firstName: payload.firstName.trim(),
@@ -617,7 +672,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         durationTo: payload.durationTo,
         registeredAt: time,
         isActive: true,
-        placementStatus: "waiting-list",
+        placementStatus,
       };
 
       await dynamoClient.send(
@@ -636,7 +691,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         headers: responseHeaders,
         body: JSON.stringify({
           message:
-            "Parking registration submitted. Status is active and currently marked as waiting list until a place is assigned.",
+            placementStatus === "active"
+              ? "Parking registration submitted and marked as Active."
+              : "Parking registration submitted and added to the waiting list.",
           time,
           pk: "PARKING_REGISTRATION",
           sk: `REGISTRATION#${registrationId}`,
@@ -1653,10 +1710,11 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }).filter(Boolean) as StoredParkingRegistrationData[];
 
     const activeRegistrationCount = registrations.filter(
-      (registration) => registration.isActive,
+      (registration) =>
+        registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus),
     ).length;
     const waitingListCount = registrations.filter(
-      (registration) => registration.placementStatus === "waiting-list",
+      (registration) => registration.isActive && registration.placementStatus === "waiting-list",
     ).length;
 
     return {

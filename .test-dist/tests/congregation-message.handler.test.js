@@ -173,6 +173,18 @@ test("creates a parking registration", async () => {
         if (command.constructor.name === "QueryCommand") {
             return { Items: [] };
         }
+        if (command.constructor.name === "GetCommand") {
+            return {
+                Item: {
+                    pk: "PARKING_SETTINGS",
+                    sk: "CONFIG",
+                    data: JSON.stringify({
+                        maxSpots: 10,
+                        updatedAt: "2026-04-09T10:00:00.000Z",
+                    }),
+                },
+            };
+        }
         if (command.constructor.name === "PutCommand") {
             return {};
         }
@@ -213,7 +225,7 @@ test("creates a parking registration", async () => {
     assert.equal(storedData.durationFrom, "2026-04-09T08:00");
     assert.equal(storedData.durationTo, "2026-04-09T17:00");
     assert.equal(storedData.isActive, true);
-    assert.equal(storedData.placementStatus, "waiting-list");
+    assert.equal(storedData.placementStatus, "active");
     assert.equal(typeof storedData.registeredAt, "string");
 });
 test("blocks parking registration when license plate already exists", async () => {
@@ -301,7 +313,7 @@ test("loads and updates parking management", async () => {
                         sk: "REGISTRATION#2",
                         data: JSON.stringify({
                             isActive: true,
-                            placementStatus: "assigned",
+                            placementStatus: "active",
                         }),
                     },
                 ],
@@ -347,7 +359,7 @@ test("loads and updates parking management", async () => {
     const getBody = parseBody(getResponse.body);
     assert.equal(getResponse.statusCode, 200);
     assert.equal(getBody.maxSpots, 50);
-    assert.equal(getBody.activeRegistrationCount, 2);
+    assert.equal(getBody.activeRegistrationCount, 1);
     assert.equal(getBody.waitingListCount, 1);
     const postResponse = await invokeHandler({
         ...createEvent({
@@ -413,7 +425,7 @@ test("lists parking registrations for parking admin", async () => {
                             lastName: "Two",
                             registeredAt: "2026-03-01T08:00:00.000Z",
                             isActive: true,
-                            placementStatus: "assigned",
+                            placementStatus: "active",
                         }),
                     },
                 ],

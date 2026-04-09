@@ -8,6 +8,7 @@ const normalizePhone = (value) => (value ?? "").replace(/[^\d+]/g, "").replace(/
 const normalizeLicensePlate = (value) => normalizeWhitespace(value).replace(/[\s-]+/g, "").toUpperCase();
 const normalizeName = (firstName, lastName, displayName) => normalizeWhitespace([firstName, lastName].filter(Boolean).join(" ") || displayName || "").toLowerCase();
 const getStoredMemberName = (firstName, lastName) => [firstName, lastName].filter(Boolean).join(" ").trim();
+const isActiveParkingPlacementStatus = (value) => value === "active" || value === "assigned";
 const decodeVcfValue = (value) => value
     .replace(/\\n/gi, "\n")
     .replace(/\\,/g, ",")
@@ -307,6 +308,49 @@ export const handler = async (event) => {
                     }),
                 };
             }
+            const [settingsResponse, registrationsResponse] = await Promise.all([
+                dynamoClient.send(new GetCommand({
+                    TableName: tableName,
+                    Key: {
+                        pk: "PARKING_SETTINGS",
+                        sk: "CONFIG",
+                    },
+                })),
+                dynamoClient.send(new QueryCommand({
+                    TableName: tableName,
+                    KeyConditionExpression: "pk = :pk",
+                    ExpressionAttributeValues: {
+                        ":pk": "PARKING_REGISTRATION",
+                    },
+                })),
+            ]);
+            let settingsData = {
+                maxSpots: 0,
+                updatedAt: "",
+            };
+            try {
+                if (settingsResponse.Item?.data) {
+                    settingsData = JSON.parse(String(settingsResponse.Item.data));
+                }
+            }
+            catch {
+                settingsData = {
+                    maxSpots: 0,
+                    updatedAt: "",
+                };
+            }
+            const existingParkingRegistrations = (registrationsResponse.Items ?? [])
+                .map((item) => {
+                try {
+                    return JSON.parse(item.data);
+                }
+                catch {
+                    return null;
+                }
+            })
+                .filter(Boolean);
+            const currentActiveCount = existingParkingRegistrations.filter((registration) => registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus)).length;
+            const placementStatus = settingsData.maxSpots > currentActiveCount ? "active" : "waiting-list";
             const registrationId = crypto.randomUUID();
             const data = {
                 firstName: payload.firstName.trim(),
@@ -321,7 +365,7 @@ export const handler = async (event) => {
                 durationTo: payload.durationTo,
                 registeredAt: time,
                 isActive: true,
-                placementStatus: "waiting-list",
+                placementStatus,
             };
             await dynamoClient.send(new PutCommand({
                 TableName: tableName,
@@ -335,7 +379,9 @@ export const handler = async (event) => {
                 statusCode: 201,
                 headers: responseHeaders,
                 body: JSON.stringify({
-                    message: "Parking registration submitted. Status is active and currently marked as waiting list until a place is assigned.",
+                    message: placementStatus === "active"
+                        ? "Parking registration submitted and marked as Active."
+                        : "Parking registration submitted and added to the waiting list.",
                     time,
                     pk: "PARKING_REGISTRATION",
                     sk: `REGISTRATION#${registrationId}`,
@@ -1141,8 +1187,8 @@ export const handler = async (event) => {
                 return null;
             }
         }).filter(Boolean);
-        const activeRegistrationCount = registrations.filter((registration) => registration.isActive).length;
-        const waitingListCount = registrations.filter((registration) => registration.placementStatus === "waiting-list").length;
+        const activeRegistrationCount = registrations.filter((registration) => registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus)).length;
+        const waitingListCount = registrations.filter((registration) => registration.isActive && registration.placementStatus === "waiting-list").length;
         return {
             statusCode: 200,
             headers: responseHeaders,

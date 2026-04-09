@@ -329,7 +329,7 @@ type ParkingRegistrationItem = {
   durationTo: string;
   registeredAt: string;
   isActive: boolean;
-  placementStatus: "waiting-list" | "assigned";
+  placementStatus: "waiting-list" | "active" | "assigned";
 };
 
 type ParkingRegistrationsResponse = {
@@ -572,6 +572,9 @@ const buildCalendarDays = (monthDate: Date) => {
   });
 };
 
+const isActiveParkingPlacementStatus = (value?: string) =>
+  value === "active" || value === "assigned";
+
 const extractGroupsFromClaim = (value: unknown) => {
   if (Array.isArray(value)) {
     return value.map(String);
@@ -764,7 +767,8 @@ export default function App() {
     );
   const currentAnnouncementWeekLabel = getCurrentIsoWeekLabel();
   const activeParkingRegistrations = parkingRegistrations.filter(
-    (registration) => registration.isActive && registration.placementStatus !== "waiting-list",
+    (registration) =>
+      registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus),
   );
   const waitingListRegistrations = parkingRegistrations
     .filter((registration) => registration.placementStatus === "waiting-list")
@@ -2566,17 +2570,12 @@ export default function App() {
         {parkingTab === "active" ? (
           <button
             type="button"
-            className="member-contact-button parking-print-button"
+            className="parking-print-link"
             aria-label={`Print parking permit for ${registration.firstName} ${registration.lastName}`}
             onClick={() => void handlePrintParkingPermit(registration)}
             disabled={printingParkingRegistrationSk === registration.sk}
           >
-            <svg viewBox="0 0 24 24" className="member-contact-icon" aria-hidden="true">
-              <path
-                d="M6 8V4.75c0-.41.34-.75.75-.75h10.5c.41 0 .75.34.75.75V8h.75A2.25 2.25 0 0 1 21 10.25v4.5A2.25 2.25 0 0 1 18.75 17H18v2.25a.75.75 0 0 1-.75.75H6.75a.75.75 0 0 1-.75-.75V17h-.75A2.25 2.25 0 0 1 3 14.75v-4.5A2.25 2.25 0 0 1 5.25 8H6Zm1.5 0h9V5.5h-9V8Zm9 5.5h-9v5h9v-5ZM17.5 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-                fill="currentColor"
-              />
-            </svg>
+            {printingParkingRegistrationSk === registration.sk ? "Preparing..." : "Print QR"}
           </button>
         ) : null}
       </div>
@@ -4031,7 +4030,7 @@ export default function App() {
                         >
                           {registration.placementStatus === "waiting-list"
                             ? "Waiting List"
-                            : "Assigned"}
+                            : "Active"}
                         </span>
                       </div>
 

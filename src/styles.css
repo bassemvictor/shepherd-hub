@@ -325,10 +325,20 @@ button {
   color: #d13212;
 }
 
-.parking-registration-actions .parking-print-button {
-  border-color: rgba(124, 58, 237, 0.22);
-  background: rgba(124, 58, 237, 0.1);
+.parking-print-link {
+  border: 0;
+  background: transparent;
   color: #7c3aed;
+  font-weight: 700;
+  padding: 0.35rem 0.2rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.18rem;
+}
+
+.parking-print-link:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .parking-management-meta {
@@ -370,9 +380,7 @@ button {
   color: #fecaca;
 }
 
-[data-theme="dark"] .parking-registration-actions .parking-print-button {
-  border-color: rgba(167, 139, 250, 0.28);
-  background: rgba(124, 58, 237, 0.2);
+[data-theme="dark"] .parking-print-link {
   color: #ddd6fe;
 }
 
