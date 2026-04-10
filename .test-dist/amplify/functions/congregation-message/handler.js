@@ -6,9 +6,10 @@ const normalizeWhitespace = (value) => value?.replace(/\s+/g, " ").trim() ?? "";
 const normalizeEmail = (value) => normalizeWhitespace(value).toLowerCase();
 const normalizePhone = (value) => (value ?? "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
 const normalizeLicensePlate = (value) => normalizeWhitespace(value).replace(/[\s-]+/g, "").toUpperCase();
+const isParkingMonthValue = (value) => /^\d{4}-\d{2}$/.test(value ?? "");
 const normalizeName = (firstName, lastName, displayName) => normalizeWhitespace([firstName, lastName].filter(Boolean).join(" ") || displayName || "").toLowerCase();
 const getStoredMemberName = (firstName, lastName) => [firstName, lastName].filter(Boolean).join(" ").trim();
-const isActiveParkingPlacementStatus = (value) => value === "active" || value === "assigned";
+const isActiveParkingPlacementStatus = (value) => value === "assigned" || value === "active";
 const decodeVcfValue = (value) => value
     .replace(/\\n/gi, "\n")
     .replace(/\\,/g, ",")
@@ -280,6 +281,27 @@ export const handler = async (event) => {
                     }),
                 };
             }
+            if (!isParkingMonthValue(payload.durationFrom) ||
+                !isParkingMonthValue(payload.durationTo)) {
+                return {
+                    statusCode: 400,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: "Duration fields must use the YYYY-MM month format.",
+                        time,
+                    }),
+                };
+            }
+            if (payload.durationFrom >= payload.durationTo) {
+                return {
+                    statusCode: 400,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: "Duration from must be earlier than duration to.",
+                        time,
+                    }),
+                };
+            }
             const normalizedLicensePlate = normalizeLicensePlate(payload.licensePlate);
             const existingRegistrationsResponse = await dynamoClient.send(new QueryCommand({
                 TableName: tableName,
@@ -350,7 +372,7 @@ export const handler = async (event) => {
             })
                 .filter(Boolean);
             const currentActiveCount = existingParkingRegistrations.filter((registration) => registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus)).length;
-            const placementStatus = settingsData.maxSpots > currentActiveCount ? "active" : "waiting-list";
+            const placementStatus = settingsData.maxSpots > currentActiveCount ? "assigned" : "waiting-list";
             const registrationId = crypto.randomUUID();
             const data = {
                 firstName: payload.firstName.trim(),
@@ -379,8 +401,8 @@ export const handler = async (event) => {
                 statusCode: 201,
                 headers: responseHeaders,
                 body: JSON.stringify({
-                    message: placementStatus === "active"
-                        ? "Parking registration submitted and marked as Active."
+                    message: placementStatus === "assigned"
+                        ? "Parking registration submitted and marked as Assigned."
                         : "Parking registration submitted and added to the waiting list.",
                     time,
                     pk: "PARKING_REGISTRATION",
@@ -424,12 +446,14 @@ export const handler = async (event) => {
         }
         if (requestPath.endsWith("/parking/registrations/status")) {
             const payload = JSON.parse(event.body ?? "{}");
-            if (!payload.sk || typeof payload.isActive !== "boolean") {
+            if (!payload.sk ||
+                (payload.placementStatus !== "assigned" &&
+                    payload.placementStatus !== "waiting-list")) {
                 return {
                     statusCode: 400,
                     headers: responseHeaders,
                     body: JSON.stringify({
-                        message: "sk and isActive are required.",
+                        message: "sk and placementStatus are required.",
                         time,
                     }),
                 };
@@ -472,7 +496,7 @@ export const handler = async (event) => {
                     sk: payload.sk,
                     data: JSON.stringify({
                         ...existingData,
-                        isActive: payload.isActive,
+                        placementStatus: payload.placementStatus,
                     }),
                 },
             }));
@@ -480,9 +504,9 @@ export const handler = async (event) => {
                 statusCode: 200,
                 headers: responseHeaders,
                 body: JSON.stringify({
-                    message: payload.isActive
-                        ? "Parking registration activated."
-                        : "Parking registration deactivated.",
+                    message: payload.placementStatus === "assigned"
+                        ? "Parking registration assigned."
+                        : "Parking registration moved to the waiting list.",
                     time,
                 }),
             };

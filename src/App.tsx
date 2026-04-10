@@ -139,7 +139,6 @@ const navSections: Array<{
     label: "Parking",
     items: [
       { key: "parking-registration", label: "Parking Registration" },
-      { key: "parling", label: "Parking" },
       { key: "parking-management", label: "Parking Management" },
     ],
   },
@@ -329,7 +328,7 @@ type ParkingRegistrationItem = {
   durationTo: string;
   registeredAt: string;
   isActive: boolean;
-  placementStatus: "waiting-list" | "active" | "assigned";
+  placementStatus: "waiting-list" | "assigned" | "active";
 };
 
 type ParkingRegistrationsResponse = {
@@ -417,6 +416,49 @@ const normalizePhoneForLink = (value?: string) => {
 };
 
 const normalizeEmailValue = (value?: string) => value?.trim().toLowerCase() ?? "";
+
+const isParkingMonthValue = (value?: string) => /^\d{4}-\d{2}$/.test(value ?? "");
+
+const parseParkingMonthStart = (value?: string) => {
+  if (isParkingMonthValue(value)) {
+    const [year, month] = value!.split("-").map(Number);
+
+    return new Date(year, month - 1, 1);
+  }
+
+  if (!value) {
+    return null;
+  }
+
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return new Date(parsedDate.getFullYear(), parsedDate.getMonth(), 1);
+};
+
+const formatParkingMonthLabel = (value?: string) => {
+  const monthStart = parseParkingMonthStart(value);
+
+  if (!monthStart) {
+    return "Not set";
+  }
+
+  return monthStart.toLocaleDateString(undefined, {
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const formatParkingDurationLabel = (durationFrom?: string, durationTo?: string) => {
+  if (!durationFrom || !durationTo) {
+    return "Not set";
+  }
+
+  return `${formatParkingMonthLabel(durationFrom)} to ${formatParkingMonthLabel(durationTo)}`;
+};
 
 const getMemberInitials = (
   firstName?: string,
@@ -573,7 +615,7 @@ const buildCalendarDays = (monthDate: Date) => {
 };
 
 const isActiveParkingPlacementStatus = (value?: string) =>
-  value === "active" || value === "assigned";
+  value === "assigned" || value === "active";
 
 const extractGroupsFromClaim = (value: unknown) => {
   if (Array.isArray(value)) {
@@ -739,7 +781,9 @@ export default function App() {
   const [parkingRegistrations, setParkingRegistrations] = useState<ParkingRegistrationItem[]>([]);
   const [parkingRegistrationsError, setParkingRegistrationsError] = useState<string | null>(null);
   const [isParkingRegistrationsLoading, setIsParkingRegistrationsLoading] = useState(false);
-  const [parkingTab, setParkingTab] = useState<"active" | "waiting-list">("active");
+  const [parkingTab, setParkingTab] = useState<"active" | "waiting-list" | "inactive">(
+    "active",
+  );
   const [updatingParkingRegistrationSk, setUpdatingParkingRegistrationSk] = useState<
     string | null
   >(null);
@@ -772,6 +816,10 @@ export default function App() {
   );
   const waitingListRegistrations = parkingRegistrations
     .filter((registration) => registration.placementStatus === "waiting-list")
+    .slice()
+    .sort((left, right) => left.registeredAt.localeCompare(right.registeredAt));
+  const inactiveParkingRegistrations = parkingRegistrations
+    .filter((registration) => !registration.isActive)
     .slice()
     .sort((left, right) => left.registeredAt.localeCompare(right.registeredAt));
   const isBackendRequestInFlight =
@@ -1306,6 +1354,11 @@ export default function App() {
       return;
     }
 
+    if (parkingRegistrationForm.durationFrom >= parkingRegistrationForm.durationTo) {
+      setParkingRegistrationStatus("Duration from must be earlier than duration to.");
+      return;
+    }
+
     setIsParkingRegistrationSubmitting(true);
     setParkingRegistrationStatus(null);
 
@@ -1400,7 +1453,8 @@ export default function App() {
     try {
       await authorizedPost("/parking/registrations/status", {
         sk: registration.sk,
-        isActive: !registration.isActive,
+        placementStatus:
+          registration.placementStatus === "waiting-list" ? "assigned" : "waiting-list",
       });
       await loadParkingRegistrations();
       if (activePage === "parking-management") {
@@ -1414,8 +1468,26 @@ export default function App() {
   const handlePrintParkingPermit = async (registration: ParkingRegistrationItem) => {
     setPrintingParkingRegistrationSk(registration.sk);
     setParkingRegistrationsError(null);
+    const printWindow = window.open("", "_blank", "width=900,height=700");
 
     try {
+      if (!printWindow) {
+        throw new Error("Unable to open print window.");
+      }
+
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html>
+<html>
+  <head>
+    <title>Preparing Parking Permit</title>
+    <style>
+      body { margin: 0; display: grid; place-items: center; min-height: 100vh; background: #f3f4f6; color: #111827; font: 600 18px "Avenir Next", "Segoe UI", sans-serif; }
+    </style>
+  </head>
+  <body>Preparing parking permit...</body>
+</html>`);
+      printWindow.document.close();
+
       const qrPayload = JSON.stringify({
         type: "parking-permit",
         sk: registration.sk,
@@ -1466,12 +1538,12 @@ export default function App() {
       context.fillStyle = "#4b5563";
       context.font = '500 26px "Avenir Next", "Segoe UI", sans-serif';
       context.fillText(
-        `Valid from: ${new Date(registration.durationFrom).toLocaleString()}`,
+        `Valid from: ${formatParkingMonthLabel(registration.durationFrom)}`,
         72,
         420,
       );
       context.fillText(
-        `Valid to: ${new Date(registration.durationTo).toLocaleString()}`,
+        `Valid to: ${formatParkingMonthLabel(registration.durationTo)}`,
         72,
         466,
       );
@@ -1499,12 +1571,7 @@ export default function App() {
       context.fillText(`Permit ID: ${registration.sk}`, 72, 640);
 
       const permitImageDataUrl = canvas.toDataURL("image/png");
-      const printWindow = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
-
-      if (!printWindow) {
-        throw new Error("Unable to open print window.");
-      }
-
+      printWindow.document.open();
       printWindow.document.write(`<!doctype html>
 <html>
   <head>
@@ -1528,6 +1595,15 @@ export default function App() {
 </html>`);
       printWindow.document.close();
     } catch {
+      if (printWindow && !printWindow.closed) {
+        printWindow.document.open();
+        printWindow.document.write(`<!doctype html>
+<html>
+  <head><title>Parking Permit</title></head>
+  <body style="font-family: sans-serif; padding: 24px;">Unable to generate the printable parking permit.</body>
+</html>`);
+        printWindow.document.close();
+      }
       setParkingRegistrationsError("Unable to generate the printable parking permit.");
     } finally {
       setPrintingParkingRegistrationSk(null);
@@ -1596,7 +1672,7 @@ export default function App() {
   useEffect(() => {
     if (
       authStatus !== "signed-in" ||
-      activePage !== "parking-management" ||
+      !["parking-management", "parling"].includes(activePage) ||
       !canManageParking
     ) {
       return;
@@ -1606,7 +1682,11 @@ export default function App() {
   }, [activePage, authStatus, canManageParking]);
 
   useEffect(() => {
-    if (authStatus !== "signed-in" || activePage !== "parling" || !canManageParking) {
+    if (
+      authStatus !== "signed-in" ||
+      !["parking-management", "parling"].includes(activePage) ||
+      !canManageParking
+    ) {
       return;
     }
 
@@ -1699,6 +1779,12 @@ export default function App() {
   }, [activePage, canManageParking]);
 
   useEffect(() => {
+    if (activePage === "parling") {
+      setActivePage("parking-management");
+    }
+  }, [activePage]);
+
+  useEffect(() => {
     if (!isMobileMenuOpen) {
       return;
     }
@@ -1721,6 +1807,26 @@ export default function App() {
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("touchstart", handlePointerDown);
+    };
+  }, [isMobileMenuOpen]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const body = document.body;
+    const previousOverflow = body.style.overflow;
+    const previousTouchAction = body.style.touchAction;
+
+    if (isMobileMenuOpen) {
+      body.style.overflow = "hidden";
+      body.style.touchAction = "none";
+    }
+
+    return () => {
+      body.style.overflow = previousOverflow;
+      body.style.touchAction = previousTouchAction;
     };
   }, [isMobileMenuOpen]);
 
@@ -2316,6 +2422,7 @@ export default function App() {
             <span>First name</span>
             <input
               type="text"
+              required
               value={parkingRegistrationForm.firstName}
               onChange={(event) =>
                 setParkingRegistrationForm((current) => ({
@@ -2331,6 +2438,7 @@ export default function App() {
             <span>Last name</span>
             <input
               type="text"
+              required
               value={parkingRegistrationForm.lastName}
               onChange={(event) =>
                 setParkingRegistrationForm((current) => ({
@@ -2346,6 +2454,7 @@ export default function App() {
             <span>License plate</span>
             <input
               type="text"
+              required
               value={parkingRegistrationForm.licensePlate}
               onChange={(event) =>
                 setParkingRegistrationForm((current) => ({
@@ -2361,6 +2470,7 @@ export default function App() {
             <span>Personal email address</span>
             <input
               type="email"
+              required
               value={parkingRegistrationForm.personalEmail}
               onChange={(event) =>
                 setParkingRegistrationForm((current) => ({
@@ -2406,6 +2516,7 @@ export default function App() {
             <span>Telephone cell</span>
             <input
               type="tel"
+              required
               value={parkingRegistrationForm.cellPhone}
               onChange={(event) =>
                 setParkingRegistrationForm((current) => ({
@@ -2435,7 +2546,8 @@ export default function App() {
           <label className="member-field">
             <span>Duration from</span>
             <input
-              type="datetime-local"
+              type="month"
+              required
               value={parkingRegistrationForm.durationFrom}
               onChange={(event) =>
                 setParkingRegistrationForm((current) => ({
@@ -2449,7 +2561,8 @@ export default function App() {
           <label className="member-field">
             <span>Duration to</span>
             <input
-              type="datetime-local"
+              type="month"
+              required
               value={parkingRegistrationForm.durationTo}
               onChange={(event) =>
                 setParkingRegistrationForm((current) => ({
@@ -2544,28 +2657,41 @@ export default function App() {
             }
           }}
         >
-          <svg viewBox="0 0 24 24" className="member-contact-icon" aria-hidden="true">
-            <path
-              d="M4 6.75h16A1.25 1.25 0 0 1 21.25 8v8A1.25 1.25 0 0 1 20 17.25H4A1.25 1.25 0 0 1 2.75 16V8A1.25 1.25 0 0 1 4 6.75Zm0 1.5a.25.25 0 0 0-.25.25v.27l8.03 5.18a.5.5 0 0 0 .44 0l8.03-5.18V8.5a.25.25 0 0 0-.25-.25H4Zm16.25 2.31-7.22 4.66a2 2 0 0 1-2.16 0L3.75 10.56V16c0 .14.11.25.25.25h16a.25.25 0 0 0 .25-.25v-5.44Z"
-              fill="currentColor"
-            />
-          </svg>
+          <img src="/email.png" alt="" className="member-contact-icon member-contact-icon-image" />
         </a>
         <button
           type="button"
           className={`member-contact-button parking-status-button${
-            registration.isActive ? " active" : " inactive"
+            registration.placementStatus === "waiting-list" ? " waiting" : " assigned"
           }`}
-          aria-label={`${registration.isActive ? "Deactivate" : "Activate"} ${registration.firstName} ${registration.lastName}`}
+          aria-label={`Move ${registration.firstName} ${registration.lastName} to ${
+            registration.placementStatus === "waiting-list" ? "assigned" : "waiting list"
+          }`}
           onClick={() => void handleParkingRegistrationStatusToggle(registration)}
           disabled={updatingParkingRegistrationSk === registration.sk}
         >
           <svg viewBox="0 0 24 24" className="member-contact-icon" aria-hidden="true">
             <path
-              d="M11.25 3.5a.75.75 0 0 1 1.5 0v8a.75.75 0 0 1-1.5 0v-8Zm5.66 2.14a.75.75 0 0 1 1.06.03 8 8 0 1 1-11.94 0 .75.75 0 1 1 1.1 1.02 6.5 6.5 0 1 0 9.72 0 .75.75 0 0 1 .06-1.05Z"
+              d={
+                registration.placementStatus !== "waiting-list"
+                  ? "M5.75 3.75h12.5a2 2 0 0 1 2 2v12.5a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2V5.75a2 2 0 0 1 2-2Zm9.44 5.72-4.04 4.63-2.34-2.25a.75.75 0 1 0-1.04 1.08l2.91 2.8a.75.75 0 0 0 1.1-.06l4.54-5.2a.75.75 0 1 0-1.13-.99Z"
+                  : "M5.75 3.75h12.5a2 2 0 0 1 2 2v12.5a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2V5.75a2 2 0 0 1 2-2Zm0 1.5a.5.5 0 0 0-.5.5v12.5c0 .28.22.5.5.5h12.5c.28 0 .5-.22.5-.5V5.75a.5.5 0 0 0-.5-.5H5.75Z"
+              }
               fill="currentColor"
             />
           </svg>
+        </button>
+        <button
+          type="button"
+          className="parking-placement-link"
+          onClick={() => void handleParkingRegistrationStatusToggle(registration)}
+          disabled={updatingParkingRegistrationSk === registration.sk}
+        >
+          {updatingParkingRegistrationSk === registration.sk
+            ? "Updating..."
+            : registration.placementStatus === "waiting-list"
+              ? "Assign"
+              : "Move to Waiting List"}
         </button>
         {parkingTab === "active" ? (
           <button
@@ -2581,6 +2707,50 @@ export default function App() {
       </div>
     );
   };
+
+  const renderParkingRegistrationsTable = (registrations: ParkingRegistrationItem[]) => (
+    <div className="parking-table-wrap">
+      <table className="parking-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>License Plate</th>
+            <th>Duration</th>
+            <th>Registered</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {registrations.map((registration) => (
+            <tr key={registration.sk}>
+              <td>
+                <div className="parking-table-primary">
+                  <span className="parking-table-name">
+                    {registration.firstName} {registration.lastName}
+                  </span>
+                  <span className="parking-table-meta">{registration.sk}</span>
+                </div>
+              </td>
+              <td>{registration.licensePlate}</td>
+              <td>{formatParkingDurationLabel(registration.durationFrom, registration.durationTo)}</td>
+              <td>{new Date(registration.registeredAt).toLocaleDateString()}</td>
+              <td>
+                <span
+                  className={`parking-registration-status${
+                    registration.placementStatus === "waiting-list" ? " waiting" : " assigned"
+                  }`}
+                >
+                  {registration.placementStatus === "waiting-list" ? "Waiting List" : "Assigned"}
+                </span>
+              </td>
+              <td>{renderParkingRegistrationActions(registration)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   if (authStatus !== "signed-in") {
     const challengeLabel =
@@ -2721,7 +2891,7 @@ export default function App() {
                 (item) =>
                   ((!["user-access", "contacts-import"].includes(item.key) ||
                     canManageUsers) &&
-                    (!["parling", "parking-management"].includes(item.key) ||
+                    (!["parking-management"].includes(item.key) ||
                       canManageParking)),
               ),
             }))
@@ -3964,144 +4134,6 @@ export default function App() {
 
           {activePage === "parking-registration" ? renderParkingRegistrationPage({}) : null}
 
-          {activePage === "parling" ? (
-            <div className="parking-page">
-              <div className="member-form-card parking-list-card">
-                <div className="member-form-header parking-list-header">
-                  <p className="member-form-mode">Parking Registrations</p>
-                  <div className="parking-tabs" role="tablist" aria-label="Parking registration tabs">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={parkingTab === "active"}
-                      className={`parking-tab${parkingTab === "active" ? " active" : ""}`}
-                      onClick={() => setParkingTab("active")}
-                    >
-                      Current Active
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={parkingTab === "waiting-list"}
-                      className={`parking-tab${parkingTab === "waiting-list" ? " active" : ""}`}
-                      onClick={() => setParkingTab("waiting-list")}
-                    >
-                      Waiting List
-                    </button>
-                  </div>
-                </div>
-
-                {parkingRegistrationsError ? (
-                  <p className="member-submit-message">{parkingRegistrationsError}</p>
-                ) : null}
-
-                {parkingTab === "active" ? (
-                  <p className="parking-list-summary">
-                    {activeParkingRegistrations.length} current active registration
-                    {activeParkingRegistrations.length === 1 ? "" : "s"}
-                  </p>
-                ) : (
-                  <p className="parking-list-summary">
-                    {waitingListRegistrations.length} waiting list registration
-                    {waitingListRegistrations.length === 1 ? "" : "s"}, sorted by earliest
-                    registration
-                  </p>
-                )}
-
-                <div className="parking-list-items">
-                  {(parkingTab === "active"
-                    ? activeParkingRegistrations
-                    : waitingListRegistrations
-                  ).map((registration) => (
-                    <article className="parking-registration-item" key={registration.sk}>
-                      <div className="parking-registration-top">
-                        <div>
-                          <p className="parking-registration-name">
-                            {registration.firstName} {registration.lastName}
-                          </p>
-                          <p className="parking-registration-meta">{registration.sk}</p>
-                        </div>
-                        <span
-                          className={`parking-registration-status${
-                            registration.placementStatus === "waiting-list"
-                              ? " waiting"
-                              : " assigned"
-                          }`}
-                        >
-                          {registration.placementStatus === "waiting-list"
-                            ? "Waiting List"
-                            : "Active"}
-                        </span>
-                      </div>
-
-                      <div className="parking-registration-grid">
-                        <div>
-                          <p className="parking-registration-label">License plate</p>
-                          <p className="parking-registration-value">{registration.licensePlate}</p>
-                        </div>
-                        <div>
-                          <p className="parking-registration-label">Registered</p>
-                          <p className="parking-registration-value">
-                            {new Date(registration.registeredAt).toLocaleString()}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="parking-registration-label">Duration</p>
-                          <p className="parking-registration-value">
-                            {new Date(registration.durationFrom).toLocaleString()} to{" "}
-                            {new Date(registration.durationTo).toLocaleString()}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="parking-registration-label">Personal email</p>
-                          <p className="parking-registration-value">
-                            {registration.personalEmail || "Not set"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="parking-registration-label">Work email</p>
-                          <p className="parking-registration-value">
-                            {registration.workEmail || "Not set"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="parking-registration-label">Place of work</p>
-                          <p className="parking-registration-value">
-                            {registration.placeOfWork || "Not set"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="parking-registration-label">Telephone cell</p>
-                          <p className="parking-registration-value">
-                            {registration.cellPhone || "Not set"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="parking-registration-label">Work phone</p>
-                          <p className="parking-registration-value">
-                            {registration.workPhone || "Not set"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {renderParkingRegistrationActions(registration)}
-                    </article>
-                  ))}
-                </div>
-
-                {(parkingTab === "active"
-                  ? activeParkingRegistrations.length === 0
-                  : waitingListRegistrations.length === 0) ? (
-                  <p className="api-message-text">
-                    {parkingTab === "active"
-                      ? "No active assigned registrations."
-                      : "No waiting list registrations."}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
           {activePage === "parking-management" ? (
             <div className="parking-management-page">
               <form
@@ -4111,7 +4143,7 @@ export default function App() {
                 <div className="member-form-header">
                   <p className="member-form-mode">Parking Capacity</p>
                   <p className="parking-management-summary">
-                    {(parkingManagement?.activeRegistrationCount ?? 0).toLocaleString()} active
+                    {(parkingManagement?.activeRegistrationCount ?? 0).toLocaleString()} assigned
                     registration
                     {(parkingManagement?.activeRegistrationCount ?? 0) === 1 ? "" : "s"} /{" "}
                     {(parkingManagement?.maxSpots ?? 0).toLocaleString()} available spots
@@ -4163,6 +4195,74 @@ export default function App() {
                   </button>
                 </div>
               </form>
+
+              <div className="member-form-card parking-list-card">
+                <div className="member-form-header parking-list-header">
+                  <div>
+                    <p className="member-form-mode">Parking Registrations</p>
+                    <p className="parking-list-summary">
+                      {parkingTab === "active"
+                        ? `${activeParkingRegistrations.length} assigned registration${activeParkingRegistrations.length === 1 ? "" : "s"}`
+                        : parkingTab === "waiting-list"
+                          ? `${waitingListRegistrations.length} waiting list registration${waitingListRegistrations.length === 1 ? "" : "s"}, sorted by earliest registration`
+                          : `${inactiveParkingRegistrations.length} inactive registration${inactiveParkingRegistrations.length === 1 ? "" : "s"}, sorted by earliest registration`}
+                    </p>
+                  </div>
+                  <div className="parking-tabs" role="tablist" aria-label="Parking registration tabs">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={parkingTab === "active"}
+                      className={`parking-tab${parkingTab === "active" ? " active" : ""}`}
+                      onClick={() => setParkingTab("active")}
+                    >
+                      Assigned
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={parkingTab === "waiting-list"}
+                      className={`parking-tab${parkingTab === "waiting-list" ? " active" : ""}`}
+                      onClick={() => setParkingTab("waiting-list")}
+                    >
+                      Waiting List
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={parkingTab === "inactive"}
+                      className={`parking-tab${parkingTab === "inactive" ? " active" : ""}`}
+                      onClick={() => setParkingTab("inactive")}
+                    >
+                      Inactive
+                    </button>
+                  </div>
+                </div>
+
+                {parkingRegistrationsError ? (
+                  <p className="member-submit-message">{parkingRegistrationsError}</p>
+                ) : null}
+
+                {parkingTab === "active"
+                  ? renderParkingRegistrationsTable(activeParkingRegistrations)
+                  : parkingTab === "waiting-list"
+                    ? renderParkingRegistrationsTable(waitingListRegistrations)
+                    : renderParkingRegistrationsTable(inactiveParkingRegistrations)}
+
+                {(parkingTab === "active"
+                  ? activeParkingRegistrations.length === 0
+                  : parkingTab === "waiting-list"
+                    ? waitingListRegistrations.length === 0
+                    : inactiveParkingRegistrations.length === 0) ? (
+                  <p className="api-message-text">
+                    {parkingTab === "active"
+                      ? "No assigned parking registrations."
+                      : parkingTab === "waiting-list"
+                        ? "No waiting list registrations."
+                        : "No inactive registrations."}
+                  </p>
+                ) : null}
+              </div>
             </div>
           ) : null}
 

@@ -96,7 +96,7 @@ type ParkingManagementPayload = {
 
 type UpdateParkingRegistrationStatusPayload = {
   sk: string;
-  isActive: boolean;
+  placementStatus: "assigned" | "waiting-list";
 };
 
 type StoredMemberData = {
@@ -148,7 +148,7 @@ type StoredParkingRegistrationData = {
   durationTo: string;
   registeredAt: string;
   isActive: boolean;
-  placementStatus: "waiting-list" | "active" | "assigned";
+  placementStatus: "waiting-list" | "assigned" | "active";
 };
 
 type StoredParkingSettingsData = {
@@ -200,6 +200,7 @@ const normalizePhone = (value?: string) =>
   (value ?? "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
 const normalizeLicensePlate = (value?: string) =>
   normalizeWhitespace(value).replace(/[\s-]+/g, "").toUpperCase();
+const isParkingMonthValue = (value?: string) => /^\d{4}-\d{2}$/.test(value ?? "");
 const normalizeName = (
   firstName?: string,
   lastName?: string,
@@ -212,7 +213,7 @@ const normalizeName = (
 const getStoredMemberName = (firstName?: string, lastName?: string) =>
   [firstName, lastName].filter(Boolean).join(" ").trim();
 const isActiveParkingPlacementStatus = (value?: string) =>
-  value === "active" || value === "assigned";
+  value === "assigned" || value === "active";
 
 const decodeVcfValue = (value: string) =>
   value
@@ -574,6 +575,31 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         };
       }
 
+      if (
+        !isParkingMonthValue(payload.durationFrom) ||
+        !isParkingMonthValue(payload.durationTo)
+      ) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Duration fields must use the YYYY-MM month format.",
+            time,
+          }),
+        };
+      }
+
+      if (payload.durationFrom >= payload.durationTo) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Duration from must be earlier than duration to.",
+            time,
+          }),
+        };
+      }
+
       const normalizedLicensePlate = normalizeLicensePlate(payload.licensePlate);
       const existingRegistrationsResponse = await dynamoClient.send(
         new QueryCommand({
@@ -656,7 +682,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus),
       ).length;
       const placementStatus =
-        settingsData.maxSpots > currentActiveCount ? "active" : "waiting-list";
+        settingsData.maxSpots > currentActiveCount ? "assigned" : "waiting-list";
 
       const registrationId = crypto.randomUUID();
       const data: StoredParkingRegistrationData = {
@@ -691,8 +717,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         headers: responseHeaders,
         body: JSON.stringify({
           message:
-            placementStatus === "active"
-              ? "Parking registration submitted and marked as Active."
+            placementStatus === "assigned"
+              ? "Parking registration submitted and marked as Assigned."
               : "Parking registration submitted and added to the waiting list.",
           time,
           pk: "PARKING_REGISTRATION",
@@ -744,12 +770,16 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (requestPath.endsWith("/parking/registrations/status")) {
       const payload = JSON.parse(event.body ?? "{}") as Partial<UpdateParkingRegistrationStatusPayload>;
 
-      if (!payload.sk || typeof payload.isActive !== "boolean") {
+      if (
+        !payload.sk ||
+        (payload.placementStatus !== "assigned" &&
+          payload.placementStatus !== "waiting-list")
+      ) {
         return {
           statusCode: 400,
           headers: responseHeaders,
           body: JSON.stringify({
-            message: "sk and isActive are required.",
+            message: "sk and placementStatus are required.",
             time,
           }),
         };
@@ -799,7 +829,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             sk: payload.sk,
             data: JSON.stringify({
               ...existingData,
-              isActive: payload.isActive,
+              placementStatus: payload.placementStatus,
             } satisfies StoredParkingRegistrationData),
           },
         }),
@@ -809,9 +839,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         statusCode: 200,
         headers: responseHeaders,
         body: JSON.stringify({
-          message: payload.isActive
-            ? "Parking registration activated."
-            : "Parking registration deactivated.",
+          message:
+            payload.placementStatus === "assigned"
+              ? "Parking registration assigned."
+              : "Parking registration moved to the waiting list.",
           time,
         }),
       };

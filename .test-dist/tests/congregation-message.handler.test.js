@@ -203,8 +203,8 @@ test("creates a parking registration", async () => {
             placeOfWork: "General Hospital",
             cellPhone: "6135550101",
             workPhone: "6135550102",
-            durationFrom: "2026-04-09T08:00",
-            durationTo: "2026-04-09T17:00",
+            durationFrom: "2026-04",
+            durationTo: "2026-05",
         },
     }));
     const body = parseBody(response.body);
@@ -222,10 +222,10 @@ test("creates a parking registration", async () => {
     assert.equal(storedData.placeOfWork, "General Hospital");
     assert.equal(storedData.cellPhone, "6135550101");
     assert.equal(storedData.workPhone, "6135550102");
-    assert.equal(storedData.durationFrom, "2026-04-09T08:00");
-    assert.equal(storedData.durationTo, "2026-04-09T17:00");
+    assert.equal(storedData.durationFrom, "2026-04");
+    assert.equal(storedData.durationTo, "2026-05");
     assert.equal(storedData.isActive, true);
-    assert.equal(storedData.placementStatus, "active");
+    assert.equal(storedData.placementStatus, "assigned");
     assert.equal(typeof storedData.registeredAt, "string");
 });
 test("blocks parking registration when license plate already exists", async () => {
@@ -245,8 +245,8 @@ test("blocks parking registration when license plate already exists", async () =
                             placeOfWork: "",
                             cellPhone: "6135550000",
                             workPhone: "",
-                            durationFrom: "2026-04-01T08:00",
-                            durationTo: "2026-04-01T17:00",
+                            durationFrom: "2026-04",
+                            durationTo: "2026-05",
                             registeredAt: "2026-04-01T08:00:00.000Z",
                             isActive: true,
                             placementStatus: "waiting-list",
@@ -270,13 +270,38 @@ test("blocks parking registration when license plate already exists", async () =
             placeOfWork: "",
             cellPhone: "6135550101",
             workPhone: "",
-            durationFrom: "2026-04-09T08:00",
-            durationTo: "2026-04-09T17:00",
+            durationFrom: "2026-04",
+            durationTo: "2026-05",
         },
     }));
     const body = parseBody(response.body);
     assert.equal(response.statusCode, 409);
     assert.equal(body.message, "A parking registration already exists for that license plate.");
+});
+test("blocks parking registration when duration from is not earlier than duration to", async () => {
+    const dynamo = createMockClient(() => {
+        throw new Error("DynamoDB should not be called for invalid duration.");
+    });
+    setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+    const response = await invokeHandler(createEvent({
+        path: "/parking/registration",
+        method: "POST",
+        body: {
+            firstName: "Jane",
+            lastName: "Driver",
+            licensePlate: "ABC 123",
+            personalEmail: "jane@example.com",
+            workEmail: "",
+            placeOfWork: "",
+            cellPhone: "6135550101",
+            workPhone: "",
+            durationFrom: "2026-05",
+            durationTo: "2026-05",
+        },
+    }));
+    const body = parseBody(response.body);
+    assert.equal(response.statusCode, 400);
+    assert.equal(body.message, "Duration from must be earlier than duration to.");
 });
 test("loads and updates parking management", async () => {
     const dynamo = createMockClient((command) => {
@@ -313,7 +338,7 @@ test("loads and updates parking management", async () => {
                         sk: "REGISTRATION#2",
                         data: JSON.stringify({
                             isActive: true,
-                            placementStatus: "active",
+                            placementStatus: "assigned",
                         }),
                     },
                 ],
@@ -425,7 +450,7 @@ test("lists parking registrations for parking admin", async () => {
                             lastName: "Two",
                             registeredAt: "2026-03-01T08:00:00.000Z",
                             isActive: true,
-                            placementStatus: "active",
+                            placementStatus: "assigned",
                         }),
                     },
                 ],
@@ -489,8 +514,8 @@ test("updates parking registration active status", async () => {
                         placeOfWork: "",
                         cellPhone: "6135550101",
                         workPhone: "",
-                        durationFrom: "2026-04-09T08:00",
-                        durationTo: "2026-04-09T17:00",
+                        durationFrom: "2026-04",
+                        durationTo: "2026-05",
                         registeredAt: "2026-04-01T08:00:00.000Z",
                         isActive: true,
                         placementStatus: "waiting-list",
@@ -510,7 +535,7 @@ test("updates parking registration active status", async () => {
             method: "POST",
             body: {
                 sk: "REGISTRATION#1",
-                isActive: false,
+                placementStatus: "assigned",
             },
         }),
         requestContext: {
@@ -519,7 +544,7 @@ test("updates parking registration active status", async () => {
                 method: "POST",
                 body: {
                     sk: "REGISTRATION#1",
-                    isActive: false,
+                    placementStatus: "assigned",
                 },
             }).requestContext,
             authorizer: {
@@ -533,7 +558,7 @@ test("updates parking registration active status", async () => {
     });
     const body = parseBody(response.body);
     assert.equal(response.statusCode, 200);
-    assert.equal(body.message, "Parking registration deactivated.");
+    assert.equal(body.message, "Parking registration assigned.");
 });
 test("creates an announcement week", async () => {
     const dynamo = createMockClient((command) => {
