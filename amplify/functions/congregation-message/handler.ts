@@ -6,6 +6,7 @@ import {
   ListUsersCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import {
   DeleteCommand,
   GetCommand,
@@ -374,9 +375,11 @@ const parseVcfContacts = (content: string) => {
 
 const defaultDynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({})) as AwsCommandClient;
 const defaultCognitoClient = new CognitoIdentityProviderClient({}) as AwsCommandClient;
+const defaultSesClient = new SESv2Client({}) as AwsCommandClient;
 const allowedUserGroups = ["admin", "super_user", "regular_user"] as const;
 let dynamoClient: AwsCommandClient = defaultDynamoClient;
 let cognitoClient: AwsCommandClient = defaultCognitoClient;
+let sesClient: AwsCommandClient = defaultSesClient;
 
 const responseHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -441,9 +444,88 @@ const forbiddenResponse = (time: string, message: string) => ({
   }),
 });
 
+const getParkingNotificationFromEmail = () =>
+  normalizeEmail(process.env.PARKING_NOTIFICATIONS_FROM_EMAIL);
+
+const sendParkingRegistrationNotification = async ({
+  fromEmail,
+  toEmail,
+  firstName,
+  lastName,
+  licensePlate,
+  durationFrom,
+  durationTo,
+  placementStatus,
+  waitingListPosition,
+}: {
+  fromEmail: string;
+  toEmail: string;
+  firstName: string;
+  lastName: string;
+  licensePlate: string;
+  durationFrom: string;
+  durationTo: string;
+  placementStatus: "assigned" | "waiting-list";
+  waitingListPosition?: number;
+}) => {
+  if (!fromEmail || !toEmail) {
+    return;
+  }
+
+  const memberName = normalizeWhitespace(`${firstName} ${lastName}`);
+  const subject =
+    placementStatus === "assigned"
+      ? "Parking registration confirmed"
+      : `Parking registration received - waiting list #${waitingListPosition ?? "-"}`;
+  const textBody =
+    placementStatus === "assigned"
+      ? [
+          `Hello ${firstName},`,
+          "",
+          `Your parking registration for ${memberName} has been received and assigned successfully.`,
+          `License plate: ${licensePlate}`,
+          `Duration: ${durationFrom} to ${durationTo}`,
+          "",
+          "Thank you.",
+        ].join("\n")
+      : [
+          `Hello ${firstName},`,
+          "",
+          `Your parking registration for ${memberName} has been received.`,
+          "There is currently no available parking spot, so your registration has been placed on the waiting list.",
+          `Waiting list position: ${waitingListPosition ?? "-"}`,
+          `License plate: ${licensePlate}`,
+          `Duration: ${durationFrom} to ${durationTo}`,
+          "",
+          "Thank you.",
+        ].join("\n");
+
+  await sesClient.send(
+    new SendEmailCommand({
+      FromEmailAddress: fromEmail,
+      Destination: {
+        ToAddresses: [toEmail],
+      },
+      Content: {
+        Simple: {
+          Subject: {
+            Data: subject,
+          },
+          Body: {
+            Text: {
+              Data: textBody,
+            },
+          },
+        },
+      },
+    }),
+  );
+};
+
 export const setHandlerClientsForTesting = (clients: {
   dynamoClient?: AwsCommandClient;
   cognitoClient?: AwsCommandClient;
+  sesClient?: AwsCommandClient;
 }) => {
   if (clients.dynamoClient) {
     dynamoClient = clients.dynamoClient;
@@ -452,11 +534,16 @@ export const setHandlerClientsForTesting = (clients: {
   if (clients.cognitoClient) {
     cognitoClient = clients.cognitoClient;
   }
+
+  if (clients.sesClient) {
+    sesClient = clients.sesClient;
+  }
 };
 
 export const resetHandlerClientsForTesting = () => {
   dynamoClient = defaultDynamoClient;
   cognitoClient = defaultCognitoClient;
+  sesClient = defaultSesClient;
 };
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
@@ -684,8 +771,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       const currentActiveCount = existingParkingRegistrations.filter(
         (registration) => isActiveParkingPlacementStatus(registration.placementStatus),
       ).length;
+      const currentWaitingListCount = existingParkingRegistrations.filter(
+        (registration) => registration.placementStatus === "waiting-list",
+      ).length;
       const placementStatus =
         settingsData.maxSpots > currentActiveCount ? "assigned" : "waiting-list";
+      const waitingListPosition =
+        placementStatus === "waiting-list" ? currentWaitingListCount + 1 : undefined;
 
       const registrationId = crypto.randomUUID();
       const data: StoredParkingRegistrationData = {
@@ -723,6 +815,27 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           },
         }),
       );
+
+      try {
+        await sendParkingRegistrationNotification({
+          fromEmail: getParkingNotificationFromEmail(),
+          toEmail: normalizeEmail(payload.personalEmail),
+          firstName: payload.firstName.trim(),
+          lastName: payload.lastName.trim(),
+          licensePlate: payload.licensePlate.trim().toUpperCase(),
+          durationFrom: payload.durationFrom,
+          durationTo: payload.durationTo,
+          placementStatus,
+          waitingListPosition,
+        });
+      } catch (error) {
+        console.error("Failed to send parking registration notification", {
+          error,
+          registrationId,
+          personalEmail: normalizeEmail(payload.personalEmail),
+          placementStatus,
+        });
+      }
 
       return {
         statusCode: 201,

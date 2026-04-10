@@ -44,6 +44,10 @@ backend.congregationMessage.addEnvironment(
   "USER_POOL_ID",
   backend.auth.resources.userPool.userPoolId,
 );
+backend.congregationMessage.addEnvironment(
+  "PARKING_NOTIFICATIONS_FROM_EMAIL",
+  process.env.PARKING_NOTIFICATIONS_FROM_EMAIL ?? "",
+);
 testTable.grantReadWriteData(backend.congregationMessage.resources.lambda);
 backend.congregationMessage.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -54,6 +58,12 @@ backend.congregationMessage.resources.lambda.addToRolePolicy(
       "cognito-idp:AdminRemoveUserFromGroup",
     ],
     resources: [backend.auth.resources.userPool.userPoolArn],
+  }),
+);
+backend.congregationMessage.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ["ses:SendEmail", "ses:SendRawEmail"],
+    resources: ["*"],
   }),
 );
 

@@ -90,6 +90,7 @@ const createMockClient = (
 beforeEach(() => {
   process.env.TEST_TABLE_NAME = "test_table";
   process.env.USER_POOL_ID = "user-pool-id";
+  process.env.PARKING_NOTIFICATIONS_FROM_EMAIL = "parking@example.com";
   resetHandlerClientsForTesting();
 });
 
@@ -97,6 +98,7 @@ afterEach(() => {
   resetHandlerClientsForTesting();
   delete process.env.TEST_TABLE_NAME;
   delete process.env.USER_POOL_ID;
+  delete process.env.PARKING_NOTIFICATIONS_FROM_EMAIL;
 });
 
 test("returns 500 when TEST_TABLE_NAME is missing", async () => {
@@ -266,8 +268,12 @@ test("creates a parking registration", async () => {
 
     throw new Error(`Unexpected command ${command.constructor.name}`);
   });
+  const ses = createMockClient((command) => {
+    assert.equal(command.constructor.name, "SendEmailCommand");
+    return {};
+  });
 
-  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client, sesClient: ses.client });
 
   const response = await invokeHandler(
     createEvent({
@@ -316,6 +322,126 @@ test("creates a parking registration", async () => {
       message: "Parking registration created and assigned.",
     },
   ]);
+  assert.equal(ses.commands.length, 1);
+  assert.equal(
+    ((ses.commands[0].input?.Destination as { ToAddresses?: string[] })?.ToAddresses ?? [])[0],
+    "jane@example.com",
+  );
+  assert.equal(
+    (ses.commands[0].input?.Content as { Simple?: { Subject?: { Data?: string } } })?.Simple
+      ?.Subject?.Data,
+    "Parking registration confirmed",
+  );
+});
+
+test("emails waiting list position for parking registration", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "QueryCommand") {
+      return {
+        Items: [
+          {
+            pk: "PARKING_REGISTRATION",
+            sk: "REGISTRATION#existing",
+            data: JSON.stringify({
+              firstName: "Existing",
+              lastName: "Driver",
+              licensePlate: "XYZ999",
+              personalEmail: "existing@example.com",
+              workEmail: "",
+              placeOfWork: "",
+              cellPhone: "6135550000",
+              workPhone: "",
+              durationFrom: "2026-04",
+              durationTo: "2026-06",
+              registeredAt: "2026-04-01T08:00:00.000Z",
+              placementStatus: "waiting-list",
+            }),
+          },
+          {
+            pk: "PARKING_REGISTRATION",
+            sk: "REGISTRATION#assigned",
+            data: JSON.stringify({
+              firstName: "Assigned",
+              lastName: "Driver",
+              licensePlate: "AAA111",
+              personalEmail: "assigned@example.com",
+              workEmail: "",
+              placeOfWork: "",
+              cellPhone: "6135550100",
+              workPhone: "",
+              durationFrom: "2026-04",
+              durationTo: "2026-06",
+              registeredAt: "2026-04-01T07:00:00.000Z",
+              placementStatus: "assigned",
+            }),
+          },
+        ],
+      };
+    }
+
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "PARKING_SETTINGS",
+          sk: "CONFIG",
+          data: JSON.stringify({
+            maxSpots: 1,
+            updatedAt: "2026-04-09T10:00:00.000Z",
+          }),
+        },
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+  const ses = createMockClient((command) => {
+    assert.equal(command.constructor.name, "SendEmailCommand");
+    return {};
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client, sesClient: ses.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/parking/registration",
+      method: "POST",
+      body: {
+        firstName: "Wait",
+        lastName: "List",
+        licensePlate: "wait 123",
+        personalEmail: "wait@example.com",
+        workEmail: "",
+        placeOfWork: "",
+        cellPhone: "6135550109",
+        workPhone: "",
+        durationFrom: "2026-04",
+        durationTo: "2026-05",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(
+    body.message,
+    "Parking registration submitted and added to the waiting list.",
+  );
+  assert.equal(
+    (ses.commands[0].input?.Content as {
+      Simple?: { Subject?: { Data?: string }; Body?: { Text?: { Data?: string } } };
+    })?.Simple?.Subject?.Data,
+    "Parking registration received - waiting list #2",
+  );
+  assert.match(
+    (ses.commands[0].input?.Content as {
+      Simple?: { Body?: { Text?: { Data?: string } } };
+    })?.Simple?.Body?.Text?.Data ?? "",
+    /Waiting list position: 2/,
+  );
 });
 
 test("blocks parking registration when license plate already exists", async () => {

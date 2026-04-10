@@ -361,31 +361,32 @@ button {
   box-shadow: none;
 }
 
-.parking-print-link {
-  border: 0;
-  background: transparent;
-  color: #0972d3;
+.parking-print-link,
+.parking-placement-link,
+.parking-history-link {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
   font-weight: 700;
-  padding: 0.35rem 0.2rem;
+  padding: 0.42rem 0.72rem;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 0.18rem;
   white-space: nowrap;
+}
+
+.parking-print-link {
+  color: #0972d3;
 }
 
 .parking-placement-link {
-  border: 0;
-  background: transparent;
   color: #166534;
-  font-weight: 700;
-  padding: 0.35rem 0.2rem;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 0.18rem;
-  white-space: nowrap;
 }
 
-.parking-placement-link:disabled {
+.parking-history-link {
+  color: #7c3aed;
+}
+
+.parking-placement-link:disabled,
+.parking-history-link:disabled {
   opacity: 0.6;
   cursor: wait;
 }
@@ -393,18 +394,6 @@ button {
 .parking-print-link:disabled {
   opacity: 0.6;
   cursor: wait;
-}
-
-.parking-history-link {
-  border: 0;
-  background: transparent;
-  color: #7c3aed;
-  font-weight: 700;
-  padding: 0.35rem 0.2rem;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 0.18rem;
-  white-space: nowrap;
 }
 
 .parking-management-meta {
@@ -450,14 +439,20 @@ button {
 }
 
 [data-theme="dark"] .parking-print-link {
+  border-color: rgba(66, 153, 225, 0.26);
+  background: rgba(9, 114, 211, 0.16);
   color: #9fd3ff;
 }
 
 [data-theme="dark"] .parking-placement-link {
+  border-color: rgba(34, 197, 94, 0.22);
+  background: rgba(34, 197, 94, 0.12);
   color: #bbf7d0;
 }
 
 [data-theme="dark"] .parking-history-link {
+  border-color: rgba(167, 139, 250, 0.24);
+  background: rgba(124, 58, 237, 0.14);
   color: #ddd6fe;
 }
 
@@ -3653,7 +3648,66 @@ button {
   }
 
   .parking-table-wrap {
-    margin-inline: -0.15rem;
+    margin-inline: 0;
+    overflow-x: visible;
+  }
+
+  .parking-table {
+    min-width: 0;
+  }
+
+  .parking-table thead {
+    display: none;
+  }
+
+  .parking-table,
+  .parking-table tbody,
+  .parking-table tr,
+  .parking-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .parking-table tr {
+    padding: 0.9rem 0;
+    border-bottom: 1px solid rgba(219, 183, 86, 0.16);
+  }
+
+  .parking-table td {
+    display: grid;
+    grid-template-columns: minmax(5.5rem, 6.5rem) minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.38rem 0;
+    border-bottom: 0;
+  }
+
+  .parking-table td::before {
+    content: attr(data-label);
+    color: var(--muted-light);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .parking-table-primary {
+    gap: 0.15rem;
+  }
+
+  .parking-registration-actions {
+    gap: 0.35rem;
+  }
+
+  .parking-registration-actions .member-contact-button {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .parking-placement-link,
+  .parking-history-link,
+  .parking-print-link {
+    padding-top: 0.2rem;
+    padding-bottom: 0.2rem;
   }
 
   .visitation-calendar-grid {

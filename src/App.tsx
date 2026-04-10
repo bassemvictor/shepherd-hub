@@ -2723,7 +2723,7 @@ export default function App() {
         <tbody>
           {registrations.map((registration) => (
             <tr key={registration.sk}>
-              <td>
+              <td data-label="Name">
                 <div className="parking-table-primary">
                   <span className="parking-table-name">
                     {registration.firstName} {registration.lastName}
@@ -2731,10 +2731,14 @@ export default function App() {
                   <span className="parking-table-meta">{registration.sk}</span>
                 </div>
               </td>
-              <td>{registration.licensePlate}</td>
-              <td>{formatParkingDurationLabel(registration.durationFrom, registration.durationTo)}</td>
-              <td>{new Date(registration.registeredAt).toLocaleDateString()}</td>
-              <td>
+              <td data-label="License Plate">{registration.licensePlate}</td>
+              <td data-label="Duration">
+                {formatParkingDurationLabel(registration.durationFrom, registration.durationTo)}
+              </td>
+              <td data-label="Registered">
+                {new Date(registration.registeredAt).toLocaleDateString()}
+              </td>
+              <td data-label="Status">
                 <span
                   className={`parking-registration-status${
                     registration.placementStatus === "waiting-list" ? " waiting" : " assigned"
@@ -2743,7 +2747,7 @@ export default function App() {
                   {registration.placementStatus === "waiting-list" ? "Waiting List" : "Assigned"}
                 </span>
               </td>
-              <td>{renderParkingRegistrationActions(registration)}</td>
+              <td data-label="Actions">{renderParkingRegistrationActions(registration)}</td>
             </tr>
           ))}
         </tbody>
