@@ -17,7 +17,8 @@ The application uses a React frontend with Amplify-managed authentication and AP
 
 ## DynamoDB Schema
 
-The backend stores congregation members in a DynamoDB table named `test_table`.
+The backend stores congregation members in an Amplify-managed DynamoDB table. The
+physical table name is generated per deployment environment rather than hardcoded.
 
 - Partition key: `pk`
 - Sort key: `sk`

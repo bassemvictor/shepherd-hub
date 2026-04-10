@@ -97,7 +97,7 @@ type ParkingManagementPayload = {
 
 type UpdateParkingRegistrationStatusPayload = {
   sk: string;
-  placementStatus: "assigned" | "waiting-list";
+  placementStatus: "assigned" | "waiting-list" | "available";
 };
 
 type StoredMemberData = {
@@ -153,7 +153,7 @@ type StoredParkingRegistrationData = {
   durationFrom: string;
   durationTo: string;
   registeredAt: string;
-  placementStatus: "waiting-list" | "assigned" | "active";
+  placementStatus: "waiting-list" | "assigned" | "available" | "active";
 };
 
 type StoredParkingSettingsData = {
@@ -218,7 +218,7 @@ const normalizeName = (
 const getStoredMemberName = (firstName?: string, lastName?: string) =>
   [firstName, lastName].filter(Boolean).join(" ").trim();
 const isActiveParkingPlacementStatus = (value?: string) =>
-  value === "assigned" || value === "active";
+  value === "assigned" || value === "available" || value === "active";
 
 const decodeVcfValue = (value: string) =>
   value
@@ -465,24 +465,34 @@ const sendParkingRegistrationNotification = async ({
   licensePlate: string;
   durationFrom: string;
   durationTo: string;
-  placementStatus: "assigned" | "waiting-list";
+  placementStatus: "assigned" | "waiting-list" | "available";
   waitingListPosition?: number;
 }) => {
   if (!fromEmail || !toEmail) {
+    console.log("Parking registration email skipped", {
+      reason: !fromEmail ? "missing_from_email" : "missing_to_email",
+      fromEmailConfigured: Boolean(fromEmail),
+      toEmailPresent: Boolean(toEmail),
+      placementStatus,
+      waitingListPosition: waitingListPosition ?? null,
+    });
     return;
   }
 
   const memberName = normalizeWhitespace(`${firstName} ${lastName}`);
   const subject =
-    placementStatus === "assigned"
-      ? "Parking registration confirmed"
-      : `Parking registration received - waiting list #${waitingListPosition ?? "-"}`;
+    placementStatus === "waiting-list"
+      ? `Parking registration received - waiting list #${waitingListPosition ?? "-"}`
+      : "Parking registration confirmed";
   const textBody =
-    placementStatus === "assigned"
+    placementStatus !== "waiting-list"
       ? [
           `Hello ${firstName},`,
           "",
-          `Your parking registration for ${memberName} has been received and assigned successfully.`,
+          `Your parking registration for ${memberName} has been received successfully.`,
+          placementStatus === "available"
+            ? "A parking spot is currently available and your registration is ready for parking-admin review."
+            : "Your parking registration has been assigned successfully.",
           `License plate: ${licensePlate}`,
           `Duration: ${durationFrom} to ${durationTo}`,
           "",
@@ -499,6 +509,16 @@ const sendParkingRegistrationNotification = async ({
           "",
           "Thank you.",
         ].join("\n");
+
+  console.log("Parking registration email send requested", {
+    fromEmail,
+    toEmail,
+    memberName,
+    licensePlate,
+    placementStatus,
+    waitingListPosition: waitingListPosition ?? null,
+    subject,
+  });
 
   await sesClient.send(
     new SendEmailCommand({
@@ -520,6 +540,12 @@ const sendParkingRegistrationNotification = async ({
       },
     }),
   );
+
+  console.log("Parking registration email sent", {
+    toEmail,
+    placementStatus,
+    waitingListPosition: waitingListPosition ?? null,
+  });
 };
 
 export const setHandlerClientsForTesting = (clients: {
@@ -775,9 +801,19 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         (registration) => registration.placementStatus === "waiting-list",
       ).length;
       const placementStatus =
-        settingsData.maxSpots > currentActiveCount ? "assigned" : "waiting-list";
+        settingsData.maxSpots > currentActiveCount ? "available" : "waiting-list";
       const waitingListPosition =
         placementStatus === "waiting-list" ? currentWaitingListCount + 1 : undefined;
+
+      console.log("Parking registration placement resolved", {
+        registrationEmail: normalizeEmail(payload.personalEmail),
+        licensePlate: payload.licensePlate.trim().toUpperCase(),
+        maxSpots: settingsData.maxSpots ?? 0,
+        currentActiveCount,
+        currentWaitingListCount,
+        placementStatus,
+        waitingListPosition: waitingListPosition ?? null,
+      });
 
       const registrationId = crypto.randomUUID();
       const data: StoredParkingRegistrationData = {
@@ -786,8 +822,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             timestamp: time,
             action: "parking_registration_created",
             message:
-              placementStatus === "assigned"
-                ? "Parking registration created and assigned."
+              placementStatus === "available"
+                ? "Parking registration created and marked as available."
                 : "Parking registration created and added to the waiting list.",
           },
         ],
@@ -832,8 +868,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         console.error("Failed to send parking registration notification", {
           error,
           registrationId,
+          fromEmailConfigured: Boolean(getParkingNotificationFromEmail()),
           personalEmail: normalizeEmail(payload.personalEmail),
           placementStatus,
+          waitingListPosition: waitingListPosition ?? null,
         });
       }
 
@@ -842,8 +880,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         headers: responseHeaders,
         body: JSON.stringify({
           message:
-            placementStatus === "assigned"
-              ? "Parking registration submitted and marked as Assigned."
+            placementStatus === "available"
+              ? "Parking registration submitted and marked as Available."
               : "Parking registration submitted and added to the waiting list.",
           time,
           pk: "PARKING_REGISTRATION",
@@ -898,7 +936,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       if (
         !payload.sk ||
         (payload.placementStatus !== "assigned" &&
-          payload.placementStatus !== "waiting-list")
+          payload.placementStatus !== "waiting-list" &&
+          payload.placementStatus !== "available")
       ) {
         return {
           statusCode: 400,
@@ -963,10 +1002,14 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
                   action:
                     payload.placementStatus === "assigned"
                       ? "parking_registration_assigned"
-                      : "parking_registration_waiting_list",
+                      : payload.placementStatus === "available"
+                        ? "parking_registration_available"
+                        : "parking_registration_waiting_list",
                   message:
                     payload.placementStatus === "assigned"
                       ? "Parking registration moved to assigned."
+                      : payload.placementStatus === "available"
+                        ? "Parking registration moved to available."
                       : "Parking registration moved to the waiting list.",
                 },
                 ...((existingDataWithoutLegacyFlag.history ?? []) as NonNullable<
@@ -986,6 +1029,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           message:
             payload.placementStatus === "assigned"
               ? "Parking registration assigned."
+              : payload.placementStatus === "available"
+                ? "Parking registration marked as available."
               : "Parking registration moved to the waiting list.",
           time,
         }),

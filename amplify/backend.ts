@@ -26,8 +26,7 @@ const backend = defineBackend({
 const storageStack = backend.createStack("congregation-storage");
 const apiStack = backend.createStack("congregation-api");
 
-const testTable = new Table(storageStack, "TestTable", {
-  tableName: "test_table",
+const congregationTable = new Table(storageStack, "CongregationTable", {
   partitionKey: {
     name: "pk",
     type: AttributeType.STRING,
@@ -39,7 +38,10 @@ const testTable = new Table(storageStack, "TestTable", {
   billingMode: BillingMode.PAY_PER_REQUEST,
 });
 
-backend.congregationMessage.addEnvironment("TEST_TABLE_NAME", testTable.tableName);
+backend.congregationMessage.addEnvironment(
+  "TEST_TABLE_NAME",
+  congregationTable.tableName,
+);
 backend.congregationMessage.addEnvironment(
   "USER_POOL_ID",
   backend.auth.resources.userPool.userPoolId,
@@ -48,7 +50,7 @@ backend.congregationMessage.addEnvironment(
   "PARKING_NOTIFICATIONS_FROM_EMAIL",
   process.env.PARKING_NOTIFICATIONS_FROM_EMAIL ?? "",
 );
-testTable.grantReadWriteData(backend.congregationMessage.resources.lambda);
+congregationTable.grantReadWriteData(backend.congregationMessage.resources.lambda);
 backend.congregationMessage.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions: [
@@ -233,8 +235,8 @@ backend.addOutput({
     },
     storage: {
       testTable: {
-        tableName: testTable.tableName,
-        region: Stack.of(testTable).region,
+        tableName: congregationTable.tableName,
+        region: Stack.of(congregationTable).region,
       },
     },
   },

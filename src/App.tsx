@@ -342,7 +342,7 @@ type ParkingRegistrationItem = {
   durationFrom: string;
   durationTo: string;
   registeredAt: string;
-  placementStatus: "waiting-list" | "assigned" | "active";
+  placementStatus: "waiting-list" | "assigned" | "available" | "active";
 };
 
 type ParkingRegistrationsResponse = {
@@ -629,7 +629,7 @@ const buildCalendarDays = (monthDate: Date) => {
 };
 
 const isActiveParkingPlacementStatus = (value?: string) =>
-  value === "assigned" || value === "active";
+  value === "assigned" || value === "available" || value === "active";
 
 const extractGroupsFromClaim = (value: unknown) => {
   if (Array.isArray(value)) {
@@ -1451,6 +1451,7 @@ export default function App() {
 
   const handleParkingRegistrationStatusToggle = async (
     registration: ParkingRegistrationItem,
+    nextPlacementStatus: "assigned" | "waiting-list" | "available",
   ) => {
     if (!congregationApiName || !canManageParking) {
       return;
@@ -1461,8 +1462,7 @@ export default function App() {
     try {
       await authorizedPost("/parking/registrations/status", {
         sk: registration.sk,
-        placementStatus:
-          registration.placementStatus === "waiting-list" ? "assigned" : "waiting-list",
+        placementStatus: nextPlacementStatus,
       });
       await loadParkingRegistrations();
       if (activePage === "parking-management") {
@@ -2667,18 +2667,48 @@ export default function App() {
         >
           <img src="/email.png" alt="" className="member-contact-icon member-contact-icon-image" />
         </a>
-        <button
-          type="button"
-          className="parking-placement-link"
-          onClick={() => void handleParkingRegistrationStatusToggle(registration)}
-          disabled={updatingParkingRegistrationSk === registration.sk}
-        >
-          {updatingParkingRegistrationSk === registration.sk
-            ? "Updating..."
-            : registration.placementStatus === "waiting-list"
-              ? "Assign"
+        {registration.placementStatus === "waiting-list" ? (
+          <button
+            type="button"
+            className="parking-placement-link"
+            onClick={() => void handleParkingRegistrationStatusToggle(registration, "available")}
+            disabled={updatingParkingRegistrationSk === registration.sk}
+          >
+            {updatingParkingRegistrationSk === registration.sk ? "Updating..." : "Mark Available"}
+          </button>
+        ) : registration.placementStatus === "available" ? (
+          <>
+            <button
+              type="button"
+              className="parking-placement-link"
+              onClick={() => void handleParkingRegistrationStatusToggle(registration, "assigned")}
+              disabled={updatingParkingRegistrationSk === registration.sk}
+            >
+              {updatingParkingRegistrationSk === registration.sk ? "Updating..." : "Assign"}
+            </button>
+            <button
+              type="button"
+              className="parking-placement-link secondary"
+              onClick={() => void handleParkingRegistrationStatusToggle(registration, "waiting-list")}
+              disabled={updatingParkingRegistrationSk === registration.sk}
+            >
+              {updatingParkingRegistrationSk === registration.sk
+                ? "Updating..."
+                : "Move to Waiting List"}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="parking-placement-link secondary"
+            onClick={() => void handleParkingRegistrationStatusToggle(registration, "waiting-list")}
+            disabled={updatingParkingRegistrationSk === registration.sk}
+          >
+            {updatingParkingRegistrationSk === registration.sk
+              ? "Updating..."
               : "Move to Waiting List"}
-        </button>
+          </button>
+        )}
         <button
           type="button"
           className="parking-history-link"
@@ -2741,10 +2771,18 @@ export default function App() {
               <td data-label="Status">
                 <span
                   className={`parking-registration-status${
-                    registration.placementStatus === "waiting-list" ? " waiting" : " assigned"
+                    registration.placementStatus === "waiting-list"
+                      ? " waiting"
+                      : registration.placementStatus === "available"
+                        ? " available"
+                        : " assigned"
                   }`}
                 >
-                  {registration.placementStatus === "waiting-list" ? "Waiting List" : "Assigned"}
+                  {registration.placementStatus === "waiting-list"
+                    ? "Waiting List"
+                    : registration.placementStatus === "available"
+                      ? "Available"
+                      : "Assigned"}
                 </span>
               </td>
               <td data-label="Actions">{renderParkingRegistrationActions(registration)}</td>
@@ -4146,8 +4184,8 @@ export default function App() {
                 <div className="member-form-header">
                   <p className="member-form-mode">Parking Capacity</p>
                   <p className="parking-management-summary">
-                    {(parkingManagement?.activeRegistrationCount ?? 0).toLocaleString()} assigned
-                    registration
+                    {(parkingManagement?.activeRegistrationCount ?? 0).toLocaleString()} active
+                    placement
                     {(parkingManagement?.activeRegistrationCount ?? 0) === 1 ? "" : "s"} /{" "}
                     {(parkingManagement?.maxSpots ?? 0).toLocaleString()} available spots
                   </p>
@@ -4205,7 +4243,7 @@ export default function App() {
                     <p className="member-form-mode">Parking Registrations</p>
                     <p className="parking-list-summary">
                       {parkingTab === "assigned"
-                        ? `${assignedParkingRegistrations.length} assigned registration${assignedParkingRegistrations.length === 1 ? "" : "s"}`
+                        ? `${assignedParkingRegistrations.length} active registration${assignedParkingRegistrations.length === 1 ? "" : "s"}`
                         : `${waitingListRegistrations.length} waiting list registration${waitingListRegistrations.length === 1 ? "" : "s"}, sorted by earliest registration`}
                     </p>
                   </div>
@@ -4217,7 +4255,7 @@ export default function App() {
                       className={`parking-tab${parkingTab === "assigned" ? " active" : ""}`}
                       onClick={() => setParkingTab("assigned")}
                     >
-                      Assigned
+                      Active
                     </button>
                     <button
                       type="button"
@@ -4244,7 +4282,7 @@ export default function App() {
                   : waitingListRegistrations.length === 0) ? (
                   <p className="api-message-text">
                     {parkingTab === "assigned"
-                      ? "No assigned parking registrations."
+                      ? "No active parking registrations."
                       : "No waiting list registrations."}
                   </p>
                 ) : null}

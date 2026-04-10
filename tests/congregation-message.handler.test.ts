@@ -313,13 +313,13 @@ test("creates a parking registration", async () => {
   assert.equal(storedData.workPhone, "6135550102");
   assert.equal(storedData.durationFrom, "2026-04");
   assert.equal(storedData.durationTo, "2026-05");
-  assert.equal(storedData.placementStatus, "assigned");
+  assert.equal(storedData.placementStatus, "available");
   assert.equal(typeof storedData.registeredAt, "string");
   assert.deepEqual(storedData.history, [
     {
       timestamp: body.time,
       action: "parking_registration_created",
-      message: "Parking registration created and assigned.",
+      message: "Parking registration created and marked as available.",
     },
   ]);
   assert.equal(ses.commands.length, 1);
@@ -372,7 +372,7 @@ test("emails waiting list position for parking registration", async () => {
               durationFrom: "2026-04",
               durationTo: "2026-06",
               registeredAt: "2026-04-01T07:00:00.000Z",
-              placementStatus: "assigned",
+            placementStatus: "available",
             }),
           },
         ],
@@ -568,7 +568,7 @@ test("loads and updates parking management", async () => {
             pk: "PARKING_REGISTRATION",
             sk: "REGISTRATION#2",
             data: JSON.stringify({
-              placementStatus: "assigned",
+              placementStatus: "available",
             }),
           },
         ],
@@ -688,7 +688,7 @@ test("lists parking registrations for parking admin", async () => {
               firstName: "B",
               lastName: "Two",
               registeredAt: "2026-03-01T08:00:00.000Z",
-              placementStatus: "assigned",
+              placementStatus: "available",
             }),
           },
         ],
@@ -728,6 +728,112 @@ test("lists parking registrations for parking admin", async () => {
   assert.equal(body.message, "Parking registrations loaded.");
   assert.equal(body.items[0].sk, "REGISTRATION#2");
   assert.equal(body.items[1].sk, "REGISTRATION#1");
+});
+
+test("updates parking registration to available", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "QueryCommand") {
+      return {
+        Items: [
+          {
+            pk: "CONGREGATION",
+            sk: "MEMBER#parking-admin",
+            data: JSON.stringify({
+              email: "lot@example.com",
+              role: "parking-admin",
+            }),
+          },
+        ],
+      };
+    }
+
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "PARKING_REGISTRATION",
+          sk: "REGISTRATION#1",
+          data: JSON.stringify({
+            history: [
+              {
+                timestamp: "2026-04-01T08:00:00.000Z",
+                action: "parking_registration_created",
+                message: "Parking registration created and added to the waiting list.",
+              },
+            ],
+            firstName: "Jane",
+            lastName: "Driver",
+            licensePlate: "ABC123",
+            personalEmail: "jane@example.com",
+            workEmail: "",
+            placeOfWork: "",
+            cellPhone: "6135550101",
+            workPhone: "",
+            durationFrom: "2026-04",
+            durationTo: "2026-05",
+            registeredAt: "2026-04-01T08:00:00.000Z",
+            placementStatus: "waiting-list",
+          }),
+        },
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler({
+    ...createEvent({
+      path: "/parking/registrations/status",
+      method: "POST",
+      body: {
+        sk: "REGISTRATION#1",
+        placementStatus: "available",
+      },
+    }),
+    requestContext: {
+      ...createEvent({
+        path: "/parking/registrations/status",
+        method: "POST",
+        body: {
+          sk: "REGISTRATION#1",
+          placementStatus: "available",
+        },
+      }).requestContext,
+      authorizer: {
+        jwt: {
+          claims: {
+            email: "lot@example.com",
+          },
+        },
+      },
+    },
+  } as APIGatewayProxyEventV2);
+  const body = parseBody(response.body);
+  const putCommand = dynamo.commands.find(
+    (command) => command.constructor.name === "PutCommand",
+  );
+  const putInput = putCommand?.input as { Item?: Record<string, unknown> };
+  const storedData = JSON.parse(String(putInput.Item?.data ?? "{}")) as Record<string, unknown>;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Parking registration marked as available.");
+  assert.deepEqual(storedData.history, [
+    {
+      timestamp: body.time,
+      action: "parking_registration_available",
+      message: "Parking registration moved to available.",
+    },
+    {
+      timestamp: "2026-04-01T08:00:00.000Z",
+      action: "parking_registration_created",
+      message: "Parking registration created and added to the waiting list.",
+    },
+  ]);
 });
 
 test("updates parking registration placement status", async () => {
