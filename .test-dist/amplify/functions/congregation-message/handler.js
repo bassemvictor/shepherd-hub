@@ -371,10 +371,19 @@ export const handler = async (event) => {
                 }
             })
                 .filter(Boolean);
-            const currentActiveCount = existingParkingRegistrations.filter((registration) => registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus)).length;
+            const currentActiveCount = existingParkingRegistrations.filter((registration) => isActiveParkingPlacementStatus(registration.placementStatus)).length;
             const placementStatus = settingsData.maxSpots > currentActiveCount ? "assigned" : "waiting-list";
             const registrationId = crypto.randomUUID();
             const data = {
+                history: [
+                    {
+                        timestamp: time,
+                        action: "parking_registration_created",
+                        message: placementStatus === "assigned"
+                            ? "Parking registration created and assigned."
+                            : "Parking registration created and added to the waiting list.",
+                    },
+                ],
                 firstName: payload.firstName.trim(),
                 lastName: payload.lastName.trim(),
                 licensePlate: payload.licensePlate.trim().toUpperCase(),
@@ -386,7 +395,6 @@ export const handler = async (event) => {
                 durationFrom: payload.durationFrom,
                 durationTo: payload.durationTo,
                 registeredAt: time,
-                isActive: true,
                 placementStatus,
             };
             await dynamoClient.send(new PutCommand({
@@ -489,13 +497,26 @@ export const handler = async (event) => {
                     }),
                 };
             }
+            const { isActive: _legacyIsActive, ...existingDataWithoutLegacyFlag } = existingData;
             await dynamoClient.send(new PutCommand({
                 TableName: tableName,
                 Item: {
                     pk: "PARKING_REGISTRATION",
                     sk: payload.sk,
                     data: JSON.stringify({
-                        ...existingData,
+                        ...existingDataWithoutLegacyFlag,
+                        history: [
+                            {
+                                timestamp: time,
+                                action: payload.placementStatus === "assigned"
+                                    ? "parking_registration_assigned"
+                                    : "parking_registration_waiting_list",
+                                message: payload.placementStatus === "assigned"
+                                    ? "Parking registration moved to assigned."
+                                    : "Parking registration moved to the waiting list.",
+                            },
+                            ...(existingDataWithoutLegacyFlag.history ?? []),
+                        ],
                         placementStatus: payload.placementStatus,
                     }),
                 },
@@ -1211,8 +1232,8 @@ export const handler = async (event) => {
                 return null;
             }
         }).filter(Boolean);
-        const activeRegistrationCount = registrations.filter((registration) => registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus)).length;
-        const waitingListCount = registrations.filter((registration) => registration.isActive && registration.placementStatus === "waiting-list").length;
+        const activeRegistrationCount = registrations.filter((registration) => isActiveParkingPlacementStatus(registration.placementStatus)).length;
+        const waitingListCount = registrations.filter((registration) => registration.placementStatus === "waiting-list").length;
         return {
             statusCode: 200,
             headers: responseHeaders,

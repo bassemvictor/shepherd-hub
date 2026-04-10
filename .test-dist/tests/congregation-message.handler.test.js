@@ -224,9 +224,15 @@ test("creates a parking registration", async () => {
     assert.equal(storedData.workPhone, "6135550102");
     assert.equal(storedData.durationFrom, "2026-04");
     assert.equal(storedData.durationTo, "2026-05");
-    assert.equal(storedData.isActive, true);
     assert.equal(storedData.placementStatus, "assigned");
     assert.equal(typeof storedData.registeredAt, "string");
+    assert.deepEqual(storedData.history, [
+        {
+            timestamp: body.time,
+            action: "parking_registration_created",
+            message: "Parking registration created and assigned.",
+        },
+    ]);
 });
 test("blocks parking registration when license plate already exists", async () => {
     const dynamo = createMockClient((command) => {
@@ -248,7 +254,6 @@ test("blocks parking registration when license plate already exists", async () =
                             durationFrom: "2026-04",
                             durationTo: "2026-05",
                             registeredAt: "2026-04-01T08:00:00.000Z",
-                            isActive: true,
                             placementStatus: "waiting-list",
                         }),
                     },
@@ -329,7 +334,6 @@ test("loads and updates parking management", async () => {
                         pk: "PARKING_REGISTRATION",
                         sk: "REGISTRATION#1",
                         data: JSON.stringify({
-                            isActive: true,
                             placementStatus: "waiting-list",
                         }),
                     },
@@ -337,7 +341,6 @@ test("loads and updates parking management", async () => {
                         pk: "PARKING_REGISTRATION",
                         sk: "REGISTRATION#2",
                         data: JSON.stringify({
-                            isActive: true,
                             placementStatus: "assigned",
                         }),
                     },
@@ -438,7 +441,6 @@ test("lists parking registrations for parking admin", async () => {
                             firstName: "A",
                             lastName: "One",
                             registeredAt: "2026-04-01T08:00:00.000Z",
-                            isActive: true,
                             placementStatus: "waiting-list",
                         }),
                     },
@@ -449,7 +451,6 @@ test("lists parking registrations for parking admin", async () => {
                             firstName: "B",
                             lastName: "Two",
                             registeredAt: "2026-03-01T08:00:00.000Z",
-                            isActive: true,
                             placementStatus: "assigned",
                         }),
                     },
@@ -484,7 +485,7 @@ test("lists parking registrations for parking admin", async () => {
     assert.equal(body.items[0].sk, "REGISTRATION#2");
     assert.equal(body.items[1].sk, "REGISTRATION#1");
 });
-test("updates parking registration active status", async () => {
+test("updates parking registration placement status", async () => {
     const dynamo = createMockClient((command) => {
         if (command.constructor.name === "QueryCommand") {
             return {
@@ -506,6 +507,13 @@ test("updates parking registration active status", async () => {
                     pk: "PARKING_REGISTRATION",
                     sk: "REGISTRATION#1",
                     data: JSON.stringify({
+                        history: [
+                            {
+                                timestamp: "2026-04-01T08:00:00.000Z",
+                                action: "parking_registration_created",
+                                message: "Parking registration created and added to the waiting list.",
+                            },
+                        ],
                         firstName: "Jane",
                         lastName: "Driver",
                         licensePlate: "ABC123",
@@ -517,7 +525,6 @@ test("updates parking registration active status", async () => {
                         durationFrom: "2026-04",
                         durationTo: "2026-05",
                         registeredAt: "2026-04-01T08:00:00.000Z",
-                        isActive: true,
                         placementStatus: "waiting-list",
                     }),
                 },
@@ -557,8 +564,23 @@ test("updates parking registration active status", async () => {
         },
     });
     const body = parseBody(response.body);
+    const putCommand = dynamo.commands.find((command) => command.constructor.name === "PutCommand");
+    const putInput = putCommand?.input;
+    const storedData = JSON.parse(String(putInput.Item?.data ?? "{}"));
     assert.equal(response.statusCode, 200);
     assert.equal(body.message, "Parking registration assigned.");
+    assert.deepEqual(storedData.history, [
+        {
+            timestamp: body.time,
+            action: "parking_registration_assigned",
+            message: "Parking registration moved to assigned.",
+        },
+        {
+            timestamp: "2026-04-01T08:00:00.000Z",
+            action: "parking_registration_created",
+            message: "Parking registration created and added to the waiting list.",
+        },
+    ]);
 });
 test("creates an announcement week", async () => {
     const dynamo = createMockClient((command) => {

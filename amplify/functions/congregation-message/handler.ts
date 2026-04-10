@@ -136,6 +136,11 @@ type StoredAnnouncementWeekData = {
 };
 
 type StoredParkingRegistrationData = {
+  history?: Array<{
+    timestamp: string;
+    action: string;
+    message: string;
+  }>;
   firstName: string;
   lastName: string;
   licensePlate: string;
@@ -147,7 +152,6 @@ type StoredParkingRegistrationData = {
   durationFrom: string;
   durationTo: string;
   registeredAt: string;
-  isActive: boolean;
   placementStatus: "waiting-list" | "assigned" | "active";
 };
 
@@ -678,14 +682,23 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         })
         .filter(Boolean) as StoredParkingRegistrationData[];
       const currentActiveCount = existingParkingRegistrations.filter(
-        (registration) =>
-          registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus),
+        (registration) => isActiveParkingPlacementStatus(registration.placementStatus),
       ).length;
       const placementStatus =
         settingsData.maxSpots > currentActiveCount ? "assigned" : "waiting-list";
 
       const registrationId = crypto.randomUUID();
       const data: StoredParkingRegistrationData = {
+        history: [
+          {
+            timestamp: time,
+            action: "parking_registration_created",
+            message:
+              placementStatus === "assigned"
+                ? "Parking registration created and assigned."
+                : "Parking registration created and added to the waiting list.",
+          },
+        ],
         firstName: payload.firstName.trim(),
         lastName: payload.lastName.trim(),
         licensePlate: payload.licensePlate.trim().toUpperCase(),
@@ -697,7 +710,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         durationFrom: payload.durationFrom,
         durationTo: payload.durationTo,
         registeredAt: time,
-        isActive: true,
         placementStatus,
       };
 
@@ -821,6 +833,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         };
       }
 
+      const { isActive: _legacyIsActive, ...existingDataWithoutLegacyFlag } = existingData as
+        StoredParkingRegistrationData & { isActive?: boolean };
+
       await dynamoClient.send(
         new PutCommand({
           TableName: tableName,
@@ -828,7 +843,23 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             pk: "PARKING_REGISTRATION",
             sk: payload.sk,
             data: JSON.stringify({
-              ...existingData,
+              ...existingDataWithoutLegacyFlag,
+              history: [
+                {
+                  timestamp: time,
+                  action:
+                    payload.placementStatus === "assigned"
+                      ? "parking_registration_assigned"
+                      : "parking_registration_waiting_list",
+                  message:
+                    payload.placementStatus === "assigned"
+                      ? "Parking registration moved to assigned."
+                      : "Parking registration moved to the waiting list.",
+                },
+                ...((existingDataWithoutLegacyFlag.history ?? []) as NonNullable<
+                  StoredParkingRegistrationData["history"]
+                >),
+              ],
               placementStatus: payload.placementStatus,
             } satisfies StoredParkingRegistrationData),
           },
@@ -1741,11 +1772,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }).filter(Boolean) as StoredParkingRegistrationData[];
 
     const activeRegistrationCount = registrations.filter(
-      (registration) =>
-        registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus),
+      (registration) => isActiveParkingPlacementStatus(registration.placementStatus),
     ).length;
     const waitingListCount = registrations.filter(
-      (registration) => registration.isActive && registration.placementStatus === "waiting-list",
+      (registration) => registration.placementStatus === "waiting-list",
     ).length;
 
     return {

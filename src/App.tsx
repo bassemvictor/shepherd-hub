@@ -221,6 +221,16 @@ type AnnouncementItemDeleteModalState = {
   label: string;
 } | null;
 
+type ParkingHistoryModalState = {
+  sk: string;
+  memberName: string;
+  history: Array<{
+    timestamp: string;
+    action: string;
+    message: string;
+  }>;
+} | null;
+
 type EditingMemberState = {
   pk: string;
   sk: string;
@@ -316,6 +326,11 @@ type ParkingManagementResponse = {
 type ParkingRegistrationItem = {
   pk: string;
   sk: string;
+  history?: Array<{
+    timestamp: string;
+    action: string;
+    message: string;
+  }>;
   firstName: string;
   lastName: string;
   licensePlate: string;
@@ -327,7 +342,6 @@ type ParkingRegistrationItem = {
   durationFrom: string;
   durationTo: string;
   registeredAt: string;
-  isActive: boolean;
   placementStatus: "waiting-list" | "assigned" | "active";
 };
 
@@ -753,6 +767,7 @@ export default function App() {
   );
   const [isVisitationSubmitting, setIsVisitationSubmitting] = useState(false);
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>(null);
+  const [parkingHistoryModal, setParkingHistoryModal] = useState<ParkingHistoryModalState>(null);
   const [userDirectory, setUserDirectory] = useState<UserDirectoryItem[]>([]);
   const [groupAssignments, setGroupAssignments] = useState<Record<string, string[]>>({});
   const [isUserDirectoryLoading, setIsUserDirectoryLoading] = useState(false);
@@ -781,9 +796,7 @@ export default function App() {
   const [parkingRegistrations, setParkingRegistrations] = useState<ParkingRegistrationItem[]>([]);
   const [parkingRegistrationsError, setParkingRegistrationsError] = useState<string | null>(null);
   const [isParkingRegistrationsLoading, setIsParkingRegistrationsLoading] = useState(false);
-  const [parkingTab, setParkingTab] = useState<"active" | "waiting-list" | "inactive">(
-    "active",
-  );
+  const [parkingTab, setParkingTab] = useState<"assigned" | "waiting-list">("assigned");
   const [updatingParkingRegistrationSk, setUpdatingParkingRegistrationSk] = useState<
     string | null
   >(null);
@@ -810,16 +823,11 @@ export default function App() {
         }),
     );
   const currentAnnouncementWeekLabel = getCurrentIsoWeekLabel();
-  const activeParkingRegistrations = parkingRegistrations.filter(
-    (registration) =>
-      registration.isActive && isActiveParkingPlacementStatus(registration.placementStatus),
+  const assignedParkingRegistrations = parkingRegistrations.filter((registration) =>
+    isActiveParkingPlacementStatus(registration.placementStatus),
   );
   const waitingListRegistrations = parkingRegistrations
     .filter((registration) => registration.placementStatus === "waiting-list")
-    .slice()
-    .sort((left, right) => left.registeredAt.localeCompare(right.registeredAt));
-  const inactiveParkingRegistrations = parkingRegistrations
-    .filter((registration) => !registration.isActive)
     .slice()
     .sort((left, right) => left.registeredAt.localeCompare(right.registeredAt));
   const isBackendRequestInFlight =
@@ -2661,28 +2669,6 @@ export default function App() {
         </a>
         <button
           type="button"
-          className={`member-contact-button parking-status-button${
-            registration.placementStatus === "waiting-list" ? " waiting" : " assigned"
-          }`}
-          aria-label={`Move ${registration.firstName} ${registration.lastName} to ${
-            registration.placementStatus === "waiting-list" ? "assigned" : "waiting list"
-          }`}
-          onClick={() => void handleParkingRegistrationStatusToggle(registration)}
-          disabled={updatingParkingRegistrationSk === registration.sk}
-        >
-          <svg viewBox="0 0 24 24" className="member-contact-icon" aria-hidden="true">
-            <path
-              d={
-                registration.placementStatus !== "waiting-list"
-                  ? "M5.75 3.75h12.5a2 2 0 0 1 2 2v12.5a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2V5.75a2 2 0 0 1 2-2Zm9.44 5.72-4.04 4.63-2.34-2.25a.75.75 0 1 0-1.04 1.08l2.91 2.8a.75.75 0 0 0 1.1-.06l4.54-5.2a.75.75 0 1 0-1.13-.99Z"
-                  : "M5.75 3.75h12.5a2 2 0 0 1 2 2v12.5a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2V5.75a2 2 0 0 1 2-2Zm0 1.5a.5.5 0 0 0-.5.5v12.5c0 .28.22.5.5.5h12.5c.28 0 .5-.22.5-.5V5.75a.5.5 0 0 0-.5-.5H5.75Z"
-              }
-              fill="currentColor"
-            />
-          </svg>
-        </button>
-        <button
-          type="button"
           className="parking-placement-link"
           onClick={() => void handleParkingRegistrationStatusToggle(registration)}
           disabled={updatingParkingRegistrationSk === registration.sk}
@@ -2693,7 +2679,20 @@ export default function App() {
               ? "Assign"
               : "Move to Waiting List"}
         </button>
-        {parkingTab === "active" ? (
+        <button
+          type="button"
+          className="parking-history-link"
+          onClick={() =>
+            setParkingHistoryModal({
+              sk: registration.sk,
+              memberName: `${registration.firstName} ${registration.lastName}`,
+              history: registration.history ?? [],
+            })
+          }
+        >
+          History
+        </button>
+        {parkingTab === "assigned" ? (
           <button
             type="button"
             className="parking-print-link"
@@ -4201,20 +4200,18 @@ export default function App() {
                   <div>
                     <p className="member-form-mode">Parking Registrations</p>
                     <p className="parking-list-summary">
-                      {parkingTab === "active"
-                        ? `${activeParkingRegistrations.length} assigned registration${activeParkingRegistrations.length === 1 ? "" : "s"}`
-                        : parkingTab === "waiting-list"
-                          ? `${waitingListRegistrations.length} waiting list registration${waitingListRegistrations.length === 1 ? "" : "s"}, sorted by earliest registration`
-                          : `${inactiveParkingRegistrations.length} inactive registration${inactiveParkingRegistrations.length === 1 ? "" : "s"}, sorted by earliest registration`}
+                      {parkingTab === "assigned"
+                        ? `${assignedParkingRegistrations.length} assigned registration${assignedParkingRegistrations.length === 1 ? "" : "s"}`
+                        : `${waitingListRegistrations.length} waiting list registration${waitingListRegistrations.length === 1 ? "" : "s"}, sorted by earliest registration`}
                     </p>
                   </div>
                   <div className="parking-tabs" role="tablist" aria-label="Parking registration tabs">
                     <button
                       type="button"
                       role="tab"
-                      aria-selected={parkingTab === "active"}
-                      className={`parking-tab${parkingTab === "active" ? " active" : ""}`}
-                      onClick={() => setParkingTab("active")}
+                      aria-selected={parkingTab === "assigned"}
+                      className={`parking-tab${parkingTab === "assigned" ? " active" : ""}`}
+                      onClick={() => setParkingTab("assigned")}
                     >
                       Assigned
                     </button>
@@ -4227,15 +4224,6 @@ export default function App() {
                     >
                       Waiting List
                     </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={parkingTab === "inactive"}
-                      className={`parking-tab${parkingTab === "inactive" ? " active" : ""}`}
-                      onClick={() => setParkingTab("inactive")}
-                    >
-                      Inactive
-                    </button>
                   </div>
                 </div>
 
@@ -4243,23 +4231,17 @@ export default function App() {
                   <p className="member-submit-message">{parkingRegistrationsError}</p>
                 ) : null}
 
-                {parkingTab === "active"
-                  ? renderParkingRegistrationsTable(activeParkingRegistrations)
-                  : parkingTab === "waiting-list"
-                    ? renderParkingRegistrationsTable(waitingListRegistrations)
-                    : renderParkingRegistrationsTable(inactiveParkingRegistrations)}
+                {parkingTab === "assigned"
+                  ? renderParkingRegistrationsTable(assignedParkingRegistrations)
+                  : renderParkingRegistrationsTable(waitingListRegistrations)}
 
-                {(parkingTab === "active"
-                  ? activeParkingRegistrations.length === 0
-                  : parkingTab === "waiting-list"
-                    ? waitingListRegistrations.length === 0
-                    : inactiveParkingRegistrations.length === 0) ? (
+                {(parkingTab === "assigned"
+                  ? assignedParkingRegistrations.length === 0
+                  : waitingListRegistrations.length === 0) ? (
                   <p className="api-message-text">
-                    {parkingTab === "active"
+                    {parkingTab === "assigned"
                       ? "No assigned parking registrations."
-                      : parkingTab === "waiting-list"
-                        ? "No waiting list registrations."
-                        : "No inactive registrations."}
+                      : "No waiting list registrations."}
                   </p>
                 ) : null}
               </div>
@@ -5279,6 +5261,54 @@ export default function App() {
                 onClick={confirmRemoveAnnouncementItem}
               >
                 Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {parkingHistoryModal ? (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onClick={() => setParkingHistoryModal(null)}
+        >
+          <div
+            className="modal-card parking-history-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Parking activity history"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="eyebrow">Parking Activity</p>
+            <h2 className="modal-title">{parkingHistoryModal.memberName}</h2>
+            <p className="modal-copy">{parkingHistoryModal.sk}</p>
+
+            {parkingHistoryModal.history.length > 0 ? (
+              <div className="parking-history-list">
+                {parkingHistoryModal.history.map((entry, index) => (
+                  <article className="parking-history-item" key={`${entry.timestamp}-${index}`}>
+                    <div className="parking-history-top">
+                      <p className="parking-history-action">{entry.action.replace(/_/g, " ")}</p>
+                      <p className="parking-history-time">
+                        {new Date(entry.timestamp).toLocaleString()}
+                      </p>
+                    </div>
+                    <p className="parking-history-message">{entry.message}</p>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="modal-copy">No parking activity recorded yet.</p>
+            )}
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-secondary-button"
+                onClick={() => setParkingHistoryModal(null)}
+              >
+                Close
               </button>
             </div>
           </div>
