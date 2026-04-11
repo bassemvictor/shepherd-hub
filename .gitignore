@@ -6,3 +6,5 @@ npm-debug.log*
 .npm
 aws_creds.txt
 dist/assets
+android/.gradle
+android/local.properties

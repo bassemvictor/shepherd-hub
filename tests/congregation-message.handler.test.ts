@@ -154,7 +154,7 @@ test("lists Cognito users and their groups for managers", async () => {
 
   assert.equal(response.statusCode, 200);
   assert.equal(body.message, "User directory loaded.");
-  assert.deepEqual(body.groupOptions, ["admin", "super_user", "regular_user"]);
+  assert.deepEqual(body.groupOptions, ["admin", "super_user", "regular_user", "parking_admin"]);
   assert.deepEqual(body.items, [
     {
       username: "alice",

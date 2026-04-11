@@ -241,6 +241,256 @@ These tests are focused on Lambda route logic and mocked AWS interactions. They 
 
 6. Connect the repo in Amplify Hosting when you are ready for CI/CD.
 
+## Android App Setup With Capacitor
+
+This project can be packaged as a native Android app using Capacitor. The web app is built with Vite, and Capacitor copies the production build from `dist/` into the native Android project under `android/`.
+
+### One-time setup
+
+1. Install project dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Install Android Studio.
+
+   Download it from the official Android developer site and install:
+
+   ```text
+   https://developer.android.com/studio
+   ```
+
+3. In Android Studio, install the required Android SDK components if prompted.
+
+   Open Android Studio and make sure these are available:
+
+   - Android SDK
+   - Android SDK Platform for the latest installed API level
+   - Android SDK Platform-Tools
+   - Android SDK Build-Tools
+
+4. Make sure a Java runtime is available.
+
+   Android Studio usually installs and manages a compatible JDK for Gradle builds. If you build from the terminal and run into Java errors, install a recent JDK and confirm:
+
+   ```bash
+   java -version
+   ```
+
+### Generate or refresh the Android app
+
+Capacitor is already configured for this repository.
+
+Important files:
+
+- Capacitor config: `capacitor.config.ts`
+- Native Android project: `android/`
+- Android app id: `com.shepherdhub.app`
+
+Use these commands:
+
+1. Build the React app and sync it into Android:
+
+   ```bash
+   npm run cap:sync:android
+   ```
+
+   This command:
+
+   - runs the Vite production build
+   - copies the web assets into `android/app/src/main/assets/public`
+   - updates the Android native project with Capacitor config and plugins
+
+2. Open the Android project in Android Studio:
+
+   ```bash
+   npm run cap:open:android
+   ```
+
+3. If you only need to copy web changes again after editing the React app, run:
+
+   ```bash
+   npm run cap:sync:android
+   ```
+
+Whenever you change frontend code in `src/`, rerun `npm run cap:sync:android` before rebuilding or reinstalling the Android app.
+
+### Build the Android app in Android Studio
+
+1. Open the project:
+
+   ```bash
+   npm run cap:open:android
+   ```
+
+2. Wait for Gradle sync to finish.
+
+3. To run a debug build on a connected device:
+
+   - choose your device from the Android Studio device selector
+   - click `Run`
+
+4. To generate an APK manually in Android Studio:
+
+   - open `Build`
+   - choose `Build Bundle(s) / APK(s)`
+   - choose `Build APK(s)`
+
+5. To generate a release build for distribution later, use:
+
+   - `Build`
+   - `Generate Signed Bundle / APK`
+
+   For release distribution, Android requires signing credentials. Keep the keystore file and passwords in a safe place.
+
+### Build the Android app from the command line
+
+After syncing Capacitor, you can also build from the terminal:
+
+1. Build a debug APK:
+
+   ```bash
+   cd android
+   ./gradlew assembleDebug
+   ```
+
+2. The generated debug APK is typically located at:
+
+   ```text
+   android/app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+3. Build a release APK:
+
+   ```bash
+   cd android
+   ./gradlew assembleRelease
+   ```
+
+4. The generated release APK is typically located at:
+
+   ```text
+   android/app/build/outputs/apk/release/app-release.apk
+   ```
+
+The current Android project uses:
+
+- minimum Android SDK: `24`
+- target Android SDK: `36`
+
+These values come from `android/variables.gradle`.
+
+### Install the app on your Android phone with Android Studio
+
+1. On your phone, enable Developer Options.
+
+   On most Android devices:
+
+   - open `Settings`
+   - open `About phone`
+   - tap `Build number` several times until developer mode is enabled
+
+2. Enable `USB debugging` in `Developer options`.
+
+3. Connect the phone to your computer with a USB cable.
+
+4. Approve the `Allow USB debugging` prompt on the phone if it appears.
+
+5. Open the Android project in Android Studio:
+
+   ```bash
+   npm run cap:open:android
+   ```
+
+6. Select your phone as the target device and click `Run`.
+
+Android Studio will build, install, and launch the app for you.
+
+### Install the app on your Android phone with ADB
+
+If you prefer the command line, use Android Debug Bridge (`adb`).
+
+1. Make sure USB debugging is enabled on the phone.
+
+2. Connect the phone over USB.
+
+3. Confirm that your device is visible:
+
+   ```bash
+   adb devices
+   ```
+
+   If the device shows as unauthorized, unlock the phone and approve the debugging prompt.
+
+4. Build the debug APK:
+
+   ```bash
+   cd android
+   ./gradlew assembleDebug
+   ```
+
+5. Install it on the phone:
+
+   ```bash
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+The `-r` flag reinstalls the app while keeping the same application id.
+
+### Install the app by copying the APK to your phone
+
+You can also copy the built APK to the phone and install it manually.
+
+1. Build the debug APK:
+
+   ```bash
+   cd android
+   ./gradlew assembleDebug
+   ```
+
+2. Copy this file to your phone:
+
+   ```text
+   android/app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+3. Open the APK on the phone and allow installation if Android prompts for permission to install unknown apps.
+
+This method is useful when USB debugging is not available, but direct install through Android Studio or `adb` is usually easier during development.
+
+### Typical development workflow
+
+After the initial setup, the normal loop is:
+
+1. Make changes to the React app.
+2. Sync the latest web build into Android:
+
+   ```bash
+   npm run cap:sync:android
+   ```
+
+3. Rebuild and run from Android Studio, or rebuild from the terminal:
+
+   ```bash
+   cd android
+   ./gradlew assembleDebug
+   ```
+
+4. Install to the phone again if needed:
+
+   ```bash
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+### Troubleshooting
+
+- If Android Studio shows Gradle or SDK errors, open the project in Android Studio and let it install any missing SDK packages.
+- If terminal builds fail because `adb` is not found, add Android SDK Platform-Tools to your shell `PATH`.
+- If the app opens with old web content, rerun `npm run cap:sync:android` and rebuild the native app.
+- If the phone is not detected, try a different USB cable, switch the USB mode to file transfer, and run `adb devices` again.
+- If you change Capacitor config or add Capacitor plugins later, rerun `npm run cap:sync:android`.
+
 ## Notes
 
 - This starter is intentionally minimal.

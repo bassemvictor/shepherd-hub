@@ -359,11 +359,12 @@ type AppNavigationState = {
   betaMemberTab: "details" | "visitations" | "activity";
 };
 
-const manageableGroups = ["admin", "super_user", "regular_user"] as const;
+const manageableGroups = ["admin", "super_user", "regular_user", "parking_admin"] as const;
 const groupLabelMap: Record<(typeof manageableGroups)[number], string> = {
   admin: "Admin",
   super_user: "Super User",
   regular_user: "Regular User",
+  parking_admin: "Parking Admin",
 };
 
 const congregationApiName = Object.keys(outputs.custom?.API ?? {})[0];

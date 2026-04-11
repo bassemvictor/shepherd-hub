@@ -132,7 +132,7 @@ const parseVcfContacts = (content) => {
 const defaultDynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const defaultCognitoClient = new CognitoIdentityProviderClient({});
 const defaultSesClient = new SESv2Client({});
-const allowedUserGroups = ["admin", "super_user", "regular_user"];
+const allowedUserGroups = ["admin", "super_user", "regular_user", "parking_admin"];
 let dynamoClient = defaultDynamoClient;
 let cognitoClient = defaultCognitoClient;
 let sesClient = defaultSesClient;

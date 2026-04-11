@@ -376,7 +376,7 @@ const parseVcfContacts = (content: string) => {
 const defaultDynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({})) as AwsCommandClient;
 const defaultCognitoClient = new CognitoIdentityProviderClient({}) as AwsCommandClient;
 const defaultSesClient = new SESv2Client({}) as AwsCommandClient;
-const allowedUserGroups = ["admin", "super_user", "regular_user"] as const;
+const allowedUserGroups = ["admin", "super_user", "regular_user", "parking_admin"] as const;
 let dynamoClient: AwsCommandClient = defaultDynamoClient;
 let cognitoClient: AwsCommandClient = defaultCognitoClient;
 let sesClient: AwsCommandClient = defaultSesClient;
