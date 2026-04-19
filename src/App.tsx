@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
+} from "react";
 import { get, post } from "aws-amplify/api";
 import {
   confirmSignIn,
@@ -211,6 +219,16 @@ type DeleteModalState = {
   memberName: string;
 } | null;
 
+type MemberContextMenuState = {
+  pk: string;
+  sk: string;
+  memberName: string;
+  memberData: StoredMemberData | null;
+  memberPhoto?: string;
+  x: number;
+  y: number;
+} | null;
+
 type AnnouncementDeleteModalState = {
   sk: string;
   weekLabel: string;
@@ -389,6 +407,9 @@ const parseMemberData = (value: string): StoredMemberData | null => {
 };
 
 const memberDetailsViewCookieName = "shepherd_hub_member_details_view";
+const memberContextMenuWidth = 240;
+const memberContextMenuHeight = 248;
+const memberLongPressDelayMs = 550;
 
 const getCookieValue = (name: string) => {
   if (typeof document === "undefined") {
@@ -695,9 +716,12 @@ const initialParkingRegistrationForm: ParkingRegistrationFormState = {
 export default function App() {
   const sidePanelRef = useRef<HTMLElement | null>(null);
   const betaMemberMenuRef = useRef<HTMLDivElement | null>(null);
+  const memberContextMenuRef = useRef<HTMLDivElement | null>(null);
   const contactsImportInputRef = useRef<HTMLInputElement | null>(null);
   const memberPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const isApplyingPopStateRef = useRef(false);
+  const memberLongPressTimerRef = useRef<number | null>(null);
+  const suppressMemberClickRef = useRef(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
   const [challengeResponse, setChallengeResponse] = useState("");
@@ -768,6 +792,7 @@ export default function App() {
   );
   const [isVisitationSubmitting, setIsVisitationSubmitting] = useState(false);
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>(null);
+  const [memberContextMenu, setMemberContextMenu] = useState<MemberContextMenuState>(null);
   const [parkingHistoryModal, setParkingHistoryModal] = useState<ParkingHistoryModalState>(null);
   const [userDirectory, setUserDirectory] = useState<UserDirectoryItem[]>([]);
   const [groupAssignments, setGroupAssignments] = useState<Record<string, string[]>>({});
@@ -1874,6 +1899,54 @@ export default function App() {
     setIsBetaMemberMenuOpen(false);
   }, [selectedMember?.pk, selectedMember?.sk]);
 
+  useEffect(() => {
+    closeMemberContextMenu();
+  }, [activePage, selectedMember?.pk, selectedMember?.sk]);
+
+  useEffect(() => {
+    if (!memberContextMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!memberContextMenuRef.current) {
+        return;
+      }
+
+      const target = event.target;
+
+      if (target instanceof Node && !memberContextMenuRef.current.contains(target)) {
+        closeMemberContextMenu();
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMemberContextMenu();
+      }
+    };
+
+    const handleViewportChange = () => {
+      closeMemberContextMenu();
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      window.removeEventListener("resize", handleViewportChange);
+    };
+  }, [memberContextMenu]);
+
+  useEffect(() => () => clearMemberLongPressTimer(), []);
+
   const updateMemberForm = (
     field: keyof MemberFormState,
     value: MemberFormState[keyof MemberFormState],
@@ -2207,6 +2280,127 @@ export default function App() {
       selectedMember: { pk, sk },
       visitationFocus: { pk, sk, memberName },
     });
+  };
+
+  const closeMemberContextMenu = () => {
+    setMemberContextMenu(null);
+  };
+
+  const clearMemberLongPressTimer = () => {
+    if (memberLongPressTimerRef.current !== null) {
+      window.clearTimeout(memberLongPressTimerRef.current);
+      memberLongPressTimerRef.current = null;
+    }
+  };
+
+  const openMemberContextMenu = (
+    options: {
+      pk: string;
+      sk: string;
+      memberName: string;
+      memberData: StoredMemberData | null;
+      memberPhoto?: string;
+    },
+    x: number,
+    y: number,
+  ) => {
+    const menuX = Math.min(
+      x,
+      Math.max(16, window.innerWidth - memberContextMenuWidth - 16),
+    );
+    const menuY = Math.min(
+      y,
+      Math.max(16, window.innerHeight - memberContextMenuHeight - 16),
+    );
+
+    setMemberContextMenu({
+      ...options,
+      x: menuX,
+      y: menuY,
+    });
+  };
+
+  const handleMemberCardClick = (pk: string, sk: string) => {
+    if (suppressMemberClickRef.current) {
+      suppressMemberClickRef.current = false;
+      return;
+    }
+
+    closeMemberContextMenu();
+    openMemberDetailsPage(pk, sk);
+  };
+
+  const handleMemberContextMenuAction = (
+    action: "delete" | "edit" | "details" | "schedule",
+  ) => {
+    if (!memberContextMenu) {
+      return;
+    }
+
+    const { pk, sk, memberName, memberData, memberPhoto } = memberContextMenu;
+    closeMemberContextMenu();
+
+    if (action === "delete") {
+      openDeleteModal(pk, sk, memberName);
+      return;
+    }
+
+    if (action === "edit") {
+      openEditMemberPage(pk, sk, memberData, memberPhoto);
+      return;
+    }
+
+    if (action === "schedule") {
+      openMemberVisitationPage(pk, sk, memberName);
+      return;
+    }
+
+    openMemberDetailsPage(pk, sk);
+  };
+
+  const handleMemberCardContextMenu = (
+    event: ReactMouseEvent<HTMLElement>,
+    options: {
+      pk: string;
+      sk: string;
+      memberName: string;
+      memberData: StoredMemberData | null;
+      memberPhoto?: string;
+    },
+  ) => {
+    event.preventDefault();
+    clearMemberLongPressTimer();
+    suppressMemberClickRef.current = true;
+    openMemberContextMenu(options, event.clientX, event.clientY);
+  };
+
+  const handleMemberCardTouchStart = (
+    event: ReactTouchEvent<HTMLElement>,
+    options: {
+      pk: string;
+      sk: string;
+      memberName: string;
+      memberData: StoredMemberData | null;
+      memberPhoto?: string;
+    },
+  ) => {
+    clearMemberLongPressTimer();
+
+    const touch = event.touches[0];
+
+    if (!touch) {
+      return;
+    }
+
+    memberLongPressTimerRef.current = window.setTimeout(() => {
+      suppressMemberClickRef.current = true;
+      openMemberContextMenu(options, touch.clientX, touch.clientY);
+      memberLongPressTimerRef.current = null;
+    }, memberLongPressDelayMs);
+  };
+
+  const handleMemberCardTouchEnd = () => {
+    clearMemberLongPressTimer();
   };
 
   const handleDeleteMember = async (pk: string, sk: string) => {
@@ -3096,12 +3290,33 @@ export default function App() {
                         <article
                           className="api-data-item api-data-item-clickable"
                           key={`${item.pk}-${item.sk}`}
+                          onContextMenu={(event) =>
+                            handleMemberCardContextMenu(event, {
+                              pk: item.pk,
+                              sk: item.sk,
+                              memberName: fullName || "Unnamed member",
+                              memberData,
+                              memberPhoto: memberPhotoDataUrl,
+                            })
+                          }
+                          onTouchStart={(event) =>
+                            handleMemberCardTouchStart(event, {
+                              pk: item.pk,
+                              sk: item.sk,
+                              memberName: fullName || "Unnamed member",
+                              memberData,
+                              memberPhoto: memberPhotoDataUrl,
+                            })
+                          }
+                          onTouchEnd={handleMemberCardTouchEnd}
+                          onTouchCancel={handleMemberCardTouchEnd}
+                          onTouchMove={handleMemberCardTouchEnd}
                         >
                           {memberData ? (
                             <div className="api-data-details">
                               <div
                                 className="api-data-layout"
-                                onClick={() => openMemberDetailsPage(item.pk, item.sk)}
+                                onClick={() => handleMemberCardClick(item.pk, item.sk)}
                               >
                                 <div className="api-data-avatar">
                                   {memberPhotoDataUrl ? (
@@ -5056,6 +5271,52 @@ export default function App() {
           </button>
         ) : null}
       </main>
+
+      {memberContextMenu ? (
+        <div
+          ref={memberContextMenuRef}
+          className="member-context-menu"
+          role="menu"
+          aria-label={`Actions for ${memberContextMenu.memberName}`}
+          style={{
+            left: `${memberContextMenu.x}px`,
+            top: `${memberContextMenu.y}px`,
+          }}
+        >
+          <button
+            type="button"
+            className="member-context-menu-item"
+            role="menuitem"
+            onClick={() => handleMemberContextMenuAction("delete")}
+          >
+            <span className="member-context-menu-label">Delete</span>
+          </button>
+          <button
+            type="button"
+            className="member-context-menu-item"
+            role="menuitem"
+            onClick={() => handleMemberContextMenuAction("edit")}
+          >
+            <span className="member-context-menu-label">Edit</span>
+          </button>
+          <button
+            type="button"
+            className="member-context-menu-item"
+            role="menuitem"
+            onClick={() => handleMemberContextMenuAction("details")}
+          >
+            <span className="member-context-menu-label">Details</span>
+          </button>
+          <button
+            type="button"
+            className="member-context-menu-item"
+            role="menuitem"
+            onClick={() => handleMemberContextMenuAction("schedule")}
+          >
+            <span className="member-context-menu-label">Schedule visitation</span>
+          </button>
+        </div>
+      ) : null}
 
       {visitationModal ? (
         <div className="modal-overlay" role="presentation" onClick={closeVisitationModal}>
