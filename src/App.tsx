@@ -715,6 +715,11 @@ const initialParkingRegistrationForm: ParkingRegistrationFormState = {
   durationTo: "",
 };
 
+const mobileMemberDetailsBreakpoint = 640;
+
+const getIsCompactMobileViewport = () =>
+  typeof window !== "undefined" && window.innerWidth <= mobileMemberDetailsBreakpoint;
+
 export default function App() {
   const sidePanelRef = useRef<HTMLElement | null>(null);
   const betaMemberMenuRef = useRef<HTMLDivElement | null>(null);
@@ -741,6 +746,9 @@ export default function App() {
   const [preferredMemberDetailsPage, setPreferredMemberDetailsPage] = useState<
     "member-details" | "member-details-beta"
   >("member-details-beta");
+  const [isCompactMobileViewport, setIsCompactMobileViewport] = useState(
+    getIsCompactMobileViewport,
+  );
   const [activePage, setActivePage] = useState<PageKey>(getInitialActivePage);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
@@ -818,6 +826,10 @@ export default function App() {
     useState<ParkingManagementResponse | null>(null);
   const [parkingManagementStatus, setParkingManagementStatus] = useState<string | null>(null);
   const [parkingManagementError, setParkingManagementError] = useState<string | null>(null);
+
+  const memberDetailsPageForViewport = isCompactMobileViewport
+    ? "member-details-beta"
+    : preferredMemberDetailsPage;
   const [parkingMaxSpotsInput, setParkingMaxSpotsInput] = useState("0");
   const [isParkingManagementLoading, setIsParkingManagementLoading] = useState(false);
   const [isParkingManagementSaving, setIsParkingManagementSaving] = useState(false);
@@ -1779,6 +1791,40 @@ export default function App() {
   }, [authStatus]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncViewport = () => {
+      setIsCompactMobileViewport(getIsCompactMobileViewport());
+    };
+
+    syncViewport();
+    window.addEventListener("resize", syncViewport);
+
+    return () => {
+      window.removeEventListener("resize", syncViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isCompactMobileViewport || activePage !== "member-details") {
+      return;
+    }
+
+    const nextState = createNavigationState({
+      activePage: "member-details-beta",
+      betaMemberTab: "details",
+    });
+
+    applyNavigationState(nextState);
+
+    if (typeof window !== "undefined") {
+      window.history.replaceState({ shepherdHubNav: nextState }, "", window.location.href);
+    }
+  }, [activePage, isCompactMobileViewport]);
+
+  useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
       return;
     }
@@ -1820,7 +1866,9 @@ export default function App() {
     deleteModal,
     editingMember,
     isBetaMemberMenuOpen,
+    isCompactMobileViewport,
     isMobileMenuOpen,
+    memberDetailsPageForViewport,
     memberContextMenu,
     parkingHistoryModal,
     selectedMember,
@@ -2320,10 +2368,10 @@ export default function App() {
 
   const openMemberDetailsPage = (pk: string, sk: string) => {
     navigateToState({
-      activePage: preferredMemberDetailsPage,
+      activePage: memberDetailsPageForViewport,
       selectedMember: { pk, sk },
       betaMemberTab:
-        preferredMemberDetailsPage === "member-details-beta" ? "details" : undefined,
+        memberDetailsPageForViewport === "member-details-beta" ? "details" : undefined,
     });
   };
 
@@ -2504,6 +2552,11 @@ export default function App() {
     }
 
     if (activePage === "member-details-beta") {
+      if (isCompactMobileViewport) {
+        setActivePage("congregation");
+        return true;
+      }
+
       setMemberDetailsViewPreference("member-details");
       setActivePage("member-details");
       return true;
@@ -2511,12 +2564,14 @@ export default function App() {
 
     if (activePage === "visitation" && visitationFocus) {
       navigateToState({
-        activePage: "member-details",
+        activePage: memberDetailsPageForViewport,
         selectedMember: {
           pk: visitationFocus.pk,
           sk: visitationFocus.sk,
         },
         visitationFocus,
+        betaMemberTab:
+          memberDetailsPageForViewport === "member-details-beta" ? "visitations" : undefined,
       });
       return true;
     }
@@ -3357,7 +3412,7 @@ export default function App() {
             <div>
               <div className="hero-title-row">
                 <p className="eyebrow">{currentPage.eyebrow}</p>
-                {activePage === "member-details" ? (
+                {activePage === "member-details" && !isCompactMobileViewport ? (
                   <button
                     type="button"
                     className="hero-inline-link"
@@ -4995,22 +5050,17 @@ export default function App() {
                         type="button"
                         className="member-detail-beta-back"
                         onClick={() => {
+                          if (isCompactMobileViewport) {
+                            setActivePage("congregation");
+                            return;
+                          }
+
                           setMemberDetailsViewPreference("member-details");
                           setActivePage("member-details");
                         }}
                       >
                         <span aria-hidden="true">←</span>
                         <span>Back</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="member-detail-beta-legacy-link"
-                        onClick={() => {
-                          setMemberDetailsViewPreference("member-details");
-                          setActivePage("member-details");
-                        }}
-                      >
-                        Legacy View
                       </button>
                     </div>
                     <div className="member-detail-beta-menu" ref={betaMemberMenuRef}>
@@ -5443,11 +5493,16 @@ export default function App() {
                       type="button"
                       className="member-cancel-button"
                       onClick={() => {
+                        if (isCompactMobileViewport) {
+                          setActivePage("congregation");
+                          return;
+                        }
+
                         setMemberDetailsViewPreference("member-details");
                         setActivePage("member-details");
                       }}
                     >
-                      Back to Details
+                      {isCompactMobileViewport ? "Back to Congregation" : "Back to Details"}
                     </button>
                   </div>
                 </div>
