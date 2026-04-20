@@ -2005,6 +2005,13 @@ button {
   color: inherit;
 }
 
+.member-contact-button.email {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+
 .member-contact-button.disabled {
   opacity: 0.45;
   cursor: default;
@@ -2136,6 +2143,13 @@ button {
 [data-theme="dark"] .member-contact-button.phone {
   border-color: transparent;
   background: transparent;
+  color: inherit;
+}
+
+[data-theme="dark"] .member-contact-button.email {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
   color: inherit;
 }
 

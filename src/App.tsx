@@ -740,7 +740,7 @@ export default function App() {
   const [currentUserGroups, setCurrentUserGroups] = useState<string[]>([]);
   const [preferredMemberDetailsPage, setPreferredMemberDetailsPage] = useState<
     "member-details" | "member-details-beta"
-  >("member-details");
+  >("member-details-beta");
   const [activePage, setActivePage] = useState<PageKey>(getInitialActivePage);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [backendMessage, setBackendMessage] = useState<BackendMessage | null>(null);
@@ -891,6 +891,7 @@ export default function App() {
     : "Member";
   const selectedMemberPhone = normalizePhoneForLink(selectedMemberData?.phone);
   const selectedMemberWhatsappPhone = selectedMemberPhone.replace(/[^\d]/g, "");
+  const selectedMemberEmail = selectedMemberData?.email?.trim() ?? "";
   const selectedMemberInitials = getMemberInitials(
     selectedMemberData?.firstName,
     selectedMemberData?.lastName,
@@ -4772,6 +4773,25 @@ export default function App() {
                                 className="member-contact-image"
                               />
                             </a>
+                            <a
+                              className={`member-contact-button email${
+                                selectedMemberEmail ? "" : " disabled"
+                              }`}
+                              href={selectedMemberEmail ? `mailto:${selectedMemberEmail}` : undefined}
+                              aria-label="Email member"
+                              onClick={(event) => {
+                                if (!selectedMemberEmail) {
+                                  event.preventDefault();
+                                }
+                              }}
+                            >
+                              <img
+                                src="/email.png"
+                                alt=""
+                                aria-hidden="true"
+                                className="member-contact-image"
+                              />
+                            </a>
                           </div>
                         </div>
                         <div className="member-detail-action-row member-detail-action-row-secondary">
@@ -5119,6 +5139,25 @@ export default function App() {
                     >
                       <img
                         src="/whatsapp.png"
+                        alt=""
+                        aria-hidden="true"
+                        className="member-contact-image"
+                      />
+                    </a>
+                    <a
+                      className={`member-contact-button email${
+                        selectedMemberEmail ? "" : " disabled"
+                      }`}
+                      href={selectedMemberEmail ? `mailto:${selectedMemberEmail}` : undefined}
+                      aria-label="Email member"
+                      onClick={(event) => {
+                        if (!selectedMemberEmail) {
+                          event.preventDefault();
+                        }
+                      }}
+                    >
+                      <img
+                        src="/email.png"
                         alt=""
                         aria-hidden="true"
                         className="member-contact-image"
