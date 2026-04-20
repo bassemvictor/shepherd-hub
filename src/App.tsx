@@ -15,6 +15,8 @@ import {
   signIn,
   signOut,
 } from "aws-amplify/auth";
+import { App as CapacitorApp } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 import QRCode from "qrcode";
 import outputs from "../amplify_outputs.json";
 
@@ -1776,6 +1778,56 @@ export default function App() {
   }, [authStatus]);
 
   useEffect(() => {
+    if (!Capacitor.isNativePlatform()) {
+      return;
+    }
+
+    let isActive = true;
+    let removeListener: (() => Promise<void>) | null = null;
+
+    const setupBackButton = async () => {
+      const listener = await CapacitorApp.addListener("backButton", async () => {
+        const handled = navigateBackInsideApp();
+
+        if (!handled) {
+          await CapacitorApp.exitApp();
+        }
+      });
+
+      removeListener = () => listener.remove();
+
+      if (!isActive) {
+        await listener.remove();
+      }
+    };
+
+    void setupBackButton();
+
+    return () => {
+      isActive = false;
+      if (removeListener) {
+        void removeListener();
+      }
+    };
+  }, [
+    activePage,
+    announcementDeleteModal,
+    announcementItemDeleteModal,
+    authStatus,
+    betaMemberTab,
+    canManageParking,
+    deleteModal,
+    editingMember,
+    isBetaMemberMenuOpen,
+    isMobileMenuOpen,
+    memberContextMenu,
+    parkingHistoryModal,
+    selectedMember,
+    visitationFocus,
+    visitationModal,
+  ]);
+
+  useEffect(() => {
     if (activePage === "user-access" && !canManageUsers) {
       setActivePage("congregation");
     }
@@ -2401,6 +2453,111 @@ export default function App() {
 
   const handleMemberCardTouchEnd = () => {
     clearMemberLongPressTimer();
+  };
+
+  const navigateBackInsideApp = () => {
+    closeMemberContextMenu();
+
+    if (isMobileMenuOpen) {
+      setIsMobileMenuOpen(false);
+      return true;
+    }
+
+    if (isBetaMemberMenuOpen) {
+      setIsBetaMemberMenuOpen(false);
+      return true;
+    }
+
+    if (parkingHistoryModal) {
+      setParkingHistoryModal(null);
+      return true;
+    }
+
+    if (announcementItemDeleteModal) {
+      setAnnouncementItemDeleteModal(null);
+      return true;
+    }
+
+    if (announcementDeleteModal) {
+      setAnnouncementDeleteModal(null);
+      return true;
+    }
+
+    if (deleteModal) {
+      closeDeleteModal();
+      return true;
+    }
+
+    if (visitationModal) {
+      closeVisitationModal();
+      return true;
+    }
+
+    if (authStatus !== "signed-in") {
+      if (activePage === "parking-registration") {
+        setActivePage("congregation");
+        return true;
+      }
+
+      return false;
+    }
+
+    if (activePage === "member-details-beta") {
+      setMemberDetailsViewPreference("member-details");
+      setActivePage("member-details");
+      return true;
+    }
+
+    if (activePage === "visitation" && visitationFocus) {
+      navigateToState({
+        activePage: "member-details",
+        selectedMember: {
+          pk: visitationFocus.pk,
+          sk: visitationFocus.sk,
+        },
+        visitationFocus,
+      });
+      return true;
+    }
+
+    if (activePage === "announcement-week") {
+      navigateToState({ activePage: "announcements" });
+      return true;
+    }
+
+    if (activePage === "parking-registration") {
+      navigateToState({
+        activePage: canManageParking ? "parking-management" : "congregation",
+      });
+      return true;
+    }
+
+    const hasNavigationHistory =
+      typeof window !== "undefined" && window.history.length > 1;
+
+    if (hasNavigationHistory) {
+      window.history.back();
+      return true;
+    }
+
+    const isAtRootPage =
+      activePage === "congregation" &&
+      !selectedMember &&
+      !visitationFocus &&
+      !editingMember;
+
+    if (!isAtRootPage) {
+      navigateToState({
+        activePage: "congregation",
+        selectedMember: null,
+        visitationFocus: null,
+        editingMember: null,
+        betaMemberTab: "details",
+      });
+      return true;
+    }
+
+    return false;
   };
 
   const handleDeleteMember = async (pk: string, sk: string) => {
