@@ -99,14 +99,40 @@ button {
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18);
 }
 
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.auth-logo {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.auth-brand-name {
+  margin: 0;
+  color: var(--panel-text);
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+}
+
 .auth-title {
   margin: 0;
   font-size: clamp(1.8rem, 5vw, 2.4rem);
+  font-weight: 700;
+  text-align: center;
 }
 
 .auth-copy {
   margin: 0;
-  color: var(--muted-light);
+  color: rgb(245 162 16);
 }
 
 .auth-inline-link {

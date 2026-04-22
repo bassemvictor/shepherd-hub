@@ -3222,7 +3222,10 @@ export default function App() {
             className="auth-card"
             onSubmit={pendingSignInStep ? handleConfirmSignIn : handleSignIn}
           >
-            <p className="eyebrow">Shepherd Hub</p>
+            <div className="auth-brand">
+              <img className="auth-logo" src="/logo.png" alt="Shepherd Hub logo" />
+              <p className="auth-brand-name">Shepherd Hub</p>
+            </div>
             <h1 className="auth-title">Sign in to continue</h1>
             <p className="auth-copy">
               Use your Cognito username and password to access Shephed Hub.
