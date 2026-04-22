@@ -3216,7 +3216,7 @@ export default function App() {
     return (
       <div className="auth-shell" data-theme={theme}>
         {activePage === "parking-registration" ? (
-          <div className="auth-card">{renderParkingRegistrationPage({ showBackButton: true })}</div>
+          renderParkingRegistrationPage({ showBackButton: true })
         ) : (
           <form
             className="auth-card"
