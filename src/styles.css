@@ -3123,6 +3123,42 @@ button {
   margin-top: 1.5rem;
 }
 
+.visitation-calendar-schedule-page {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.visitation-calendar-schedule-card {
+  margin-top: 0;
+}
+
+.visitation-calendar-schedule-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.visitation-calendar-schedule-copy {
+  margin: 0.35rem 0 0;
+  color: var(--muted-light);
+  font-size: 0.95rem;
+}
+
+.visitation-calendar-schedule-date-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.8rem 1rem;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  color: var(--dark-card-text);
+  font-weight: 700;
+}
+
 .visitation-calendar-toolbar {
   display: flex;
   align-items: center;
@@ -3185,6 +3221,19 @@ button {
   background: var(--dark-card-bg);
   border: 1px solid rgba(233, 201, 112, 0.2);
   box-shadow: 0 14px 32px rgba(148, 163, 184, 0.12);
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    border-color 140ms ease;
+}
+
+.visitation-calendar-day:hover,
+.visitation-calendar-day:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(59, 130, 246, 0.24);
+  box-shadow: 0 18px 36px rgba(59, 130, 246, 0.12);
+  outline: none;
 }
 
 .visitation-calendar-day.outside-month {
@@ -3261,6 +3310,12 @@ button {
 
 .visitation-calendar-empty-slot {
   min-height: 0.2rem;
+}
+
+[data-theme="dark"] .visitation-calendar-schedule-date-pill {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(96, 165, 250, 0.24);
+  color: #f8fafc;
 }
 
 .visitation-report-toolbar {
@@ -4106,6 +4161,11 @@ button {
   }
 
   .visitation-calendar-toolbar {
+    align-items: stretch;
+  }
+
+  .visitation-calendar-schedule-header {
+    flex-direction: column;
     align-items: stretch;
   }
 

@@ -25,6 +25,7 @@ type PageKey =
   | "visitation"
   | "visitation-report"
   | "visitation-calendar"
+  | "visitation-calendar-schedule"
   | "parling"
   | "parking-management"
   | "parking-registration"
@@ -59,6 +60,10 @@ const pageContent: Record<
   },
   "visitation-calendar": {
     eyebrow: "Visitation Calendar",
+    description: "",
+  },
+  "visitation-calendar-schedule": {
+    eyebrow: "Schedule Visitation",
     description: "",
   },
   parling: {
@@ -377,6 +382,7 @@ type AppNavigationState = {
   visitationFocus: VisitationFocusState | null;
   editingMember: EditingMemberState | null;
   betaMemberTab: "details" | "visitations" | "activity";
+  calendarScheduleDate: string | null;
 };
 
 const manageableGroups = ["admin", "super_user", "regular_user", "parking_admin"] as const;
@@ -438,6 +444,11 @@ const formatMemberKeyLabel = (pk: string, sk: string) => `${pk} / ${sk}`;
 const formatCompactMemberKey = (sk: string) => {
   return sk;
 };
+
+const formatDateInputValue = (value: Date) =>
+  `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(
+    value.getDate(),
+  ).padStart(2, "0")}`;
 
 const normalizePhoneForLink = (value?: string) => {
   if (!value) {
@@ -777,6 +788,7 @@ export default function App() {
   const [editingMember, setEditingMember] = useState<EditingMemberState>(null);
   const [selectedMember, setSelectedMember] = useState<SelectedMemberState>(null);
   const [visitationFocus, setVisitationFocus] = useState<VisitationFocusState>(null);
+  const [calendarScheduleDate, setCalendarScheduleDate] = useState<string | null>(null);
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [betaMemberTab, setBetaMemberTab] = useState<
     "details" | "visitations" | "activity"
@@ -795,6 +807,14 @@ export default function App() {
   const [visitationCalendarMonth, setVisitationCalendarMonth] = useState(() =>
     startOfMonth(new Date()),
   );
+  const [calendarScheduleMemberSk, setCalendarScheduleMemberSk] = useState("");
+  const [calendarScheduleTime, setCalendarScheduleTime] = useState("09:00");
+  const [calendarScheduleAssignedPriestSk, setCalendarScheduleAssignedPriestSk] =
+    useState("");
+  const [calendarScheduleSubmitState, setCalendarScheduleSubmitState] = useState<
+    string | null
+  >(null);
+  const [isCalendarScheduleSubmitting, setIsCalendarScheduleSubmitting] = useState(false);
   const [showCompletedVisitationsInReport, setShowCompletedVisitationsInReport] =
     useState(true);
   const [visitationSubmitState, setVisitationSubmitState] = useState<string | null>(
@@ -878,6 +898,7 @@ export default function App() {
     isMemberSubmitting ||
     deletingMemberKey !== null ||
     isVisitationSubmitting ||
+    isCalendarScheduleSubmitting ||
     isUserDirectoryLoading ||
     savingUserGroups !== null ||
     isContactsImporting ||
@@ -964,6 +985,19 @@ export default function App() {
       ? leftName.localeCompare(rightName, undefined, { sensitivity: "base" })
       : rightName.localeCompare(leftName, undefined, { sensitivity: "base" });
   });
+  const congregationMemberOptions = ((backendMessage?.items ?? [])
+    .map((item) => {
+      const memberData = parseMemberData(item.data);
+
+      return {
+        pk: item.pk,
+        sk: item.sk,
+        name: getMemberName(memberData?.firstName, memberData?.lastName, item.sk),
+      };
+    })
+    .sort((left, right) =>
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+    ));
   const priestMembers = ((backendMessage?.items ?? [])
     .map((item) => {
       const memberData = parseMemberData(item.data);
@@ -984,6 +1018,16 @@ export default function App() {
   const selectedVisitationPriestAvailable =
     !visitationAssignedPriestSk ||
     priestMembers.some((priest) => priest.sk === visitationAssignedPriestSk);
+  const selectedCalendarScheduleMember =
+    congregationMemberOptions.find((member) => member.sk === calendarScheduleMemberSk) ?? null;
+  const calendarScheduleDateLabel = calendarScheduleDate
+    ? new Date(`${calendarScheduleDate}T00:00`).toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "";
   const visitationItems = visitationFocus
     ? (backendMessage?.items.filter(
         (item) => item.pk === visitationFocus.pk && item.sk === visitationFocus.sk,
@@ -1179,6 +1223,7 @@ export default function App() {
     visitationFocus: overrides.visitationFocus ?? visitationFocus,
     editingMember: overrides.editingMember ?? editingMember,
     betaMemberTab: overrides.betaMemberTab ?? betaMemberTab,
+    calendarScheduleDate: overrides.calendarScheduleDate ?? calendarScheduleDate,
   });
 
   const applyNavigationState = (nextState: AppNavigationState) => {
@@ -1187,6 +1232,7 @@ export default function App() {
     setVisitationFocus(nextState.visitationFocus);
     setEditingMember(nextState.editingMember);
     setBetaMemberTab(nextState.betaMemberTab);
+    setCalendarScheduleDate(nextState.calendarScheduleDate);
     setIsMobileMenuOpen(false);
     setIsBetaMemberMenuOpen(false);
   };
@@ -1764,6 +1810,7 @@ export default function App() {
     visitationFocus,
     editingMember,
     betaMemberTab,
+    calendarScheduleDate,
   ]);
 
   useEffect(() => {
@@ -2383,6 +2430,25 @@ export default function App() {
     });
   };
 
+  const openCalendarDaySchedulePage = (day: Date) => {
+    setCalendarScheduleMemberSk("");
+    setCalendarScheduleTime("09:00");
+    setCalendarScheduleAssignedPriestSk("");
+    setCalendarScheduleSubmitState(null);
+    navigateToState({
+      activePage: "visitation-calendar-schedule",
+      calendarScheduleDate: formatDateInputValue(day),
+    });
+  };
+
+  const closeCalendarDaySchedulePage = () => {
+    setCalendarScheduleSubmitState(null);
+    navigateToState({
+      activePage: "visitation-calendar",
+      calendarScheduleDate: null,
+    });
+  };
+
   const closeMemberContextMenu = () => {
     setMemberContextMenu(null);
   };
@@ -2578,6 +2644,11 @@ export default function App() {
 
     if (activePage === "announcement-week") {
       navigateToState({ activePage: "announcements" });
+      return true;
+    }
+
+    if (activePage === "visitation-calendar-schedule") {
+      closeCalendarDaySchedulePage();
       return true;
     }
 
@@ -2801,6 +2872,34 @@ export default function App() {
       setVisitationSubmitState("Unable to save visitation update.");
     } finally {
       setIsVisitationSubmitting(false);
+    }
+  };
+
+  const handleCalendarScheduleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!congregationApiName || !calendarScheduleDate || !selectedCalendarScheduleMember) {
+      setCalendarScheduleSubmitState("Select a member and date before scheduling.");
+      return;
+    }
+
+    setIsCalendarScheduleSubmitting(true);
+    setCalendarScheduleSubmitState(null);
+
+    try {
+      await authorizedPost("/congregation/member/visitation", {
+        pk: selectedCalendarScheduleMember.pk,
+        sk: selectedCalendarScheduleMember.sk,
+        action: "schedule",
+        schedule: `${calendarScheduleDate}T${calendarScheduleTime}`,
+        assignedPriestSk: calendarScheduleAssignedPriestSk || undefined,
+      });
+      await loadBackendMessage();
+      closeCalendarDaySchedulePage();
+    } catch {
+      setCalendarScheduleSubmitState("Unable to schedule visitation from the calendar.");
+    } finally {
+      setIsCalendarScheduleSubmitting(false);
     }
   };
 
@@ -3967,6 +4066,15 @@ export default function App() {
                       className={`visitation-calendar-day${
                         isOutsideMonth ? " outside-month" : ""
                       }${isToday ? " today" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openCalendarDaySchedulePage(day)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openCalendarDaySchedulePage(day);
+                        }
+                      }}
                     >
                       <div className="visitation-calendar-day-header">
                         <p className="visitation-calendar-day-number">{day.getDate()}</p>
@@ -3986,13 +4094,14 @@ export default function App() {
                                 event.completedAt ? " completed" : ""
                               }`}
                               key={event.id}
-                              onClick={() =>
+                              onClick={(clickEvent) => {
+                                clickEvent.stopPropagation();
                                 openMemberVisitationPage(
                                   event.memberPk,
                                   event.memberSk,
                                   event.memberName,
-                                )
-                              }
+                                );
+                              }}
                             >
                               <span className="visitation-calendar-event-time">
                                 {event.scheduledDate.toLocaleTimeString(undefined, {
@@ -4016,6 +4125,116 @@ export default function App() {
                   );
                 })}
               </div>
+            </div>
+          ) : null}
+
+          {activePage === "visitation-calendar-schedule" ? (
+            <div className="visitation-calendar-schedule-page">
+              <form
+                className="member-form-card visitation-calendar-schedule-card"
+                onSubmit={handleCalendarScheduleSubmit}
+              >
+                <div className="member-form-header visitation-calendar-schedule-header">
+                  <div>
+                    <p className="member-form-mode">Schedule Visitation</p>
+                    <p className="visitation-calendar-schedule-copy">
+                      {calendarScheduleDateLabel
+                        ? `Create a visitation for ${calendarScheduleDateLabel}.`
+                        : "Choose a member and time for this visitation."}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="member-cancel-button"
+                    onClick={closeCalendarDaySchedulePage}
+                  >
+                    Back to Calendar
+                  </button>
+                </div>
+
+                <div className="visitation-calendar-schedule-date-pill">
+                  {calendarScheduleDateLabel || "Select a date from the calendar"}
+                </div>
+
+                <div className="member-form-grid visitation-calendar-schedule-grid">
+                  <label className="member-field">
+                    <span>Member</span>
+                    <select
+                      value={calendarScheduleMemberSk}
+                      onChange={(event) => setCalendarScheduleMemberSk(event.target.value)}
+                      required
+                    >
+                      <option value="">
+                        {congregationMemberOptions.length > 0
+                          ? "Select a member"
+                          : "No members available"}
+                      </option>
+                      {congregationMemberOptions.map((member) => (
+                        <option key={`${member.pk}-${member.sk}`} value={member.sk}>
+                          {member.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="member-field">
+                    <span>Time</span>
+                    <input
+                      type="time"
+                      value={calendarScheduleTime}
+                      onChange={(event) => setCalendarScheduleTime(event.target.value)}
+                      required
+                    />
+                  </label>
+
+                  <label className="member-field member-field-full">
+                    <span>Assign priest</span>
+                    <select
+                      value={calendarScheduleAssignedPriestSk}
+                      onChange={(event) =>
+                        setCalendarScheduleAssignedPriestSk(event.target.value)
+                      }
+                    >
+                      <option value="">Leave unassigned</option>
+                      {priestMembers.map((priest) => (
+                        <option key={priest.sk} value={priest.sk}>
+                          {priest.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="member-form-actions">
+                  <p className="member-submit-message">{calendarScheduleSubmitState}</p>
+                  <button
+                    type="button"
+                    className="member-cancel-button"
+                    onClick={() => {
+                      setCalendarScheduleMemberSk("");
+                      setCalendarScheduleTime("09:00");
+                      setCalendarScheduleAssignedPriestSk("");
+                      setCalendarScheduleSubmitState(null);
+                    }}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="submit"
+                    className="member-submit-button"
+                    disabled={
+                      isCalendarScheduleSubmitting ||
+                      !calendarScheduleDate ||
+                      !selectedCalendarScheduleMember
+                    }
+                  >
+                    {isCalendarScheduleSubmitting
+                      ? "Scheduling..."
+                      : "Schedule Visitation"}
+                  </button>
+                </div>
+              </form>
             </div>
           ) : null}
 
