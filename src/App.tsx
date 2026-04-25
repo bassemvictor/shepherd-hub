@@ -3483,13 +3483,24 @@ export default function App() {
           <div className="nav-section">
             <p className="nav-section-label">Session</p>
             <div className="nav-section-items">
-              <button
-                type="button"
-                className="nav-item theme-toggle-button"
-                onClick={toggleTheme}
-              >
-                {theme === "light" ? "Dark Mode" : "Light Mode"}
-              </button>
+              <div className="theme-toggle-group" role="group" aria-label="Theme mode">
+                <button
+                  type="button"
+                  className={`theme-toggle-option${theme === "light" ? " active" : ""}`}
+                  aria-pressed={theme === "light"}
+                  onClick={() => setTheme("light")}
+                >
+                  Light
+                </button>
+                <button
+                  type="button"
+                  className={`theme-toggle-option${theme === "dark" ? " active" : ""}`}
+                  aria-pressed={theme === "dark"}
+                  onClick={() => setTheme("dark")}
+                >
+                  Dark
+                </button>
+              </div>
               <button
                 type="button"
                 className="nav-item sign-out-button"
@@ -3497,6 +3508,7 @@ export default function App() {
               >
                 Sign Out
               </button>
+              <p className="side-panel-version">Version v0.1</p>
             </div>
           </div>
         </nav>
