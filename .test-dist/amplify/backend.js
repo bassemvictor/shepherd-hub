@@ -27,6 +27,10 @@ const congregationTable = new Table(storageStack, "CongregationTable", {
 backend.congregationMessage.addEnvironment("TEST_TABLE_NAME", congregationTable.tableName);
 backend.congregationMessage.addEnvironment("USER_POOL_ID", backend.auth.resources.userPool.userPoolId);
 backend.congregationMessage.addEnvironment("PARKING_NOTIFICATIONS_FROM_EMAIL", process.env.PARKING_NOTIFICATIONS_FROM_EMAIL ?? "");
+backend.congregationMessage.addEnvironment("GOOGLE_CLIENT_ID", process.env.GOOGLE_CLIENT_ID ?? "");
+backend.congregationMessage.addEnvironment("GOOGLE_CLIENT_SECRET", process.env.GOOGLE_CLIENT_SECRET ?? "");
+backend.congregationMessage.addEnvironment("GOOGLE_CALENDAR_CALLBACK_URL", process.env.GOOGLE_CALENDAR_CALLBACK_URL ?? "");
+backend.congregationMessage.addEnvironment("GOOGLE_TOKEN_ENCRYPTION_KEY", process.env.GOOGLE_TOKEN_ENCRYPTION_KEY ?? "");
 congregationTable.grantReadWriteData(backend.congregationMessage.resources.lambda);
 backend.congregationMessage.resources.lambda.addToRolePolicy(new PolicyStatement({
     actions: [
@@ -78,6 +82,42 @@ congregationApi.addRoutes({
     path: "/congregation/member/visitation",
     methods: [HttpMethod.POST],
     integration: new HttpLambdaIntegration("CongregationMemberVisitationIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/calendar/google/connect/start",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("GoogleCalendarConnectStartIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/calendar/google/connection",
+    methods: [HttpMethod.GET],
+    integration: new HttpLambdaIntegration("GoogleCalendarConnectionIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/calendar/google/freebusy",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("GoogleCalendarFreeBusyIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/calendar/google/calendars",
+    methods: [HttpMethod.GET],
+    integration: new HttpLambdaIntegration("GoogleCalendarListIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/calendar/google/events",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("GoogleCalendarEventsIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/calendar/google/events/create",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("GoogleCalendarEventsCreateIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/calendar/google/oauth/callback",
+    methods: [HttpMethod.GET],
+    authorizer: new HttpNoneAuthorizer(),
+    integration: new HttpLambdaIntegration("GoogleCalendarOauthCallbackIntegration", backend.congregationMessage.resources.lambda),
 });
 congregationApi.addRoutes({
     path: "/announcements",

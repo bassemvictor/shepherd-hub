@@ -15,6 +15,7 @@ import {
   QueryCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 type TableRow = {
   pk: string;
@@ -95,6 +96,34 @@ type ParkingManagementPayload = {
   maxSpots: number;
 };
 
+type GoogleCalendarConnectStartPayload = {
+  returnTo?: string;
+};
+
+type GoogleCalendarFreeBusyPayload = {
+  timeMin: string;
+  timeMax: string;
+  timeZone?: string;
+  calendarId?: string;
+};
+
+type GoogleCalendarEventsPayload = {
+  timeMin: string;
+  timeMax: string;
+  timeZone?: string;
+  calendarId?: string;
+};
+
+type GoogleCalendarCreateEventPayload = {
+  calendarId?: string;
+  title: string;
+  start: string;
+  end: string;
+  timeZone?: string;
+  location?: string;
+  description?: string;
+};
+
 type UpdateParkingRegistrationStatusPayload = {
   sk: string;
   placementStatus: "assigned" | "waiting-list" | "available";
@@ -161,6 +190,28 @@ type StoredParkingSettingsData = {
   updatedAt: string;
 };
 
+type StoredGoogleCalendarConnectionData = {
+  email: string;
+  refreshTokenEncrypted: string;
+  accessTokenEncrypted: string;
+  accessTokenExpiresAt: string;
+  tokenScope?: string;
+  tokenType?: string;
+  connectedAt: string;
+  updatedAt: string;
+  refreshTokenUpdatedAt: string;
+  lastRefreshAt?: string;
+  lastError?: string | null;
+};
+
+type StoredGoogleOAuthStateData = {
+  email: string;
+  userKey?: string;
+  returnTo: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
 type ParkingRegistrationsResponse = {
   message: string;
   time: string;
@@ -188,6 +239,71 @@ type ParsedVcfContact = {
   phone: string;
   address: string;
   notes: string;
+};
+
+type GoogleTokenResponse = {
+  access_token?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+  token_type?: string;
+  error?: string;
+  error_description?: string;
+};
+
+type GoogleFreeBusyResponse = {
+  calendars?: Record<
+    string,
+    {
+      busy?: Array<{
+        start?: string;
+        end?: string;
+      }>;
+      errors?: Array<{
+        domain?: string;
+        reason?: string;
+      }>;
+    }
+  >;
+  timeMin?: string;
+  timeMax?: string;
+};
+
+type GoogleCalendarListResponse = {
+  items?: Array<{
+    id?: string;
+    summary?: string;
+    summaryOverride?: string;
+    primary?: boolean;
+    accessRole?: string;
+    timeZone?: string;
+    hidden?: boolean;
+    selected?: boolean;
+  }>;
+};
+
+type GoogleCalendarEventsListResponse = {
+  items?: Array<{
+    id?: string;
+    summary?: string;
+    status?: string;
+    htmlLink?: string;
+    location?: string;
+    eventType?: string;
+    visibility?: string;
+    start?: {
+      dateTime?: string;
+      date?: string;
+    };
+    end?: {
+      dateTime?: string;
+      date?: string;
+    };
+    organizer?: {
+      email?: string;
+      displayName?: string;
+    };
+  }>;
 };
 
 type AwsCommandClient = {
@@ -386,6 +502,11 @@ const responseHeaders = {
   "Access-Control-Allow-Headers": "*",
   "Content-Type": "application/json",
 };
+const googleCalendarScope = "https://www.googleapis.com/auth/calendar";
+const googleConnectionPk = "CALENDAR_INTEGRATION";
+const googleOauthStatePk = "CALENDAR_OAUTH_STATE";
+const googleOauthStateTtlMs = 10 * 60 * 1000;
+const googleAccessTokenExpiryBufferMs = 60 * 1000;
 
 const getRequestGroups = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
   const claims =
@@ -433,6 +554,482 @@ const getRequestEmail = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
   const email = claims.email;
 
   return typeof email === "string" ? normalizeEmail(email) : "";
+};
+
+const getRequestUserKey = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
+  const claims =
+    ((event.requestContext as { authorizer?: { jwt?: { claims?: Record<string, unknown> } } })
+      .authorizer?.jwt?.claims as Record<string, unknown> | undefined) ?? {};
+
+  const sub =
+    typeof claims.sub === "string"
+      ? normalizeWhitespace(String(claims.sub)).toLowerCase()
+      : "";
+  const email = typeof claims.email === "string" ? normalizeEmail(claims.email) : "";
+  const cognitoUsername =
+    typeof claims["cognito:username"] === "string"
+      ? normalizeWhitespace(String(claims["cognito:username"])).toLowerCase()
+      : "";
+
+  return sub || email || cognitoUsername;
+};
+
+const getHeaderValue = (
+  headers: Parameters<APIGatewayProxyHandlerV2>[0]["headers"],
+  name: string,
+) => {
+  const lookupName = name.toLowerCase();
+  const match = Object.entries(headers ?? {}).find(
+    ([headerName]) => headerName.toLowerCase() === lookupName,
+  );
+
+  return typeof match?.[1] === "string" ? match[1] : "";
+};
+
+const getGoogleClientId = () => normalizeWhitespace(process.env.GOOGLE_CLIENT_ID);
+const getGoogleClientSecret = () => normalizeWhitespace(process.env.GOOGLE_CLIENT_SECRET);
+const getGoogleCalendarCallbackUrl = () =>
+  normalizeWhitespace(process.env.GOOGLE_CALENDAR_CALLBACK_URL);
+const getGoogleTokenEncryptionKey = () =>
+  normalizeWhitespace(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY);
+
+const getGoogleConnectionSortKey = (email: string) => `GOOGLE#${email}`;
+const getGoogleOauthStateSortKey = (state: string) => `GOOGLE#${state}`;
+
+const getRequiredGoogleConfig = () => {
+  const clientId = getGoogleClientId();
+  const clientSecret = getGoogleClientSecret();
+  const callbackUrl = getGoogleCalendarCallbackUrl();
+  const encryptionKey = getGoogleTokenEncryptionKey();
+
+  if (!clientId || !clientSecret || !callbackUrl || !encryptionKey) {
+    throw new Error(
+      "Google Calendar OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_CALENDAR_CALLBACK_URL, and GOOGLE_TOKEN_ENCRYPTION_KEY.",
+    );
+  }
+
+  return {
+    clientId,
+    clientSecret,
+    callbackUrl,
+    encryptionKey,
+  };
+};
+
+const getEncryptionKeyBytes = () => {
+  const { encryptionKey } = getRequiredGoogleConfig();
+  const decodedKey = Buffer.from(encryptionKey, "base64");
+
+  if (decodedKey.length !== 32) {
+    throw new Error("GOOGLE_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key.");
+  }
+
+  return decodedKey;
+};
+
+const encryptSecret = (value: string) => {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", getEncryptionKeyBytes(), iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return [iv, tag, encrypted].map((part) => part.toString("base64")).join(".");
+};
+
+const decryptSecret = (value: string) => {
+  const [ivPart, tagPart, encryptedPart] = value.split(".");
+
+  if (!ivPart || !tagPart || !encryptedPart) {
+    throw new Error("Encrypted secret is malformed.");
+  }
+
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    getEncryptionKeyBytes(),
+    Buffer.from(ivPart, "base64"),
+  );
+  decipher.setAuthTag(Buffer.from(tagPart, "base64"));
+
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(encryptedPart, "base64")),
+    decipher.final(),
+  ]);
+
+  return decrypted.toString("utf8");
+};
+
+const parseAbsoluteHttpUrl = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(value);
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const buildCalendarReturnUrl = ({
+  returnTo,
+  status,
+  message,
+}: {
+  returnTo: string;
+  status: "success" | "error";
+  message: string;
+}) => {
+  const url = new URL(returnTo);
+  url.searchParams.set("calendar-google-status", status);
+  url.searchParams.set("calendar-google-message", message);
+  return url.toString();
+};
+
+const redirectResponse = (location: string) => ({
+  statusCode: 302,
+  headers: {
+    Location: location,
+    "Cache-Control": "no-store",
+  },
+  body: "",
+});
+
+const exchangeGoogleToken = async (
+  formBody: URLSearchParams,
+): Promise<Required<Pick<GoogleTokenResponse, "access_token" | "expires_in">> &
+  Pick<GoogleTokenResponse, "refresh_token" | "scope" | "token_type">> => {
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: formBody.toString(),
+  });
+
+  const responseBody = (await response.json()) as GoogleTokenResponse;
+
+  if (!response.ok || !responseBody.access_token || !responseBody.expires_in) {
+    const errorMessage =
+      responseBody.error_description || responseBody.error || "Google token exchange failed.";
+    throw new Error(errorMessage);
+  }
+
+  return {
+    access_token: responseBody.access_token,
+    expires_in: responseBody.expires_in,
+    refresh_token: responseBody.refresh_token,
+    scope: responseBody.scope,
+    token_type: responseBody.token_type,
+  };
+};
+
+const queryGoogleCalendarFreeBusy = async ({
+  accessToken,
+  timeMin,
+  timeMax,
+  timeZone,
+  calendarId,
+}: {
+  accessToken: string;
+  timeMin: string;
+  timeMax: string;
+  timeZone?: string;
+  calendarId?: string;
+}) => {
+  const response = await fetch("https://www.googleapis.com/calendar/v3/freeBusy", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      timeMin,
+      timeMax,
+      timeZone,
+      items: [{ id: calendarId || "primary" }],
+    }),
+  });
+
+  const responseBody = (await response.json()) as GoogleFreeBusyResponse & {
+    error?: {
+      message?: string;
+    };
+  };
+
+  if (!response.ok) {
+    throw new Error(
+      responseBody.error?.message || "Unable to load Google Calendar free/busy data.",
+    );
+  }
+
+  return responseBody;
+};
+
+const listGoogleCalendars = async (accessToken: string) => {
+  const response = await fetch(
+    "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250",
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  const responseBody = (await response.json()) as GoogleCalendarListResponse & {
+    error?: {
+      message?: string;
+    };
+  };
+
+  if (!response.ok) {
+    throw new Error(responseBody.error?.message || "Unable to load Google calendars.");
+  }
+
+  return (responseBody.items ?? [])
+    .filter((item) => item.id)
+    .map((item) => ({
+      id: String(item.id),
+      name: item.summaryOverride || item.summary || String(item.id),
+      primary: Boolean(item.primary),
+      accessRole: item.accessRole ?? "",
+      timeZone: item.timeZone ?? "",
+      hidden: Boolean(item.hidden),
+      selected: Boolean(item.selected),
+    }));
+};
+
+const listGoogleCalendarEvents = async ({
+  accessToken,
+  calendarId,
+  timeMin,
+  timeMax,
+  timeZone,
+}: {
+  accessToken: string;
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
+  timeZone?: string;
+}) => {
+  const url = new URL(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+  );
+  url.searchParams.set("timeMin", timeMin);
+  url.searchParams.set("timeMax", timeMax);
+  url.searchParams.set("singleEvents", "true");
+  url.searchParams.set("orderBy", "startTime");
+  url.searchParams.set("maxResults", "100");
+  if (timeZone) {
+    url.searchParams.set("timeZone", timeZone);
+  }
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  const responseBody = (await response.json()) as GoogleCalendarEventsListResponse & {
+    error?: { message?: string };
+  };
+
+  if (!response.ok) {
+    throw new Error(responseBody.error?.message || "Unable to load Google Calendar events.");
+  }
+
+  return (responseBody.items ?? [])
+    .filter((item) => item.id && item.status !== "cancelled")
+    .map((item) => ({
+      id: String(item.id),
+      title: item.summary || "(No title)",
+      status: item.status ?? "",
+      htmlLink: item.htmlLink ?? "",
+      location: item.location ?? "",
+      eventType: item.eventType ?? "default",
+      visibility: item.visibility ?? "default",
+      start: item.start?.dateTime || item.start?.date || "",
+      end: item.end?.dateTime || item.end?.date || "",
+      isAllDay: Boolean(item.start?.date && !item.start?.dateTime),
+      organizer:
+        item.organizer?.displayName || item.organizer?.email || "",
+    }));
+};
+
+const createGoogleCalendarEvent = async ({
+  accessToken,
+  calendarId,
+  title,
+  start,
+  end,
+  timeZone,
+  location,
+  description,
+}: {
+  accessToken: string;
+  calendarId: string;
+  title: string;
+  start: string;
+  end: string;
+  timeZone?: string;
+  location?: string;
+  description?: string;
+}) => {
+  const response = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        summary: title,
+        location,
+        description,
+        start: {
+          dateTime: start,
+          timeZone,
+        },
+        end: {
+          dateTime: end,
+          timeZone,
+        },
+      }),
+    },
+  );
+
+  const responseBody = (await response.json()) as {
+    error?: { message?: string };
+    id?: string;
+    summary?: string;
+    status?: string;
+    htmlLink?: string;
+    location?: string;
+    eventType?: string;
+    visibility?: string;
+    start?: { dateTime?: string; date?: string };
+    end?: { dateTime?: string; date?: string };
+    organizer?: { email?: string; displayName?: string };
+  };
+
+  if (!response.ok || !responseBody.id) {
+    throw new Error(responseBody.error?.message || "Unable to create Google Calendar event.");
+  }
+
+  return {
+    id: responseBody.id,
+    title: responseBody.summary || title,
+    status: responseBody.status ?? "",
+    htmlLink: responseBody.htmlLink ?? "",
+    location: responseBody.location ?? location ?? "",
+    eventType: responseBody.eventType ?? "default",
+    visibility: responseBody.visibility ?? "default",
+    start: responseBody.start?.dateTime || responseBody.start?.date || start,
+    end: responseBody.end?.dateTime || responseBody.end?.date || end,
+    isAllDay: Boolean(responseBody.start?.date && !responseBody.start?.dateTime),
+    organizer: responseBody.organizer?.displayName || responseBody.organizer?.email || "",
+  };
+};
+
+const getStoredGoogleConnection = async (tableName: string, email: string) => {
+  const response = await dynamoClient.send(
+    new GetCommand({
+      TableName: tableName,
+      Key: {
+        pk: googleConnectionPk,
+        sk: getGoogleConnectionSortKey(email),
+      },
+    }),
+  );
+
+  if (!response.Item?.data) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(String(response.Item.data)) as StoredGoogleCalendarConnectionData;
+  } catch {
+    return null;
+  }
+};
+
+const saveStoredGoogleConnection = async (
+  tableName: string,
+  email: string,
+  connection: StoredGoogleCalendarConnectionData,
+) => {
+  await dynamoClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item: {
+        pk: googleConnectionPk,
+        sk: getGoogleConnectionSortKey(email),
+        data: JSON.stringify(connection),
+      },
+    }),
+  );
+};
+
+const refreshGoogleAccessTokenIfNeeded = async ({
+  tableName,
+  time,
+  email,
+  connection,
+}: {
+  tableName: string;
+  time: string;
+  email: string;
+  connection: StoredGoogleCalendarConnectionData;
+}) => {
+  const expiresAtMs = Date.parse(connection.accessTokenExpiresAt ?? "");
+  const isExpiredOrMissing =
+    !connection.accessTokenEncrypted ||
+    !Number.isFinite(expiresAtMs) ||
+    expiresAtMs <= Date.now() + googleAccessTokenExpiryBufferMs;
+
+  if (!isExpiredOrMissing) {
+    return connection;
+  }
+
+  const refreshToken = decryptSecret(connection.refreshTokenEncrypted);
+  const { clientId, clientSecret, callbackUrl } = getRequiredGoogleConfig();
+
+  const refreshedToken = await exchangeGoogleToken(
+    new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      redirect_uri: callbackUrl,
+    }),
+  );
+
+  const refreshedAt = new Date();
+  const nextConnection: StoredGoogleCalendarConnectionData = {
+    ...connection,
+    email,
+    accessTokenEncrypted: encryptSecret(refreshedToken.access_token),
+    accessTokenExpiresAt: new Date(
+      refreshedAt.getTime() + refreshedToken.expires_in * 1000,
+    ).toISOString(),
+    tokenScope: refreshedToken.scope ?? connection.tokenScope,
+    tokenType: refreshedToken.token_type ?? connection.tokenType,
+    updatedAt: time,
+    lastRefreshAt: time,
+    lastError: null,
+  };
+
+  await saveStoredGoogleConnection(tableName, email, nextConnection);
+
+  return nextConnection;
 };
 
 const forbiddenResponse = (time: string, message: string) => ({
@@ -579,6 +1176,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const requestPath = event.requestContext.http.path;
   const requestGroups = getRequestGroups(event);
   const requestEmail = getRequestEmail(event);
+  const requestUserKey = getRequestUserKey(event);
 
   if (!tableName) {
     return {
@@ -669,6 +1267,396 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   }
 
   if (event.requestContext.http.method === "POST") {
+    if (requestPath.endsWith("/calendar/google/connect/start")) {
+      if (!requestUserKey) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A signed-in user identifier is required to connect Google Calendar.",
+            time,
+          }),
+        };
+      }
+
+      try {
+        const { clientId, callbackUrl } = getRequiredGoogleConfig();
+        const payload = JSON.parse(event.body ?? "{}") as Partial<GoogleCalendarConnectStartPayload>;
+        const fallbackReturnTo =
+          parseAbsoluteHttpUrl(getHeaderValue(event.headers, "origin"))?.toString() ?? "";
+        const returnTo =
+          parseAbsoluteHttpUrl(payload.returnTo)?.toString() || fallbackReturnTo;
+
+        if (!returnTo) {
+          return {
+            statusCode: 400,
+            headers: responseHeaders,
+            body: JSON.stringify({
+              message: "A valid returnTo URL is required to start Google Calendar OAuth.",
+              time,
+            }),
+          };
+        }
+
+        const state = randomBytes(24).toString("hex");
+        const createdAt = new Date(time);
+        const expiresAt = new Date(createdAt.getTime() + googleOauthStateTtlMs).toISOString();
+
+        await dynamoClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              pk: googleOauthStatePk,
+              sk: getGoogleOauthStateSortKey(state),
+              data: JSON.stringify({
+                email: requestEmail,
+                userKey: requestUserKey,
+                returnTo,
+                createdAt: time,
+                expiresAt,
+              } satisfies StoredGoogleOAuthStateData),
+            },
+          }),
+        );
+
+        const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+        authorizationUrl.searchParams.set("client_id", clientId);
+        authorizationUrl.searchParams.set("redirect_uri", callbackUrl);
+        authorizationUrl.searchParams.set("response_type", "code");
+        authorizationUrl.searchParams.set("scope", googleCalendarScope);
+        authorizationUrl.searchParams.set("access_type", "offline");
+        authorizationUrl.searchParams.set("include_granted_scopes", "true");
+        authorizationUrl.searchParams.set("prompt", "consent");
+        authorizationUrl.searchParams.set("state", state);
+
+        return {
+          statusCode: 200,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar authorization started.",
+            time,
+            authorizationUrl: authorizationUrl.toString(),
+          }),
+        };
+      } catch (error) {
+        return {
+          statusCode: 500,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: error instanceof Error ? error.message : "Unable to start Google OAuth.",
+            time,
+          }),
+        };
+      }
+    }
+
+    if (requestPath.endsWith("/calendar/google/freebusy")) {
+      if (!requestUserKey) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A signed-in user identifier is required to load calendar availability.",
+            time,
+          }),
+        };
+      }
+
+      const payload = JSON.parse(event.body ?? "{}") as Partial<GoogleCalendarFreeBusyPayload>;
+      const timeMin = normalizeWhitespace(payload.timeMin);
+      const timeMax = normalizeWhitespace(payload.timeMax);
+      const timeZone = normalizeWhitespace(payload.timeZone);
+      const calendarId = normalizeWhitespace(payload.calendarId) || "primary";
+
+      if (!timeMin || !timeMax) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "timeMin and timeMax are required.",
+            time,
+          }),
+        };
+      }
+
+      if (
+        Number.isNaN(Date.parse(timeMin)) ||
+        Number.isNaN(Date.parse(timeMax)) ||
+        Date.parse(timeMin) >= Date.parse(timeMax)
+      ) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "timeMin must be earlier than timeMax and both must be valid dates.",
+            time,
+          }),
+        };
+      }
+
+      const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
+
+      if (!existingConnection) {
+        return {
+          statusCode: 404,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar is not connected.",
+            time,
+          }),
+        };
+      }
+
+      try {
+        const currentConnection = await refreshGoogleAccessTokenIfNeeded({
+          tableName,
+          time,
+          email: requestUserKey,
+          connection: existingConnection,
+        });
+        const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+        const freeBusyResponse = await queryGoogleCalendarFreeBusy({
+          accessToken,
+          timeMin,
+          timeMax,
+          timeZone,
+          calendarId,
+        });
+        const calendarData = freeBusyResponse.calendars?.[calendarId] ?? {
+          busy: [],
+          errors: [],
+        };
+
+        return {
+          statusCode: 200,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar availability loaded.",
+            time,
+            calendarId,
+            timeMin: freeBusyResponse.timeMin ?? timeMin,
+            timeMax: freeBusyResponse.timeMax ?? timeMax,
+            busy: (calendarData.busy ?? []).filter(
+              (slot) => typeof slot.start === "string" && typeof slot.end === "string",
+            ),
+            errors: calendarData.errors ?? [],
+          }),
+        };
+      } catch (error) {
+        return {
+          statusCode: 500,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message:
+              error instanceof Error
+                ? error.message
+                : "Unable to load Google Calendar availability.",
+            time,
+          }),
+        };
+      }
+    }
+
+    if (requestPath.endsWith("/calendar/google/events")) {
+      if (!requestUserKey) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A signed-in user identifier is required to load calendar events.",
+            time,
+          }),
+        };
+      }
+
+      const payload = JSON.parse(event.body ?? "{}") as Partial<GoogleCalendarEventsPayload>;
+      const timeMin = normalizeWhitespace(payload.timeMin);
+      const timeMax = normalizeWhitespace(payload.timeMax);
+      const timeZone = normalizeWhitespace(payload.timeZone);
+      const calendarId = normalizeWhitespace(payload.calendarId) || "primary";
+
+      if (!timeMin || !timeMax) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "timeMin and timeMax are required.",
+            time,
+          }),
+        };
+      }
+
+      if (
+        Number.isNaN(Date.parse(timeMin)) ||
+        Number.isNaN(Date.parse(timeMax)) ||
+        Date.parse(timeMin) >= Date.parse(timeMax)
+      ) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "timeMin must be earlier than timeMax and both must be valid dates.",
+            time,
+          }),
+        };
+      }
+
+      const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
+
+      if (!existingConnection) {
+        return {
+          statusCode: 404,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar is not connected.",
+            time,
+          }),
+        };
+      }
+
+      try {
+        const currentConnection = await refreshGoogleAccessTokenIfNeeded({
+          tableName,
+          time,
+          email: requestUserKey,
+          connection: existingConnection,
+        });
+        const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+        const items = await listGoogleCalendarEvents({
+          accessToken,
+          calendarId,
+          timeMin,
+          timeMax,
+          timeZone,
+        });
+
+        return {
+          statusCode: 200,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar events loaded.",
+            time,
+            calendarId,
+            timeMin,
+            timeMax,
+            items,
+          }),
+        };
+      } catch (error) {
+        return {
+          statusCode: 500,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message:
+              error instanceof Error ? error.message : "Unable to load Google Calendar events.",
+            time,
+          }),
+        };
+      }
+    }
+
+    if (requestPath.endsWith("/calendar/google/events/create")) {
+      if (!requestUserKey) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A signed-in user identifier is required to create calendar events.",
+            time,
+          }),
+        };
+      }
+
+      const payload = JSON.parse(event.body ?? "{}") as Partial<GoogleCalendarCreateEventPayload>;
+      const calendarId = normalizeWhitespace(payload.calendarId) || "primary";
+      const title = normalizeWhitespace(payload.title);
+      const start = normalizeWhitespace(payload.start);
+      const end = normalizeWhitespace(payload.end);
+      const timeZone = normalizeWhitespace(payload.timeZone);
+      const location = normalizeWhitespace(payload.location);
+      const description = normalizeWhitespace(payload.description);
+
+      if (!title || !start || !end) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "title, start, and end are required.",
+            time,
+          }),
+        };
+      }
+
+      if (
+        Number.isNaN(Date.parse(start)) ||
+        Number.isNaN(Date.parse(end)) ||
+        Date.parse(start) >= Date.parse(end)
+      ) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "start must be earlier than end and both must be valid dates.",
+            time,
+          }),
+        };
+      }
+
+      const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
+
+      if (!existingConnection) {
+        return {
+          statusCode: 404,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar is not connected.",
+            time,
+          }),
+        };
+      }
+
+      try {
+        const currentConnection = await refreshGoogleAccessTokenIfNeeded({
+          tableName,
+          time,
+          email: requestUserKey,
+          connection: existingConnection,
+        });
+        const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+        const item = await createGoogleCalendarEvent({
+          accessToken,
+          calendarId,
+          title,
+          start,
+          end,
+          timeZone,
+          location,
+          description,
+        });
+
+        return {
+          statusCode: 201,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar event created.",
+            time,
+            calendarId,
+            item,
+          }),
+        };
+      } catch (error) {
+        return {
+          statusCode: 500,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message:
+              error instanceof Error ? error.message : "Unable to create Google Calendar event.",
+            time,
+          }),
+        };
+      }
+    }
+
     if (requestPath.endsWith("/parking/registration")) {
       const payload = JSON.parse(event.body ?? "{}") as Partial<ParkingRegistrationPayload>;
 
@@ -1803,6 +2791,309 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         time,
       }),
     };
+  }
+
+  if (requestPath.endsWith("/calendar/google/oauth/callback")) {
+    const errorDescription =
+      normalizeWhitespace(event.queryStringParameters?.error_description) ||
+      normalizeWhitespace(event.queryStringParameters?.error);
+    const state = normalizeWhitespace(event.queryStringParameters?.state);
+    const authorizationCode = normalizeWhitespace(event.queryStringParameters?.code);
+
+    if (!state) {
+      return {
+        statusCode: 400,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Missing OAuth state.",
+          time,
+        }),
+      };
+    }
+
+    const stateResponse = await dynamoClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          pk: googleOauthStatePk,
+          sk: getGoogleOauthStateSortKey(state),
+        },
+      }),
+    );
+
+    let stateData: StoredGoogleOAuthStateData | null = null;
+
+    try {
+      if (stateResponse.Item?.data) {
+        stateData = JSON.parse(String(stateResponse.Item.data)) as StoredGoogleOAuthStateData;
+      }
+    } catch {
+      stateData = null;
+    }
+
+    if (!stateData) {
+      return {
+        statusCode: 400,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "OAuth state is invalid or has expired.",
+          time,
+        }),
+      };
+    }
+
+    const expired = Date.parse(stateData.expiresAt) < Date.now();
+
+    if (expired) {
+      await dynamoClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            pk: googleOauthStatePk,
+            sk: getGoogleOauthStateSortKey(state),
+          },
+        }),
+      );
+
+      return redirectResponse(
+        buildCalendarReturnUrl({
+          returnTo: stateData.returnTo,
+          status: "error",
+          message: "Google Calendar connection expired before it could be completed.",
+        }),
+      );
+    }
+
+    if (errorDescription) {
+      await dynamoClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            pk: googleOauthStatePk,
+            sk: getGoogleOauthStateSortKey(state),
+          },
+        }),
+      );
+
+      return redirectResponse(
+        buildCalendarReturnUrl({
+          returnTo: stateData.returnTo,
+          status: "error",
+          message: errorDescription,
+        }),
+      );
+    }
+
+    if (!authorizationCode) {
+      return redirectResponse(
+        buildCalendarReturnUrl({
+          returnTo: stateData.returnTo,
+          status: "error",
+          message: "Google did not return an authorization code.",
+        }),
+      );
+    }
+
+    try {
+      const storedUserKey = stateData.userKey || stateData.email;
+      const existingConnection = await getStoredGoogleConnection(tableName, storedUserKey);
+      const { clientId, clientSecret, callbackUrl } = getRequiredGoogleConfig();
+      const tokenResponse = await exchangeGoogleToken(
+        new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code: authorizationCode,
+          grant_type: "authorization_code",
+          redirect_uri: callbackUrl,
+        }),
+      );
+
+      const refreshToken =
+        tokenResponse.refresh_token ||
+        (existingConnection
+          ? decryptSecret(existingConnection.refreshTokenEncrypted)
+          : "");
+
+      if (!refreshToken) {
+        throw new Error(
+          "Google did not return a refresh token. Remove the app from your Google account permissions and try connecting again.",
+        );
+      }
+
+      const connectedAt = existingConnection?.connectedAt ?? time;
+
+      await saveStoredGoogleConnection(tableName, storedUserKey, {
+        email: storedUserKey,
+        refreshTokenEncrypted: encryptSecret(refreshToken),
+        accessTokenEncrypted: encryptSecret(tokenResponse.access_token),
+        accessTokenExpiresAt: new Date(
+          Date.now() + tokenResponse.expires_in * 1000,
+        ).toISOString(),
+        tokenScope: tokenResponse.scope ?? existingConnection?.tokenScope,
+        tokenType: tokenResponse.token_type ?? existingConnection?.tokenType,
+        connectedAt,
+        updatedAt: time,
+        refreshTokenUpdatedAt: tokenResponse.refresh_token
+          ? time
+          : existingConnection?.refreshTokenUpdatedAt ?? connectedAt,
+        lastRefreshAt: existingConnection?.lastRefreshAt,
+        lastError: null,
+      });
+
+      await dynamoClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            pk: googleOauthStatePk,
+            sk: getGoogleOauthStateSortKey(state),
+          },
+        }),
+      );
+
+      return redirectResponse(
+        buildCalendarReturnUrl({
+          returnTo: stateData.returnTo,
+          status: "success",
+          message: "Google Calendar connected.",
+        }),
+      );
+    } catch (error) {
+      return redirectResponse(
+        buildCalendarReturnUrl({
+          returnTo: stateData.returnTo,
+          status: "error",
+          message:
+            error instanceof Error ? error.message : "Unable to connect Google Calendar.",
+        }),
+      );
+    }
+  }
+
+  if (requestPath.endsWith("/calendar/google/connection")) {
+    if (!requestUserKey) {
+      return {
+        statusCode: 400,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "A signed-in user identifier is required to view Google Calendar status.",
+          time,
+        }),
+      };
+    }
+
+    const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
+
+    if (!existingConnection) {
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Google Calendar is not connected.",
+          time,
+          connected: false,
+          hasRefreshToken: false,
+          accessTokenExpiresAt: null,
+          connectedAt: null,
+          updatedAt: null,
+          lastRefreshAt: null,
+          tokenScope: null,
+          lastError: null,
+        }),
+      };
+    }
+
+    let currentConnection = existingConnection;
+
+    try {
+      currentConnection = await refreshGoogleAccessTokenIfNeeded({
+        tableName,
+        time,
+        email: requestUserKey,
+        connection: existingConnection,
+      });
+    } catch (error) {
+      currentConnection = {
+        ...existingConnection,
+        lastError:
+          error instanceof Error ? error.message : "Unable to refresh Google access token.",
+        updatedAt: time,
+      };
+      await saveStoredGoogleConnection(tableName, requestUserKey, currentConnection);
+    }
+
+    return {
+      statusCode: 200,
+      headers: responseHeaders,
+      body: JSON.stringify({
+        message: "Google Calendar connection loaded.",
+        time,
+        connected: true,
+        hasRefreshToken: Boolean(currentConnection.refreshTokenEncrypted),
+        accessTokenExpiresAt: currentConnection.accessTokenExpiresAt ?? null,
+        connectedAt: currentConnection.connectedAt ?? null,
+        updatedAt: currentConnection.updatedAt ?? null,
+        lastRefreshAt: currentConnection.lastRefreshAt ?? null,
+        tokenScope: currentConnection.tokenScope ?? null,
+        lastError: currentConnection.lastError ?? null,
+      }),
+    };
+  }
+
+  if (requestPath.endsWith("/calendar/google/calendars")) {
+    if (!requestUserKey) {
+      return {
+        statusCode: 400,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "A signed-in user identifier is required to load calendars.",
+          time,
+        }),
+      };
+    }
+
+    const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
+
+    if (!existingConnection) {
+      return {
+        statusCode: 404,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Google Calendar is not connected.",
+          time,
+        }),
+      };
+    }
+
+    try {
+      const currentConnection = await refreshGoogleAccessTokenIfNeeded({
+        tableName,
+        time,
+        email: requestUserKey,
+        connection: existingConnection,
+      });
+      const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+      const calendars = await listGoogleCalendars(accessToken);
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Google calendars loaded.",
+          time,
+          items: calendars,
+        }),
+      };
+    } catch (error) {
+      return {
+        statusCode: 500,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message:
+            error instanceof Error ? error.message : "Unable to load Google calendars.",
+          time,
+        }),
+      };
+    }
   }
 
   if (requestPath.endsWith("/admin/users")) {

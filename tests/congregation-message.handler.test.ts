@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createCipheriv, randomBytes } from "node:crypto";
 import { afterEach, beforeEach, test } from "node:test";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 
@@ -15,30 +16,53 @@ type MockCommand = {
 
 const parseBody = (body: string | undefined) => JSON.parse(body ?? "{}") as Record<string, unknown>;
 
+const encryptTestSecret = (value: string) => {
+  const key = Buffer.from(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY ?? "", "base64");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return [iv, tag, encrypted].map((part) => part.toString("base64")).join(".");
+};
+
 const invokeHandler = async (event: APIGatewayProxyEventV2) =>
   (await handler(
     event,
     {} as never,
     (() => undefined) as never,
-  )) as { statusCode: number; body?: string };
+  )) as { statusCode: number; body?: string; headers?: Record<string, string> };
 
 const createEvent = ({
   path,
   method = "GET",
   body,
   groups,
+  email = "user@example.com",
+  sub = "00000000-0000-4000-8000-000000000001",
+  cognitoUsername = "user@example.com",
+  headers,
+  queryStringParameters,
 }: {
   path: string;
   method?: "GET" | "POST";
   body?: Record<string, unknown>;
   groups?: string[];
+  email?: string;
+  sub?: string;
+  cognitoUsername?: string;
+  headers?: Record<string, string>;
+  queryStringParameters?: Record<string, string>;
 }) =>
   ({
     body: body ? JSON.stringify(body) : undefined,
-    headers: {},
+    headers: headers ?? {},
     isBase64Encoded: false,
     rawPath: path,
-    rawQueryString: "",
+    rawQueryString: queryStringParameters
+      ? new URLSearchParams(queryStringParameters).toString()
+      : "",
+    queryStringParameters,
     requestContext: {
       accountId: "123456789012",
       apiId: "api-id",
@@ -61,6 +85,9 @@ const createEvent = ({
             jwt: {
               claims: {
                 "cognito:groups": `[${groups.join(" ")}]`,
+                email,
+                sub,
+                "cognito:username": cognitoUsername,
               },
             },
           }
@@ -91,6 +118,11 @@ beforeEach(() => {
   process.env.TEST_TABLE_NAME = "test_table";
   process.env.USER_POOL_ID = "user-pool-id";
   process.env.PARKING_NOTIFICATIONS_FROM_EMAIL = "parking@example.com";
+  process.env.GOOGLE_CLIENT_ID = "google-client-id";
+  process.env.GOOGLE_CLIENT_SECRET = "google-client-secret";
+  process.env.GOOGLE_CALENDAR_CALLBACK_URL =
+    "https://api.example.com/calendar/google/oauth/callback";
+  process.env.GOOGLE_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
   resetHandlerClientsForTesting();
 });
 
@@ -99,6 +131,10 @@ afterEach(() => {
   delete process.env.TEST_TABLE_NAME;
   delete process.env.USER_POOL_ID;
   delete process.env.PARKING_NOTIFICATIONS_FROM_EMAIL;
+  delete process.env.GOOGLE_CLIENT_ID;
+  delete process.env.GOOGLE_CLIENT_SECRET;
+  delete process.env.GOOGLE_CALENDAR_CALLBACK_URL;
+  delete process.env.GOOGLE_TOKEN_ENCRYPTION_KEY;
 });
 
 test("returns 500 when TEST_TABLE_NAME is missing", async () => {
@@ -241,6 +277,465 @@ test("forbids contacts import for regular users", async () => {
 
   assert.equal(response.statusCode, 403);
   assert.equal(body.message, "You do not have access to import contacts.");
+});
+
+test("starts the Google Calendar OAuth flow for a signed-in user", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "PutCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/connect/start",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        returnTo: "https://app.example.com/calendar/connect",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Google Calendar authorization started.");
+  assert.match(String(body.authorizationUrl), /^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?/);
+  assert.equal(dynamo.commands[0]?.constructor.name, "PutCommand");
+});
+
+test("loads an existing Google Calendar connection", async () => {
+  const connectionData = {
+    email: "user@example.com",
+    refreshTokenEncrypted: "refresh.encrypted.value",
+    accessTokenEncrypted: "access.encrypted.value",
+    accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+    connectedAt: "2026-04-26T12:00:00.000Z",
+    updatedAt: "2026-04-26T12:05:00.000Z",
+    refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+    tokenScope: "https://www.googleapis.com/auth/calendar",
+    tokenType: "Bearer",
+    lastError: null,
+  };
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "CALENDAR_INTEGRATION",
+          sk: "GOOGLE#user@example.com",
+          data: JSON.stringify(connectionData),
+        },
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/connection",
+      groups: ["admin"],
+    }),
+  );
+  const body = parseBody(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.connected, true);
+  assert.equal(body.hasRefreshToken, true);
+  assert.equal(body.accessTokenExpiresAt, connectionData.accessTokenExpiresAt);
+});
+
+test("loads Google Calendar free/busy availability", async () => {
+  const originalFetch = globalThis.fetch;
+  const connectionData = {
+    email: "user@example.com",
+    refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+    accessTokenEncrypted: encryptTestSecret("access-token"),
+    accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+    connectedAt: "2026-04-26T12:00:00.000Z",
+    updatedAt: "2026-04-26T12:05:00.000Z",
+    refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+    tokenScope: "https://www.googleapis.com/auth/calendar",
+    tokenType: "Bearer",
+    lastError: null,
+  };
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "CALENDAR_INTEGRATION",
+          sk: "GOOGLE#user@example.com",
+          data: JSON.stringify(connectionData),
+        },
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  globalThis.fetch = async (_input, init) =>
+    ({
+      ok: true,
+      json: async () => ({
+        timeMin: "2026-04-27T13:00:00.000Z",
+        timeMax: "2026-04-27T21:00:00.000Z",
+        calendars: {
+          primary: {
+            busy: [
+              {
+                start: "2026-04-27T15:00:00.000Z",
+                end: "2026-04-27T16:00:00.000Z",
+              },
+            ],
+          },
+        },
+      }),
+    }) as Response;
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/freebusy",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        timeMin: "2026-04-27T13:00:00.000Z",
+        timeMax: "2026-04-27T21:00:00.000Z",
+        timeZone: "America/Toronto",
+        calendarId: "primary",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  globalThis.fetch = originalFetch;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Google Calendar availability loaded.");
+  assert.deepEqual(body.busy, [
+    {
+      start: "2026-04-27T15:00:00.000Z",
+      end: "2026-04-27T16:00:00.000Z",
+    },
+  ]);
+});
+
+test("loads Google calendar names", async () => {
+  const originalFetch = globalThis.fetch;
+  const connectionData = {
+    email: "user@example.com",
+    refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+    accessTokenEncrypted: encryptTestSecret("access-token"),
+    accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+    connectedAt: "2026-04-26T12:00:00.000Z",
+    updatedAt: "2026-04-26T12:05:00.000Z",
+    refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+    tokenScope: "https://www.googleapis.com/auth/calendar",
+    tokenType: "Bearer",
+    lastError: null,
+  };
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "CALENDAR_INTEGRATION",
+          sk: "GOOGLE#user@example.com",
+          data: JSON.stringify(connectionData),
+        },
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  globalThis.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            id: "primary",
+            summary: "My Calendar",
+            primary: true,
+            accessRole: "owner",
+            timeZone: "America/Toronto",
+          },
+          {
+            id: "team@example.com",
+            summary: "Team Calendar",
+            accessRole: "reader",
+            timeZone: "America/Toronto",
+          },
+        ],
+      }),
+    }) as Response;
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/calendars",
+      groups: ["admin"],
+    }),
+  );
+  const body = parseBody(response.body);
+
+  globalThis.fetch = originalFetch;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Google calendars loaded.");
+  assert.deepEqual(body.items, [
+    {
+      id: "primary",
+      name: "My Calendar",
+      primary: true,
+      accessRole: "owner",
+      timeZone: "America/Toronto",
+      hidden: false,
+      selected: false,
+    },
+    {
+      id: "team@example.com",
+      name: "Team Calendar",
+      primary: false,
+      accessRole: "reader",
+      timeZone: "America/Toronto",
+      hidden: false,
+      selected: false,
+    },
+  ]);
+});
+
+test("loads Google calendar events", async () => {
+  const originalFetch = globalThis.fetch;
+  const connectionData = {
+    email: "user@example.com",
+    refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+    accessTokenEncrypted: encryptTestSecret("access-token"),
+    accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+    connectedAt: "2026-04-26T12:00:00.000Z",
+    updatedAt: "2026-04-26T12:05:00.000Z",
+    refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+    tokenScope: "https://www.googleapis.com/auth/calendar",
+    tokenType: "Bearer",
+    lastError: null,
+  };
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "CALENDAR_INTEGRATION",
+          sk: "GOOGLE#user@example.com",
+          data: JSON.stringify(connectionData),
+        },
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  globalThis.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            id: "event-1",
+            summary: "Staff Meeting",
+            start: { dateTime: "2026-04-27T15:00:00.000Z" },
+            end: { dateTime: "2026-04-27T16:00:00.000Z" },
+            organizer: { displayName: "Admin" },
+            location: "Main Hall",
+            eventType: "default",
+            visibility: "private",
+            status: "confirmed",
+          },
+        ],
+      }),
+    }) as Response;
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/events",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        timeMin: "2026-04-27T13:00:00.000Z",
+        timeMax: "2026-04-27T21:00:00.000Z",
+        timeZone: "America/Toronto",
+        calendarId: "primary",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  globalThis.fetch = originalFetch;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Google Calendar events loaded.");
+  assert.deepEqual(body.items, [
+    {
+      id: "event-1",
+      title: "Staff Meeting",
+      status: "confirmed",
+      htmlLink: "",
+      location: "Main Hall",
+      eventType: "default",
+      visibility: "private",
+      start: "2026-04-27T15:00:00.000Z",
+      end: "2026-04-27T16:00:00.000Z",
+      isAllDay: false,
+      organizer: "Admin",
+    },
+  ]);
+});
+
+test("creates a Google calendar event", async () => {
+  const originalFetch = globalThis.fetch;
+  const connectionData = {
+    email: "user@example.com",
+    refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+    accessTokenEncrypted: encryptTestSecret("access-token"),
+    accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+    connectedAt: "2026-04-26T12:00:00.000Z",
+    updatedAt: "2026-04-26T12:05:00.000Z",
+    refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+    tokenScope: "https://www.googleapis.com/auth/calendar",
+    tokenType: "Bearer",
+    lastError: null,
+  };
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "CALENDAR_INTEGRATION",
+          sk: "GOOGLE#00000000-0000-4000-8000-000000000001",
+          data: JSON.stringify(connectionData),
+        },
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  globalThis.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        id: "event-2",
+        summary: "Booked Event",
+        status: "confirmed",
+        htmlLink: "https://calendar.google.com/event?eid=123",
+        location: "Room A",
+        eventType: "default",
+        visibility: "default",
+        start: { dateTime: "2026-04-28T14:00:00.000Z" },
+        end: { dateTime: "2026-04-28T15:00:00.000Z" },
+        organizer: { displayName: "User" },
+      }),
+    }) as Response;
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/events/create",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        calendarId: "primary",
+        title: "Booked Event",
+        start: "2026-04-28T14:00:00.000Z",
+        end: "2026-04-28T15:00:00.000Z",
+        timeZone: "America/Toronto",
+        location: "Room A",
+        description: "Planning session",
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  globalThis.fetch = originalFetch;
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(body.message, "Google Calendar event created.");
+  assert.equal((body.item as { title: string }).title, "Booked Event");
+});
+
+test("handles the Google Calendar OAuth callback and redirects back to the app", async () => {
+  const originalFetch = globalThis.fetch;
+  const stateRecord = {
+    email: "user@example.com",
+    returnTo: "https://app.example.com/calendar/connect",
+    createdAt: "2026-04-26T12:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z",
+  };
+  let getCount = 0;
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      getCount += 1;
+      return getCount === 1
+        ? {
+            Item: {
+              pk: "CALENDAR_OAUTH_STATE",
+              sk: "GOOGLE#oauth-state",
+              data: JSON.stringify(stateRecord),
+            },
+          }
+        : {};
+    }
+
+    if (command.constructor.name === "PutCommand" || command.constructor.name === "DeleteCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  globalThis.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        access_token: "new-access-token",
+        refresh_token: "new-refresh-token",
+        expires_in: 3600,
+        scope: "https://www.googleapis.com/auth/calendar",
+        token_type: "Bearer",
+      }),
+    }) as Response;
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/oauth/callback",
+      queryStringParameters: {
+        state: "oauth-state",
+        code: "auth-code",
+      },
+    }),
+  );
+
+  globalThis.fetch = originalFetch;
+
+  assert.equal(response.statusCode, 302);
+  assert.match(
+    String(response.body ?? ""),
+    /^$/,
+  );
+  assert.match(
+    String(response.headers?.Location ?? response.headers?.location),
+    /^https:\/\/app\.example\.com\/calendar\/connect\?calendar-google-status=success&calendar-google-message=Google\+Calendar\+connected\.$/,
+  );
 });
 
 test("creates a parking registration", async () => {

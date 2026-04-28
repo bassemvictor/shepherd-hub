@@ -1536,6 +1536,247 @@ button {
   color: var(--content-text);
 }
 
+.calendar-connect-layout {
+  margin-top: 1.5rem;
+}
+
+.calendar-connect-card {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.calendar-connect-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.calendar-connect-title,
+.calendar-connect-copy,
+.calendar-connect-metric span,
+.calendar-connect-metric strong {
+  margin: 0;
+}
+
+.calendar-connect-title {
+  font-size: 1.4rem;
+  color: var(--dark-card-text);
+}
+
+.calendar-connect-copy {
+  margin-top: 0.45rem;
+}
+
+.calendar-connect-status {
+  margin: 0;
+}
+
+.calendar-connect-status.success {
+  color: #15803d;
+}
+
+.calendar-connect-status.error {
+  color: #dc2626;
+}
+
+.calendar-connect-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.calendar-connect-metric {
+  padding: 1rem 1.05rem;
+  border-radius: 18px;
+  border: 1px solid var(--nav-border);
+  background: var(--nav-bg);
+}
+
+.calendar-connect-metric span {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-light);
+}
+
+.calendar-connect-metric strong {
+  display: block;
+  margin-top: 0.55rem;
+  color: var(--heading-text);
+  line-height: 1.45;
+}
+
+[data-theme="dark"] .calendar-connect-status.success {
+  color: #86efac;
+}
+
+[data-theme="dark"] .calendar-connect-status.error {
+  color: #fca5a5;
+}
+
+.calendar-schedule-layout {
+  margin-top: 1.5rem;
+}
+
+.calendar-month-layout {
+  margin-top: 1.5rem;
+}
+
+.calendar-schedule-card {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.calendar-month-card {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.calendar-schedule-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.calendar-schedule-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.calendar-schedule-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.calendar-schedule-status {
+  margin: 0;
+}
+
+.calendar-schedule-empty {
+  padding: 1rem 1.05rem;
+  border-radius: 18px;
+  border: 1px dashed var(--nav-border);
+  background: var(--nav-bg);
+}
+
+.calendar-month-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.calendar-month-grid {
+  margin-top: 0;
+}
+
+.calendar-month-day.selected {
+  border-color: rgba(244, 196, 48, 0.5);
+  box-shadow: 0 0 0 1px rgba(244, 196, 48, 0.35) inset;
+}
+
+.calendar-month-event-chip {
+  cursor: default;
+}
+
+.calendar-booking-card {
+  margin-top: 0;
+}
+
+.calendar-booking-empty {
+  margin-top: 0;
+}
+
+.calendar-schedule-results {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.calendar-schedule-summary-card {
+  grid-column: 1 / -1;
+  padding: 1rem 1.05rem;
+  border-radius: 18px;
+  border: 1px solid var(--nav-border);
+  background:
+    linear-gradient(135deg, rgba(244, 196, 48, 0.12), rgba(59, 130, 246, 0.08)),
+    var(--nav-bg);
+}
+
+.calendar-schedule-summary-copy {
+  margin: 0.45rem 0 0;
+  color: var(--muted-light);
+}
+
+.calendar-schedule-column {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.calendar-schedule-section-header,
+.calendar-schedule-slot-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.calendar-schedule-section-title,
+.calendar-schedule-slot-time,
+.calendar-schedule-slot-copy {
+  margin: 0;
+}
+
+.calendar-schedule-section-title {
+  color: var(--dark-card-text);
+  font-size: 1.15rem;
+}
+
+.calendar-schedule-slot {
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--nav-border);
+  background: var(--nav-bg);
+}
+
+.calendar-schedule-slot.free {
+  border-color: rgba(34, 197, 94, 0.22);
+  background: rgba(34, 197, 94, 0.09);
+}
+
+.calendar-schedule-slot.busy {
+  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.calendar-schedule-slot.event {
+  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.calendar-schedule-slot-time {
+  color: var(--heading-text);
+  font-weight: 700;
+}
+
+.calendar-schedule-slot-copy {
+  margin-top: 0.35rem;
+  color: var(--muted-light);
+  font-size: 0.9rem;
+}
+
+.calendar-schedule-slot-meta {
+  margin: 0.35rem 0 0;
+  color: var(--muted-light);
+  font-size: 0.82rem;
+}
+
 .announcements-page {
   display: grid;
   gap: 1rem;
@@ -4227,6 +4468,28 @@ button {
 
   .visitation-calendar-day {
     min-height: auto;
+  }
+
+  .calendar-connect-header {
+    flex-direction: column;
+  }
+
+  .calendar-connect-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-schedule-header {
+    flex-direction: column;
+  }
+
+  .calendar-month-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .calendar-schedule-controls,
+  .calendar-schedule-results {
+    grid-template-columns: 1fr;
   }
 
   .member-detail-header {

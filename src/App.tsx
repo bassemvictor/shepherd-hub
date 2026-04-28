@@ -21,6 +21,11 @@ import QRCode from "qrcode";
 import outputs from "../amplify_outputs.json";
 
 type PageKey =
+  | "calendar-dashboard"
+  | "calendar-connect"
+  | "calendar-month"
+  | "calendar-schedule"
+  | "calendar-reporting"
   | "congregation"
   | "visitation"
   | "visitation-report"
@@ -46,6 +51,26 @@ const pageContent: Record<
   PageKey,
   { eyebrow: string; description: string }
 > = {
+  "calendar-dashboard": {
+    eyebrow: "Calendar Dashboard",
+    description: "",
+  },
+  "calendar-connect": {
+    eyebrow: "Connect Calendar",
+    description: "",
+  },
+  "calendar-month": {
+    eyebrow: "Calendar Month View",
+    description: "",
+  },
+  "calendar-schedule": {
+    eyebrow: "Calendar Schedule",
+    description: "",
+  },
+  "calendar-reporting": {
+    eyebrow: "Calendar Reporting",
+    description: "",
+  },
   congregation: {
     eyebrow: "Congregation",
     description: "",
@@ -133,6 +158,16 @@ const navSections: Array<{
   label: string;
   items: Array<{ key: PageKey; label: string }>;
 }> = [
+  {
+    label: "Calendar",
+    items: [
+      { key: "calendar-dashboard", label: "Dashboard" },
+      { key: "calendar-connect", label: "Connect Calendar" },
+      { key: "calendar-month", label: "Month View" },
+      { key: "calendar-schedule", label: "Schedule" },
+      { key: "calendar-reporting", label: "Reporting" },
+    ],
+  },
   {
     label: "Workspace",
     items: [
@@ -376,6 +411,152 @@ type ParkingRegistrationsResponse = {
   items: ParkingRegistrationItem[];
 };
 
+type GoogleCalendarConnectionResponse = {
+  message: string;
+  time: string;
+  connected: boolean;
+  hasRefreshToken: boolean;
+  accessTokenExpiresAt: string | null;
+  connectedAt: string | null;
+  updatedAt: string | null;
+  lastRefreshAt: string | null;
+  tokenScope: string | null;
+  lastError: string | null;
+};
+
+type GoogleCalendarConnectStartResponse = {
+  message: string;
+  time: string;
+  authorizationUrl: string;
+};
+
+type GoogleCalendarCallbackState = {
+  status: "success" | "error";
+  message: string;
+};
+
+type GoogleCalendarFreeBusyResponse = {
+  message: string;
+  time: string;
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
+  busy: Array<{
+    start: string;
+    end: string;
+  }>;
+  errors: Array<{
+    domain?: string;
+    reason?: string;
+  }>;
+};
+
+type GoogleCalendarListResponse = {
+  message: string;
+  time: string;
+  items: Array<{
+    id: string;
+    name: string;
+    primary: boolean;
+    accessRole: string;
+    timeZone: string;
+    hidden: boolean;
+    selected: boolean;
+  }>;
+};
+
+type GoogleCalendarEventsResponse = {
+  message: string;
+  time: string;
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
+  items: Array<{
+    id: string;
+    title: string;
+    status: string;
+    htmlLink: string;
+    location: string;
+    eventType: string;
+    visibility: string;
+    start: string;
+    end: string;
+    isAllDay: boolean;
+    organizer: string;
+  }>;
+};
+
+type GoogleCalendarCreateEventResponse = {
+  message: string;
+  time: string;
+  calendarId: string;
+  item: {
+    id: string;
+    title: string;
+    status: string;
+    htmlLink: string;
+    location: string;
+    eventType: string;
+    visibility: string;
+    start: string;
+    end: string;
+    isAllDay: boolean;
+    organizer: string;
+  };
+};
+
+type CalendarTimeSlot = {
+  start: string;
+  end: string;
+};
+
+type CalendarEventFormState = {
+  title: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+  description: string;
+};
+
+const getErrorMessage = async (error: unknown, fallback: string) => {
+  if (error && typeof error === "object") {
+    const maybeError = error as {
+      message?: unknown;
+      response?: {
+        body?: {
+          json?: () => Promise<unknown>;
+          text?: () => Promise<string>;
+        };
+      };
+    };
+
+    const bodyJson = maybeError.response?.body?.json;
+
+    if (typeof bodyJson === "function") {
+      try {
+        const payload = await bodyJson();
+
+        if (
+          payload &&
+          typeof payload === "object" &&
+          "message" in payload &&
+          typeof (payload as { message?: unknown }).message === "string"
+        ) {
+          return (payload as { message: string }).message;
+        }
+      } catch {
+        // Fall through to other error shapes.
+      }
+    }
+
+    if (typeof maybeError.message === "string" && maybeError.message.trim()) {
+      return maybeError.message;
+    }
+  }
+
+  return fallback;
+};
+
 type AppNavigationState = {
   activePage: PageKey;
   selectedMember: SelectedMemberState | null;
@@ -449,6 +630,111 @@ const formatDateInputValue = (value: Date) =>
   `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(
     value.getDate(),
   ).padStart(2, "0")}`;
+
+const buildLocalDateTimeIso = (dateValue: string, timeValue: string) => {
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const [hours, minutes] = timeValue.split(":").map(Number);
+
+  return new Date(year, (month || 1) - 1, day || 1, hours || 0, minutes || 0, 0, 0)
+    .toISOString();
+};
+
+const formatTimeLabel = (value: string) =>
+  new Date(value).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+const formatDurationLabel = (start: string, end: string) => {
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  const totalMinutes = Math.max(0, Math.round((endMs - startMs) / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours > 0 && minutes > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h`;
+  }
+
+  return `${minutes}m`;
+};
+
+const formatEventDateTimeLabel = (start: string, end: string, isAllDay: boolean) => {
+  if (isAllDay) {
+    return `${new Date(start).toLocaleDateString()} (All day)`;
+  }
+
+  return `${formatTimeLabel(start)} to ${formatTimeLabel(end)}`;
+};
+
+const buildFreeTimeSlots = ({
+  timeMin,
+  timeMax,
+  busy,
+}: {
+  timeMin: string;
+  timeMax: string;
+  busy: CalendarTimeSlot[];
+}) => {
+  const windowStart = new Date(timeMin).getTime();
+  const windowEnd = new Date(timeMax).getTime();
+
+  if (!Number.isFinite(windowStart) || !Number.isFinite(windowEnd) || windowStart >= windowEnd) {
+    return [];
+  }
+
+  const normalizedBusy = busy
+    .map((slot) => ({
+      start: new Date(slot.start).getTime(),
+      end: new Date(slot.end).getTime(),
+    }))
+    .filter(
+      (slot) =>
+        Number.isFinite(slot.start) &&
+        Number.isFinite(slot.end) &&
+        slot.end > windowStart &&
+        slot.start < windowEnd,
+    )
+    .sort((left, right) => left.start - right.start);
+
+  const freeSlots: CalendarTimeSlot[] = [];
+  let cursor = windowStart;
+
+  for (const slot of normalizedBusy) {
+    const boundedStart = Math.max(slot.start, windowStart);
+    const boundedEnd = Math.min(slot.end, windowEnd);
+
+    if (boundedStart > cursor) {
+      freeSlots.push({
+        start: new Date(cursor).toISOString(),
+        end: new Date(boundedStart).toISOString(),
+      });
+    }
+
+    cursor = Math.max(cursor, boundedEnd);
+  }
+
+  if (cursor < windowEnd) {
+    freeSlots.push({
+      start: new Date(cursor).toISOString(),
+      end: new Date(windowEnd).toISOString(),
+    });
+  }
+
+  return freeSlots;
+};
+
+const initialCalendarEventForm: CalendarEventFormState = {
+  title: "",
+  startTime: "09:00",
+  endTime: "10:00",
+  location: "",
+  description: "",
+};
 
 const normalizePhoneForLink = (value?: string) => {
   if (!value) {
@@ -693,6 +979,8 @@ const extractGroupsFromClaim = (value: unknown) => {
 };
 
 const placeholderPages: PageKey[] = [
+  "calendar-dashboard",
+  "calendar-reporting",
   "events",
   "sunday-school",
   "summer-camp",
@@ -700,7 +988,34 @@ const placeholderPages: PageKey[] = [
   "board-meeting",
 ];
 
+const getInitialCalendarCallbackState = (): GoogleCalendarCallbackState | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("calendar-google-status");
+  const message = params.get("calendar-google-message") ?? "";
+
+  if ((status === "success" || status === "error") && message) {
+    return {
+      status,
+      message,
+    };
+  }
+
+  return null;
+};
+
 const getInitialActivePage = (): PageKey => {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get("calendar-google-status")) {
+      return "calendar-connect";
+    }
+  }
+
   if (typeof window !== "undefined" && window.location.hash === "#parking-registration") {
     return "parking-registration";
   }
@@ -740,6 +1055,7 @@ export default function App() {
   const isApplyingPopStateRef = useRef(false);
   const memberLongPressTimerRef = useRef<number | null>(null);
   const suppressMemberClickRef = useRef(false);
+  const initialGoogleCalendarCallbackState = getInitialCalendarCallbackState();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
   const [challengeResponse, setChallengeResponse] = useState("");
@@ -754,6 +1070,46 @@ export default function App() {
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [currentUserLabel, setCurrentUserLabel] = useState<string>("");
   const [currentUserGroups, setCurrentUserGroups] = useState<string[]>([]);
+  const [googleCalendarConnection, setGoogleCalendarConnection] =
+    useState<GoogleCalendarConnectionResponse | null>(null);
+  const [googleCalendarStatus, setGoogleCalendarStatus] = useState<string | null>(
+    initialGoogleCalendarCallbackState?.message ?? null,
+  );
+  const [googleCalendarStatusTone, setGoogleCalendarStatusTone] = useState<
+    "success" | "error" | "neutral"
+  >(initialGoogleCalendarCallbackState?.status ?? "neutral");
+  const [isGoogleCalendarLoading, setIsGoogleCalendarLoading] = useState(false);
+  const [isGoogleCalendarConnecting, setIsGoogleCalendarConnecting] = useState(false);
+  const [calendarScheduleLookupDate, setCalendarScheduleLookupDate] = useState(() =>
+    formatDateInputValue(new Date()),
+  );
+  const [calendarScheduleLookupStartTime, setCalendarScheduleLookupStartTime] =
+    useState("09:00");
+  const [calendarScheduleLookupEndTime, setCalendarScheduleLookupEndTime] =
+    useState("17:00");
+  const [calendarMonthViewDate, setCalendarMonthViewDate] = useState(() =>
+    startOfMonth(new Date()),
+  );
+  const [calendarMonthSelectedDate, setCalendarMonthSelectedDate] = useState<string | null>(
+    null,
+  );
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarListResponse["items"]>(
+    [],
+  );
+  const [selectedGoogleCalendarId, setSelectedGoogleCalendarId] = useState("primary");
+  const [calendarAvailability, setCalendarAvailability] =
+    useState<GoogleCalendarFreeBusyResponse | null>(null);
+  const [calendarEvents, setCalendarEvents] = useState<GoogleCalendarEventsResponse | null>(null);
+  const [calendarMonthEvents, setCalendarMonthEvents] =
+    useState<GoogleCalendarEventsResponse | null>(null);
+  const [calendarEventForm, setCalendarEventForm] =
+    useState<CalendarEventFormState>(initialCalendarEventForm);
+  const [calendarEventFormStatus, setCalendarEventFormStatus] = useState<string | null>(null);
+  const [isCalendarEventSubmitting, setIsCalendarEventSubmitting] = useState(false);
+  const [calendarAvailabilityStatus, setCalendarAvailabilityStatus] = useState<string | null>(
+    null,
+  );
+  const [isCalendarAvailabilityLoading, setIsCalendarAvailabilityLoading] = useState(false);
   const [preferredMemberDetailsPage, setPreferredMemberDetailsPage] = useState<
     "member-details" | "member-details-beta"
   >("member-details-beta");
@@ -902,6 +1258,10 @@ export default function App() {
     isUserDirectoryLoading ||
     savingUserGroups !== null ||
     isContactsImporting ||
+    isGoogleCalendarLoading ||
+    isGoogleCalendarConnecting ||
+    isCalendarAvailabilityLoading ||
+    isCalendarEventSubmitting ||
     isParkingRegistrationSubmitting ||
     isParkingManagementLoading ||
     isParkingManagementSaving ||
@@ -1022,6 +1382,26 @@ export default function App() {
     congregationMemberOptions.find((member) => member.sk === calendarScheduleMemberSk) ?? null;
   const calendarScheduleDateLabel = calendarScheduleDate
     ? new Date(`${calendarScheduleDate}T00:00`).toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "";
+  const calendarAvailabilityFreeSlots = calendarAvailability
+    ? buildFreeTimeSlots({
+        timeMin: calendarAvailability.timeMin,
+        timeMax: calendarAvailability.timeMax,
+        busy: calendarAvailability.busy,
+      })
+    : [];
+  const calendarMonthDays = buildCalendarDays(calendarMonthViewDate);
+  const calendarMonthLabel = calendarMonthViewDate.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+  const calendarMonthSelectedDateLabel = calendarMonthSelectedDate
+    ? new Date(`${calendarMonthSelectedDate}T00:00`).toLocaleDateString(undefined, {
         weekday: "long",
         month: "long",
         day: "numeric",
@@ -1213,6 +1593,244 @@ export default function App() {
     });
 
     return restOperation.response;
+  };
+
+  const loadGoogleCalendarConnection = async () => {
+    if (!congregationApiName) {
+      setGoogleCalendarStatus("Backend API is not configured yet.");
+      setGoogleCalendarStatusTone("error");
+      return;
+    }
+
+    setIsGoogleCalendarLoading(true);
+
+    try {
+      const response = await authorizedGet<GoogleCalendarConnectionResponse>(
+        "/calendar/google/connection",
+      );
+      setGoogleCalendarConnection(response);
+
+      if (response.lastError) {
+        setGoogleCalendarStatus(response.lastError);
+        setGoogleCalendarStatusTone("error");
+      } else if (!initialGoogleCalendarCallbackState) {
+        setGoogleCalendarStatus(response.message);
+        setGoogleCalendarStatusTone(response.connected ? "success" : "neutral");
+      }
+    } catch (error) {
+      setGoogleCalendarStatus(
+        await getErrorMessage(error, "Unable to load Google Calendar connection."),
+      );
+      setGoogleCalendarStatusTone("error");
+    } finally {
+      setIsGoogleCalendarLoading(false);
+    }
+  };
+
+  const handleGoogleCalendarConnect = async () => {
+    if (!congregationApiName || typeof window === "undefined") {
+      return;
+    }
+
+    setIsGoogleCalendarConnecting(true);
+    setGoogleCalendarStatus(null);
+
+    try {
+      const returnToUrl = new URL(window.location.href);
+      returnToUrl.hash = "";
+      returnToUrl.searchParams.delete("calendar-google-status");
+      returnToUrl.searchParams.delete("calendar-google-message");
+
+      const response = await authorizedPost("/calendar/google/connect/start", {
+        returnTo: returnToUrl.toString(),
+      });
+      const payload = (await response.body.json()) as GoogleCalendarConnectStartResponse;
+      if (!payload.authorizationUrl) {
+        throw new Error(payload.message || "Google authorization URL was not returned.");
+      }
+      window.location.assign(payload.authorizationUrl);
+    } catch (error) {
+      setGoogleCalendarStatus(
+        await getErrorMessage(error, "Unable to start Google Calendar connection."),
+      );
+      setGoogleCalendarStatusTone("error");
+      setIsGoogleCalendarConnecting(false);
+    }
+  };
+
+  const loadGoogleCalendars = async () => {
+    if (!congregationApiName) {
+      return;
+    }
+
+    try {
+      const response = await authorizedGet<GoogleCalendarListResponse>(
+        "/calendar/google/calendars",
+      );
+      setGoogleCalendars(response.items);
+      setSelectedGoogleCalendarId((current) => {
+        if (response.items.some((item) => item.id === current)) {
+          return current;
+        }
+
+        return response.items.find((item) => item.primary)?.id ?? response.items[0]?.id ?? "primary";
+      });
+    } catch (error) {
+      setGoogleCalendars([]);
+      setCalendarAvailabilityStatus(await getErrorMessage(error, "Unable to load Google calendars."));
+    }
+  };
+
+  const loadGoogleCalendarAvailability = async () => {
+    if (!congregationApiName) {
+      setCalendarAvailabilityStatus("Backend API is not configured yet.");
+      return;
+    }
+
+    if (!calendarScheduleLookupDate || !calendarScheduleLookupStartTime || !calendarScheduleLookupEndTime) {
+      setCalendarAvailabilityStatus("Choose a date and time range first.");
+      return;
+    }
+
+    if (calendarScheduleLookupStartTime >= calendarScheduleLookupEndTime) {
+      setCalendarAvailabilityStatus("Start time must be earlier than end time.");
+      return;
+    }
+
+    setIsCalendarAvailabilityLoading(true);
+    setCalendarAvailabilityStatus(null);
+
+    try {
+      const timeMin = buildLocalDateTimeIso(
+        calendarScheduleLookupDate,
+        calendarScheduleLookupStartTime,
+      );
+      const timeMax = buildLocalDateTimeIso(
+        calendarScheduleLookupDate,
+        calendarScheduleLookupEndTime,
+      );
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const [freeBusyResponse, eventsResponse] = await Promise.all([
+        authorizedPost("/calendar/google/freebusy", {
+          timeMin,
+          timeMax,
+          timeZone,
+          calendarId: selectedGoogleCalendarId,
+        }),
+        authorizedPost("/calendar/google/events", {
+          timeMin,
+          timeMax,
+          timeZone,
+          calendarId: selectedGoogleCalendarId,
+        }),
+      ]);
+      const availabilityPayload = (await freeBusyResponse.body.json()) as GoogleCalendarFreeBusyResponse;
+      const eventsPayload = (await eventsResponse.body.json()) as GoogleCalendarEventsResponse;
+      setCalendarAvailability(availabilityPayload);
+      setCalendarEvents(eventsPayload);
+      setCalendarAvailabilityStatus(availabilityPayload.message);
+    } catch (error) {
+      setCalendarAvailability(null);
+      setCalendarEvents(null);
+      setCalendarAvailabilityStatus(
+        await getErrorMessage(error, "Unable to load Google Calendar availability."),
+      );
+    } finally {
+      setIsCalendarAvailabilityLoading(false);
+    }
+  };
+
+  const loadGoogleCalendarMonthEvents = async () => {
+    if (!congregationApiName) {
+      return;
+    }
+
+    const monthStart = new Date(
+      calendarMonthViewDate.getFullYear(),
+      calendarMonthViewDate.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
+    const nextMonthStart = new Date(
+      calendarMonthViewDate.getFullYear(),
+      calendarMonthViewDate.getMonth() + 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
+
+    try {
+      const response = await authorizedPost("/calendar/google/events", {
+        timeMin: monthStart.toISOString(),
+        timeMax: nextMonthStart.toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        calendarId: selectedGoogleCalendarId,
+      });
+      const payload = (await response.body.json()) as GoogleCalendarEventsResponse;
+      setCalendarMonthEvents(payload);
+    } catch (error) {
+      setCalendarMonthEvents(null);
+      setCalendarEventFormStatus(
+        await getErrorMessage(error, "Unable to load month calendar events."),
+      );
+    }
+  };
+
+  const handleCalendarEventCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!congregationApiName) {
+      setCalendarEventFormStatus("Backend API is not configured yet.");
+      return;
+    }
+
+    if (
+      !calendarEventForm.title.trim() ||
+      !calendarMonthSelectedDate ||
+      !calendarEventForm.startTime ||
+      !calendarEventForm.endTime
+    ) {
+      setCalendarEventFormStatus("Title, date, start time, and end time are required.");
+      return;
+    }
+
+    if (calendarEventForm.startTime >= calendarEventForm.endTime) {
+      setCalendarEventFormStatus("Start time must be earlier than end time.");
+      return;
+    }
+
+    setIsCalendarEventSubmitting(true);
+    setCalendarEventFormStatus(null);
+
+    try {
+      const response = await authorizedPost("/calendar/google/events/create", {
+        calendarId: selectedGoogleCalendarId,
+        title: calendarEventForm.title.trim(),
+        start: buildLocalDateTimeIso(calendarMonthSelectedDate, calendarEventForm.startTime),
+        end: buildLocalDateTimeIso(calendarMonthSelectedDate, calendarEventForm.endTime),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        location: calendarEventForm.location.trim(),
+        description: calendarEventForm.description.trim(),
+      });
+      const payload = (await response.body.json()) as GoogleCalendarCreateEventResponse;
+      setCalendarEventFormStatus(payload.message);
+      setCalendarEventForm(initialCalendarEventForm);
+      await loadGoogleCalendarMonthEvents();
+      if (activePage === "calendar-schedule") {
+        await loadGoogleCalendarAvailability();
+      }
+    } catch (error) {
+      setCalendarEventFormStatus(
+        await getErrorMessage(error, "Unable to create Google Calendar event."),
+      );
+    } finally {
+      setIsCalendarEventSubmitting(false);
+    }
   };
 
   const createNavigationState = (
@@ -1730,6 +2348,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+
+    if (
+      !url.searchParams.has("calendar-google-status") &&
+      !url.searchParams.has("calendar-google-message")
+    ) {
+      return;
+    }
+
+    url.searchParams.delete("calendar-google-status");
+    url.searchParams.delete("calendar-google-message");
+    window.history.replaceState(window.history.state, "", url.toString());
+  }, []);
+
+  useEffect(() => {
     if (authStatus !== "signed-in") {
       return;
     }
@@ -1787,6 +2424,70 @@ export default function App() {
 
     void loadParkingRegistrations();
   }, [activePage, authStatus, canManageParking]);
+
+  useEffect(() => {
+    if (authStatus !== "signed-in" || activePage !== "calendar-connect") {
+      return;
+    }
+
+    void loadGoogleCalendarConnection();
+  }, [activePage, authStatus]);
+
+  useEffect(() => {
+    if (authStatus !== "signed-in" || activePage !== "calendar-schedule") {
+      return;
+    }
+
+    void loadGoogleCalendarConnection();
+    void loadGoogleCalendars();
+  }, [activePage, authStatus]);
+
+  useEffect(() => {
+    if (authStatus !== "signed-in" || activePage !== "calendar-month") {
+      return;
+    }
+
+    void loadGoogleCalendarConnection();
+    void loadGoogleCalendars();
+  }, [activePage, authStatus]);
+
+  useEffect(() => {
+    if (
+      authStatus !== "signed-in" ||
+      activePage !== "calendar-schedule" ||
+      !googleCalendarConnection?.connected
+    ) {
+      return;
+    }
+
+    void loadGoogleCalendarAvailability();
+  }, [
+    activePage,
+    authStatus,
+    googleCalendarConnection?.connected,
+    selectedGoogleCalendarId,
+    calendarScheduleLookupDate,
+    calendarScheduleLookupStartTime,
+    calendarScheduleLookupEndTime,
+  ]);
+
+  useEffect(() => {
+    if (
+      authStatus !== "signed-in" ||
+      activePage !== "calendar-month" ||
+      !googleCalendarConnection?.connected
+    ) {
+      return;
+    }
+
+    void loadGoogleCalendarMonthEvents();
+  }, [
+    activePage,
+    authStatus,
+    googleCalendarConnection?.connected,
+    selectedGoogleCalendarId,
+    calendarMonthViewDate,
+  ]);
 
   useEffect(() => {
     if (authStatus !== "signed-in" || typeof window === "undefined") {
@@ -4953,6 +5654,499 @@ export default function App() {
             </div>
           ) : null}
 
+          {activePage === "calendar-connect" ? (
+            <div className="calendar-connect-layout">
+              <section className="placeholder-page-card calendar-connect-card">
+                <div className="calendar-connect-header">
+                  <div>
+                    <p className="placeholder-page-kicker">Google Calendar</p>
+                    <h3 className="calendar-connect-title">Connection</h3>
+                    <p className="placeholder-page-copy calendar-connect-copy">
+                      Connect a Google account so Shepherd Hub can keep Calendar access on
+                      the server and refresh tokens automatically when needed.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="member-submit-button"
+                    onClick={handleGoogleCalendarConnect}
+                    disabled={isGoogleCalendarConnecting}
+                  >
+                    {isGoogleCalendarConnecting
+                      ? "Redirecting..."
+                      : googleCalendarConnection?.connected
+                        ? "Reconnect Google Calendar"
+                        : "Connect Google Calendar"}
+                  </button>
+                </div>
+
+                {googleCalendarStatus ? (
+                  <p
+                    className={`member-submit-message calendar-connect-status ${googleCalendarStatusTone}`}
+                  >
+                    {googleCalendarStatus}
+                  </p>
+                ) : null}
+
+                <div className="calendar-connect-grid">
+                  <div className="calendar-connect-metric">
+                    <span>Status</span>
+                    <strong>
+                      {isGoogleCalendarLoading
+                        ? "Loading..."
+                        : googleCalendarConnection?.connected
+                          ? "Connected"
+                          : "Not connected"}
+                    </strong>
+                  </div>
+
+                  <div className="calendar-connect-metric">
+                    <span>Refresh token</span>
+                    <strong>
+                      {googleCalendarConnection?.hasRefreshToken ? "Stored" : "Not stored"}
+                    </strong>
+                  </div>
+
+                  <div className="calendar-connect-metric">
+                    <span>Access token expiry</span>
+                    <strong>
+                      {googleCalendarConnection?.accessTokenExpiresAt
+                        ? new Date(
+                            googleCalendarConnection.accessTokenExpiresAt,
+                          ).toLocaleString()
+                        : "Not available"}
+                    </strong>
+                  </div>
+
+                  <div className="calendar-connect-metric">
+                    <span>Last refresh</span>
+                    <strong>
+                      {googleCalendarConnection?.lastRefreshAt
+                        ? new Date(googleCalendarConnection.lastRefreshAt).toLocaleString()
+                        : "Not yet"}
+                    </strong>
+                  </div>
+                </div>
+              </section>
+            </div>
+          ) : null}
+
+          {activePage === "calendar-schedule" ? (
+            <div className="calendar-schedule-layout">
+              <section className="placeholder-page-card calendar-schedule-card">
+                <form
+                  className="calendar-schedule-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void loadGoogleCalendarAvailability();
+                  }}
+                >
+                  <div className="calendar-schedule-header">
+                    <div>
+                      <p className="placeholder-page-kicker">Google Calendar</p>
+                      <h3 className="calendar-connect-title">Busy and Free Times</h3>
+                      <p className="placeholder-page-copy calendar-connect-copy">
+                        Pull live availability from the connected Google Calendar and use
+                        it to see open schedule windows before you book anything else.
+                      </p>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="member-submit-button"
+                      disabled={isCalendarAvailabilityLoading}
+                    >
+                      {isCalendarAvailabilityLoading ? "Loading..." : "Refresh Availability"}
+                    </button>
+                  </div>
+
+                  <div className="calendar-schedule-controls">
+                    <label className="member-field">
+                      <span>Calendar</span>
+                      <select
+                        value={selectedGoogleCalendarId}
+                        onChange={(event) => setSelectedGoogleCalendarId(event.target.value)}
+                        disabled={googleCalendars.length === 0}
+                      >
+                        {googleCalendars.length > 0 ? (
+                          googleCalendars.map((calendar) => (
+                            <option key={calendar.id} value={calendar.id}>
+                              {calendar.name}
+                              {calendar.primary ? " (Primary)" : ""}
+                            </option>
+                          ))
+                        ) : (
+                          <option value="primary">Primary Calendar</option>
+                        )}
+                      </select>
+                    </label>
+
+                    <label className="member-field">
+                      <span>Date</span>
+                      <input
+                        type="date"
+                        value={calendarScheduleLookupDate}
+                        onChange={(event) =>
+                          setCalendarScheduleLookupDate(event.target.value)
+                        }
+                      />
+                    </label>
+
+                    <label className="member-field">
+                      <span>From</span>
+                      <input
+                        type="time"
+                        value={calendarScheduleLookupStartTime}
+                        onChange={(event) =>
+                          setCalendarScheduleLookupStartTime(event.target.value)
+                        }
+                      />
+                    </label>
+
+                    <label className="member-field">
+                      <span>To</span>
+                      <input
+                        type="time"
+                        value={calendarScheduleLookupEndTime}
+                        onChange={(event) =>
+                          setCalendarScheduleLookupEndTime(event.target.value)
+                        }
+                      />
+                    </label>
+                  </div>
+                </form>
+
+                {calendarAvailabilityStatus ? (
+                  <p className="member-submit-message calendar-schedule-status">
+                    {calendarAvailabilityStatus}
+                  </p>
+                ) : null}
+
+                {!googleCalendarConnection?.connected ? (
+                  <div className="calendar-schedule-empty">
+                    <p className="placeholder-page-copy">
+                      Connect Google Calendar first from{" "}
+                      <code>Calendar -&gt; Connect Calendar</code> before pulling live
+                      availability.
+                    </p>
+                  </div>
+                ) : null}
+
+                {googleCalendarConnection?.connected ? (
+                  <div className="calendar-schedule-results">
+                    <div className="calendar-schedule-summary-card">
+                      <p className="placeholder-page-kicker">Schedule Window</p>
+                      <h4 className="calendar-schedule-section-title">
+                        {new Date(`${calendarScheduleLookupDate}T00:00`).toLocaleDateString(
+                          undefined,
+                          {
+                            weekday: "long",
+                            month: "long",
+                            day: "numeric",
+                            year: "numeric",
+                          },
+                        )}
+                      </h4>
+                      <p className="calendar-schedule-summary-copy">
+                        Calendar:{" "}
+                        {googleCalendars.find((calendar) => calendar.id === selectedGoogleCalendarId)
+                          ?.name ?? "Primary Calendar"}
+                      </p>
+                      <p className="calendar-schedule-summary-copy">
+                        Looking from {calendarScheduleLookupStartTime} to{" "}
+                        {calendarScheduleLookupEndTime}
+                      </p>
+                    </div>
+
+                    <div className="calendar-schedule-column">
+                      <div className="calendar-schedule-section-header">
+                        <p className="placeholder-page-kicker">Available</p>
+                        <h4 className="calendar-schedule-section-title">
+                          {calendarAvailabilityFreeSlots.length} free time
+                          {calendarAvailabilityFreeSlots.length === 1 ? "" : "s"}
+                        </h4>
+                      </div>
+
+                      {calendarAvailabilityFreeSlots.length > 0 ? (
+                        <div className="calendar-schedule-slot-list">
+                          {calendarAvailabilityFreeSlots.map((slot) => (
+                            <article
+                              className="calendar-schedule-slot free"
+                              key={`free-${slot.start}-${slot.end}`}
+                            >
+                              <p className="calendar-schedule-slot-time">
+                                {formatTimeLabel(slot.start)} to {formatTimeLabel(slot.end)}
+                              </p>
+                              <p className="calendar-schedule-slot-copy">
+                                Free for {formatDurationLabel(slot.start, slot.end)}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="placeholder-page-copy">
+                          No open time was found in this window.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="calendar-schedule-column">
+                      <div className="calendar-schedule-section-header">
+                        <p className="placeholder-page-kicker">Busy</p>
+                        <h4 className="calendar-schedule-section-title">
+                          {calendarAvailability?.busy.length ?? 0} busy time
+                          {(calendarAvailability?.busy.length ?? 0) === 1 ? "" : "s"}
+                        </h4>
+                      </div>
+
+                      {(calendarAvailability?.busy.length ?? 0) > 0 ? (
+                        <div className="calendar-schedule-slot-list">
+                          {calendarAvailability?.busy.map((slot) => (
+                            <article
+                              className="calendar-schedule-slot busy"
+                              key={`busy-${slot.start}-${slot.end}`}
+                            >
+                              <p className="calendar-schedule-slot-time">
+                                {formatTimeLabel(slot.start)} to {formatTimeLabel(slot.end)}
+                              </p>
+                              <p className="calendar-schedule-slot-copy">
+                                Busy for {formatDurationLabel(slot.start, slot.end)}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="placeholder-page-copy">
+                          No busy events were returned for this window.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="calendar-schedule-column">
+                      <div className="calendar-schedule-section-header">
+                        <p className="placeholder-page-kicker">Events</p>
+                        <h4 className="calendar-schedule-section-title">
+                          {calendarEvents?.items.length ?? 0} actual event
+                          {(calendarEvents?.items.length ?? 0) === 1 ? "" : "s"}
+                        </h4>
+                      </div>
+
+                      {(calendarEvents?.items.length ?? 0) > 0 ? (
+                        <div className="calendar-schedule-slot-list">
+                          {calendarEvents?.items.map((eventItem) => (
+                            <article
+                              className="calendar-schedule-slot event"
+                              key={`event-${eventItem.id}`}
+                            >
+                              <p className="calendar-schedule-slot-time">{eventItem.title}</p>
+                              <p className="calendar-schedule-slot-copy">
+                                {formatEventDateTimeLabel(
+                                  eventItem.start,
+                                  eventItem.end,
+                                  eventItem.isAllDay,
+                                )}
+                              </p>
+                              {eventItem.organizer ? (
+                                <p className="calendar-schedule-slot-meta">
+                                  Organizer: {eventItem.organizer}
+                                </p>
+                              ) : null}
+                              {eventItem.location ? (
+                                <p className="calendar-schedule-slot-meta">
+                                  Location: {eventItem.location}
+                                </p>
+                              ) : null}
+                              <p className="calendar-schedule-slot-meta">
+                                Type: {eventItem.eventType}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="placeholder-page-copy">
+                          No actual events were returned for this window.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            </div>
+          ) : null}
+
+          {activePage === "calendar-month" ? (
+            <div className="calendar-month-layout">
+              <section className="placeholder-page-card calendar-month-card">
+                <div className="calendar-schedule-header">
+                  <div>
+                    <p className="placeholder-page-kicker">Google Calendar</p>
+                    <h3 className="calendar-connect-title">Month View</h3>
+                    <p className="placeholder-page-copy calendar-connect-copy">
+                      Browse a full month of events and book new events directly into the
+                      selected calendar.
+                    </p>
+                  </div>
+                </div>
+
+                {!googleCalendarConnection?.connected ? (
+                  <div className="calendar-schedule-empty">
+                    <p className="placeholder-page-copy">
+                      Connect Google Calendar first from{" "}
+                      <code>Calendar -&gt; Connect Calendar</code> before using month
+                      view booking.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="calendar-month-toolbar">
+                      <label className="member-field">
+                        <span>Calendar</span>
+                        <select
+                          value={selectedGoogleCalendarId}
+                          onChange={(event) => setSelectedGoogleCalendarId(event.target.value)}
+                          disabled={googleCalendars.length === 0}
+                        >
+                          {googleCalendars.length > 0 ? (
+                            googleCalendars.map((calendar) => (
+                              <option key={calendar.id} value={calendar.id}>
+                                {calendar.name}
+                                {calendar.primary ? " (Primary)" : ""}
+                              </option>
+                            ))
+                          ) : (
+                            <option value="primary">Primary Calendar</option>
+                          )}
+                        </select>
+                      </label>
+
+                      <div className="visitation-calendar-month-nav">
+                        <button
+                          type="button"
+                          className="member-cancel-button visitation-calendar-nav-button"
+                          onClick={() =>
+                            setCalendarMonthViewDate(
+                              (current) =>
+                                new Date(current.getFullYear(), current.getMonth() - 1, 1),
+                            )
+                          }
+                          aria-label="Previous month"
+                        >
+                          ←
+                        </button>
+                        <p className="visitation-calendar-month-label">{calendarMonthLabel}</p>
+                        <button
+                          type="button"
+                          className="member-cancel-button visitation-calendar-nav-button"
+                          onClick={() =>
+                            setCalendarMonthViewDate(
+                              (current) =>
+                                new Date(current.getFullYear(), current.getMonth() + 1, 1),
+                            )
+                          }
+                          aria-label="Next month"
+                        >
+                          →
+                        </button>
+                      </div>
+                    </div>
+
+                    {calendarEventFormStatus ? (
+                      <p className="member-submit-message calendar-schedule-status">
+                        {calendarEventFormStatus}
+                      </p>
+                    ) : null}
+
+                    <div className="visitation-calendar-weekdays" aria-hidden="true">
+                      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((dayLabel) => (
+                        <p key={dayLabel}>{dayLabel}</p>
+                      ))}
+                    </div>
+
+                    <div className="visitation-calendar-grid calendar-month-grid">
+                      {calendarMonthDays.map((day) => {
+                        const dayEvents = (calendarMonthEvents?.items ?? []).filter((eventItem) =>
+                          isSameDay(new Date(eventItem.start), day),
+                        );
+                        const isOutsideMonth =
+                          day.getMonth() !== calendarMonthViewDate.getMonth();
+                        const isToday = isSameDay(day, new Date());
+                        const dayValue = formatDateInputValue(day);
+                        const isSelected = dayValue === calendarMonthSelectedDate;
+
+                        return (
+                          <article
+                            key={day.toISOString()}
+                            className={`visitation-calendar-day calendar-month-day${
+                              isOutsideMonth ? " outside-month" : ""
+                            }${isToday ? " today" : ""}${isSelected ? " selected" : ""}`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              setCalendarMonthSelectedDate(dayValue);
+                              setCalendarEventForm((current) => ({
+                                ...current,
+                                startTime: current.startTime || "09:00",
+                                endTime: current.endTime || "10:00",
+                              }));
+                              setCalendarEventFormStatus(null);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                setCalendarMonthSelectedDate(dayValue);
+                                setCalendarEventFormStatus(null);
+                              }
+                            }}
+                          >
+                            <div className="visitation-calendar-day-header">
+                              <p className="visitation-calendar-day-number">{day.getDate()}</p>
+                              {dayEvents.length > 0 ? (
+                                <p className="visitation-calendar-day-count">
+                                  {dayEvents.length}
+                                </p>
+                              ) : null}
+                            </div>
+
+                            <div className="visitation-calendar-events">
+                              {dayEvents.length > 0 ? (
+                                dayEvents.slice(0, 3).map((eventItem) => (
+                                  <div
+                                    className="visitation-calendar-event calendar-month-event-chip"
+                                    key={eventItem.id}
+                                  >
+                                    <span className="visitation-calendar-event-time">
+                                      {eventItem.isAllDay
+                                        ? "All day"
+                                        : formatTimeLabel(eventItem.start)}
+                                    </span>
+                                    <span className="visitation-calendar-event-name">
+                                      {eventItem.title}
+                                    </span>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="visitation-calendar-empty-slot" />
+                              )}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+
+                    {!calendarMonthSelectedDate ? (
+                      <div className="calendar-schedule-empty calendar-booking-empty">
+                        <p className="placeholder-page-copy">
+                          Click any day on the calendar to open the add-event form.
+                        </p>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </section>
+            </div>
+          ) : null}
+
           {placeholderPages.includes(activePage) ? (
             <div className="placeholder-page-card">
               <p className="placeholder-page-kicker">Placeholder</p>
@@ -6100,6 +7294,144 @@ export default function App() {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {calendarMonthSelectedDate ? (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onClick={() => {
+            setCalendarMonthSelectedDate(null);
+            setCalendarEventFormStatus(null);
+          }}
+        >
+          <div
+            className="modal-card calendar-booking-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calendar-booking-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="member-form-header visitation-calendar-schedule-header">
+              <div>
+                <p className="member-form-mode">Book Event</p>
+                <h2 className="modal-title" id="calendar-booking-modal-title">
+                  {calendarMonthSelectedDateLabel}
+                </h2>
+                <p className="visitation-calendar-schedule-copy">
+                  Create an event for the selected day.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="member-cancel-button"
+                onClick={() => {
+                  setCalendarMonthSelectedDate(null);
+                  setCalendarEventFormStatus(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <form className="modal-form calendar-booking-form" onSubmit={handleCalendarEventCreate}>
+              <div className="member-form-grid visitation-calendar-schedule-grid">
+                <label className="member-field member-field-full">
+                  <span>Title</span>
+                  <input
+                    type="text"
+                    value={calendarEventForm.title}
+                    onChange={(event) =>
+                      setCalendarEventForm((current) => ({
+                        ...current,
+                        title: event.target.value,
+                      }))
+                    }
+                    placeholder="Event title"
+                  />
+                </label>
+
+                <label className="member-field">
+                  <span>Start time</span>
+                  <input
+                    type="time"
+                    value={calendarEventForm.startTime}
+                    onChange={(event) =>
+                      setCalendarEventForm((current) => ({
+                        ...current,
+                        startTime: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+
+                <label className="member-field">
+                  <span>End time</span>
+                  <input
+                    type="time"
+                    value={calendarEventForm.endTime}
+                    onChange={(event) =>
+                      setCalendarEventForm((current) => ({
+                        ...current,
+                        endTime: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+
+                <label className="member-field member-field-full">
+                  <span>Location</span>
+                  <input
+                    type="text"
+                    value={calendarEventForm.location}
+                    onChange={(event) =>
+                      setCalendarEventForm((current) => ({
+                        ...current,
+                        location: event.target.value,
+                      }))
+                    }
+                    placeholder="Optional location"
+                  />
+                </label>
+
+                <label className="member-field member-field-full">
+                  <span>Description</span>
+                  <textarea
+                    rows={4}
+                    value={calendarEventForm.description}
+                    onChange={(event) =>
+                      setCalendarEventForm((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                    placeholder="Optional description"
+                  />
+                </label>
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="modal-secondary-button"
+                  onClick={() => {
+                    setCalendarEventForm(initialCalendarEventForm);
+                    setCalendarEventFormStatus(null);
+                  }}
+                >
+                  Clear
+                </button>
+                <button
+                  type="submit"
+                  className="member-submit-button"
+                  disabled={isCalendarEventSubmitting}
+                >
+                  {isCalendarEventSubmitting ? "Booking..." : "Book Event"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       ) : null}

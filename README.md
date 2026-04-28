@@ -204,6 +204,136 @@ These tests are focused on Lambda route logic and mocked AWS interactions. They 
 
    Replace `us-east-1` if your Amplify app uses a different region.
 
+## Google Calendar Setup
+
+The `Calendar -> Connect Calendar` page uses Google's OAuth 2.0 web-server flow.
+Before connecting an account, configure a Google Cloud project plus the backend
+environment variables used by the Lambda handler.
+
+### 1. Create or select a Google Cloud project
+
+1. Open the Google Cloud Console.
+2. Create a new project or select an existing one for Shepherd Hub.
+3. Make sure billing and organization policies allow Google API usage if your
+   account requires that.
+
+### 2. Enable the Google Calendar API
+
+1. In Google Cloud Console, open `APIs & Services`.
+2. Choose `Library`.
+3. Search for `Google Calendar API`.
+4. Open it and click `Enable`.
+
+### 3. Configure the OAuth consent screen
+
+1. In Google Cloud Console, open `APIs & Services -> OAuth consent screen`.
+2. Choose the appropriate user type for your organization.
+3. Fill in the required app name, support email, and developer contact details.
+4. Add scopes as needed. This app currently requests:
+
+   ```text
+   https://www.googleapis.com/auth/calendar
+   ```
+
+5. If the app is in testing mode, add the Google accounts that are allowed to
+   complete the OAuth flow as test users.
+
+### 4. Create a Web OAuth client
+
+1. In Google Cloud Console, open `APIs & Services -> Credentials`.
+2. Click `Create Credentials -> OAuth client ID`.
+3. Choose `Web application`.
+4. Add the authorized redirect URI.
+
+For the current backend environment in `amplify_outputs.json`, the callback URL is:
+
+```text
+https://ltp1tnzlk9.execute-api.ca-central-1.amazonaws.com/calendar/google/oauth/callback
+```
+
+This value must exactly match:
+
+- the redirect URI configured in Google Cloud Console
+- the Lambda environment variable `GOOGLE_CALENDAR_CALLBACK_URL`
+
+If the API endpoint changes in another sandbox or deployed environment, recompute
+the callback URI as:
+
+```text
+<API endpoint without trailing slash>/calendar/google/oauth/callback
+```
+
+Example:
+
+```text
+https://example.execute-api.ca-central-1.amazonaws.com/calendar/google/oauth/callback
+```
+
+### 5. Capture the Google client credentials
+
+After creating the OAuth client, copy:
+
+- `Client ID`
+- `Client Secret`
+
+Store them in the backend environment as:
+
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+
+### 6. Generate the token encryption key
+
+The backend encrypts Google refresh and access tokens before storing them in
+DynamoDB. Generate the encryption key yourself; it does not come from Google.
+
+Generate a valid key with:
+
+```bash
+openssl rand -base64 32
+```
+
+Store the output as:
+
+- `GOOGLE_TOKEN_ENCRYPTION_KEY`
+
+Requirements:
+
+- it must be a base64-encoded 32-byte key
+- keep it secret
+- do not rotate it casually, because previously stored encrypted tokens will no
+  longer decrypt if the key changes
+
+### 7. Set the backend environment variables
+
+Configure these values for the Lambda environment used by your Amplify sandbox or
+deployed backend:
+
+```text
+GOOGLE_CLIENT_ID=<your Google OAuth client id>
+GOOGLE_CLIENT_SECRET=<your Google OAuth client secret>
+GOOGLE_CALENDAR_CALLBACK_URL=https://ltp1tnzlk9.execute-api.ca-central-1.amazonaws.com/calendar/google/oauth/callback
+GOOGLE_TOKEN_ENCRYPTION_KEY=<base64 output from openssl rand -base64 32>
+```
+
+After updating these values, restart or redeploy the backend so the Lambda picks
+them up.
+
+### 8. Verify the connection flow
+
+1. Sign in to Shepherd Hub.
+2. Open `Calendar -> Connect Calendar`.
+3. Click `Connect Google Calendar`.
+4. Complete the Google consent screen.
+5. Confirm the app returns to Shepherd Hub and the connection status shows as connected.
+
+Useful DynamoDB items during debugging:
+
+- OAuth start state: `pk = CALENDAR_OAUTH_STATE`
+- Stored Google connection: `pk = CALENDAR_INTEGRATION`
+
+If you see OAuth state items but no integration item, the callback likely failed
+during token exchange, encryption, or connection persistence.
+
 ## Next Steps
 
 1. Install dependencies:
