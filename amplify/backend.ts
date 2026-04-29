@@ -204,6 +204,24 @@ congregationApi.addRoutes({
 });
 
 congregationApi.addRoutes({
+  path: "/calendar/google/events/update",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "GoogleCalendarEventsUpdateIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
+  path: "/calendar/google/events/delete",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "GoogleCalendarEventsDeleteIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
   path: "/calendar/google/oauth/callback",
   methods: [HttpMethod.GET],
   authorizer: new HttpNoneAuthorizer(),

@@ -95,6 +95,104 @@ Announcement notes:
 - `items` is the editable list of announcement strings for that week
 - weeks are currently ordered in the UI by descending `sk`
 
+For Google Calendar OAuth state, the key pattern is:
+
+- `pk`: `CALENDAR_OAUTH_STATE`
+- `sk`: `GOOGLE#<oauth-state>`
+
+The `data` attribute stores temporary OAuth flow state in this shape:
+
+```json
+{
+  "email": "user@example.com",
+  "userKey": "00000000-0000-4000-8000-000000000001",
+  "returnTo": "https://app.example.com/#/calendar/connect",
+  "createdAt": "2026-04-28T12:00:00.000Z",
+  "expiresAt": "2026-04-28T12:10:00.000Z"
+}
+```
+
+OAuth state notes:
+
+- these items are short-lived and only exist during the Google connect flow
+- `userKey` is the Cognito-backed per-user identifier used for token ownership
+- `returnTo` is where the callback redirects after success or failure
+
+For stored Google Calendar connections, the key pattern is:
+
+- `pk`: `CALENDAR_INTEGRATION`
+- `sk`: `GOOGLE#<userKey>`
+
+The `data` attribute stores the encrypted Google token set in this shape:
+
+```json
+{
+  "email": "00000000-0000-4000-8000-000000000001",
+  "refreshTokenEncrypted": "base64iv.base64tag.base64ciphertext",
+  "accessTokenEncrypted": "base64iv.base64tag.base64ciphertext",
+  "accessTokenExpiresAt": "2026-04-28T13:00:00.000Z",
+  "connectedAt": "2026-04-28T12:00:00.000Z",
+  "updatedAt": "2026-04-28T12:05:00.000Z",
+  "refreshTokenUpdatedAt": "2026-04-28T12:00:00.000Z",
+  "lastRefreshAt": "2026-04-28T12:05:00.000Z",
+  "tokenScope": "https://www.googleapis.com/auth/calendar",
+  "tokenType": "Bearer",
+  "lastError": null
+}
+```
+
+Connection notes:
+
+- each signed-in user has their own Google connection record
+- token values are encrypted before being written to DynamoDB
+- `accessTokenExpiresAt` and `lastRefreshAt` support automatic token refresh
+- `lastError` can store the most recent token-related problem when one occurs
+
+For Google Calendar sync state and cached events, the key pattern is:
+
+- `pk`: `CALENDAR_EVENT_SYNC#<userKey>#<calendarId>`
+- `sk`: `SYNC_STATE` or `MONTH#<yyyy-mm>#<chunk>`
+
+The sync-state `data` attribute looks like:
+
+```json
+{
+  "syncToken": "CPDAlvWDx70CEPDAlvWDx70CGAU=",
+  "lastSyncedAt": "2026-04-28T12:15:00.000Z"
+}
+```
+
+Each month cache row stores one month chunk of normalized Google event data in this shape:
+
+```json
+{
+  "month": "2026-05",
+  "items": [
+    {
+      "id": "event-123",
+      "title": "Staff Meeting",
+      "status": "confirmed",
+      "htmlLink": "https://calendar.google.com/calendar/event?eid=abc",
+      "location": "Main Hall",
+      "eventType": "default",
+      "visibility": "private",
+      "start": "2026-05-01T15:00:00.000Z",
+      "end": "2026-05-01T16:00:00.000Z",
+      "isAllDay": false,
+      "organizer": "Admin"
+    }
+  ]
+}
+```
+
+Sync cache notes:
+
+- the partition groups cached events by signed-in user and selected Google calendar
+- `SYNC_STATE` stores the Google incremental sync token used for future updates
+- `MONTH#...` rows cache event collections by month instead of one DynamoDB row per event
+- if a month would grow too large for one item, it is split into multiple month chunks such as `MONTH#2026-05#001` and `MONTH#2026-05#002`
+- if Google invalidates the sync token, the cache can be cleared and rebuilt
+
 ## RBAC
 
 Shepherd Hub uses Amazon Cognito groups for role-based access control.

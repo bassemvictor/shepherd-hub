@@ -112,6 +112,8 @@ type GoogleCalendarEventsPayload = {
   timeMax: string;
   timeZone?: string;
   calendarId?: string;
+  useSyncCache?: boolean;
+  selectedYearMonth?: string;
 };
 
 type GoogleCalendarCreateEventPayload = {
@@ -122,6 +124,22 @@ type GoogleCalendarCreateEventPayload = {
   timeZone?: string;
   location?: string;
   description?: string;
+};
+
+type GoogleCalendarUpdateEventPayload = {
+  calendarId?: string;
+  eventId: string;
+  title: string;
+  start: string;
+  end: string;
+  timeZone?: string;
+  location?: string;
+  isAllDay?: boolean;
+};
+
+type GoogleCalendarDeleteEventPayload = {
+  calendarId?: string;
+  eventId: string;
 };
 
 type UpdateParkingRegistrationStatusPayload = {
@@ -211,6 +229,40 @@ type StoredGoogleOAuthStateData = {
   createdAt: string;
   expiresAt: string;
 };
+
+type StoredGoogleCalendarSyncStateData = {
+  syncToken: string;
+  lastSyncedAt: string;
+};
+
+type StoredGoogleCalendarSyncedEventData = {
+  id: string;
+  title: string;
+  status: string;
+  htmlLink: string;
+  location: string;
+  eventType: string;
+  visibility: string;
+  start: string;
+  end: string;
+  isAllDay: boolean;
+  organizer: string;
+};
+
+type StoredGoogleCalendarMonthCacheData = {
+  month: string;
+  items: StoredGoogleCalendarSyncedEventData[];
+};
+
+type GoogleCalendarSyncChangedResource =
+  | (StoredGoogleCalendarSyncedEventData & {
+      changeType: "upsert";
+    })
+  | {
+      id: string;
+      status: string;
+      changeType: "deleted";
+    };
 
 type ParkingRegistrationsResponse = {
   message: string;
@@ -505,8 +557,12 @@ const responseHeaders = {
 const googleCalendarScope = "https://www.googleapis.com/auth/calendar";
 const googleConnectionPk = "CALENDAR_INTEGRATION";
 const googleOauthStatePk = "CALENDAR_OAUTH_STATE";
+const googleEventSyncPkPrefix = "CALENDAR_EVENT_SYNC";
+const googleEventSyncStateSk = "SYNC_STATE";
+const googleEventSyncMonthSkPrefix = "MONTH";
 const googleOauthStateTtlMs = 10 * 60 * 1000;
 const googleAccessTokenExpiryBufferMs = 60 * 1000;
+const googleCalendarMonthCacheTargetBytes = 350 * 1024;
 
 const getRequestGroups = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
   const claims =
@@ -595,6 +651,10 @@ const getGoogleTokenEncryptionKey = () =>
 
 const getGoogleConnectionSortKey = (email: string) => `GOOGLE#${email}`;
 const getGoogleOauthStateSortKey = (state: string) => `GOOGLE#${state}`;
+const getGoogleEventSyncPartitionKey = (userKey: string, calendarId: string) =>
+  `${googleEventSyncPkPrefix}#${userKey}#${calendarId}`;
+const getGoogleEventSyncMonthSortKey = (month: string, chunkIndex: number) =>
+  `${googleEventSyncMonthSkPrefix}#${month}#${String(chunkIndex).padStart(3, "0")}`;
 
 const getRequiredGoogleConfig = () => {
   const clientId = getGoogleClientId();
@@ -805,6 +865,133 @@ const listGoogleCalendars = async (accessToken: string) => {
     }));
 };
 
+const normalizeGoogleCalendarEvent = (item: {
+  id?: string;
+  summary?: string;
+  status?: string;
+  htmlLink?: string;
+  location?: string;
+  eventType?: string;
+  visibility?: string;
+  start?: {
+    dateTime?: string;
+    date?: string;
+  };
+  end?: {
+    dateTime?: string;
+    date?: string;
+  };
+  organizer?: {
+    email?: string;
+    displayName?: string;
+  };
+}): StoredGoogleCalendarSyncedEventData | null => {
+  if (!item.id || item.status === "cancelled") {
+    return null;
+  }
+
+  const start = item.start?.dateTime || item.start?.date || "";
+  const end = item.end?.dateTime || item.end?.date || "";
+
+  if (!start || !end) {
+    return null;
+  }
+
+  return {
+    id: String(item.id),
+    title: item.summary || "(No title)",
+    status: item.status ?? "",
+    htmlLink: item.htmlLink ?? "",
+    location: item.location ?? "",
+    eventType: item.eventType ?? "default",
+    visibility: item.visibility ?? "default",
+    start,
+    end,
+    isAllDay: Boolean(item.start?.date && !item.start?.dateTime),
+    organizer: item.organizer?.displayName || item.organizer?.email || "",
+  };
+};
+
+const getGoogleCalendarEventMonthKey = (event: Pick<StoredGoogleCalendarSyncedEventData, "start">) =>
+  event.start.slice(0, 7);
+
+const isGoogleCalendarMonthCacheSortKey = (sortKey: string) =>
+  sortKey.startsWith(`${googleEventSyncMonthSkPrefix}#`);
+
+const getSerializedGoogleCalendarMonthCacheSize = (
+  month: string,
+  items: StoredGoogleCalendarSyncedEventData[],
+) => Buffer.byteLength(JSON.stringify({ month, items } satisfies StoredGoogleCalendarMonthCacheData), "utf8");
+
+const parseGoogleCalendarMonthCacheRow = (item: TableRow) => {
+  if (!isGoogleCalendarMonthCacheSortKey(item.sk)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(String(item.data)) as StoredGoogleCalendarMonthCacheData;
+
+    if (!parsed || typeof parsed.month !== "string" || !Array.isArray(parsed.items)) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const buildGoogleCalendarMonthCacheChunks = (
+  events: StoredGoogleCalendarSyncedEventData[],
+): StoredGoogleCalendarMonthCacheData[] => {
+  const eventsByMonth = new Map<string, StoredGoogleCalendarSyncedEventData[]>();
+
+  for (const event of events) {
+    const monthKey = getGoogleCalendarEventMonthKey(event);
+    const existingMonthEvents = eventsByMonth.get(monthKey) ?? [];
+    existingMonthEvents.push(event);
+    eventsByMonth.set(monthKey, existingMonthEvents);
+  }
+
+  const monthChunks: StoredGoogleCalendarMonthCacheData[] = [];
+
+  for (const monthKey of Array.from(eventsByMonth.keys()).sort()) {
+    const monthEvents = (eventsByMonth.get(monthKey) ?? []).slice().sort((left, right) =>
+      left.start.localeCompare(right.start),
+    );
+
+    let currentChunk: StoredGoogleCalendarSyncedEventData[] = [];
+
+    for (const event of monthEvents) {
+      const nextChunk = [...currentChunk, event];
+
+      if (
+        currentChunk.length > 0 &&
+        getSerializedGoogleCalendarMonthCacheSize(monthKey, nextChunk) >
+          googleCalendarMonthCacheTargetBytes
+      ) {
+        monthChunks.push({
+          month: monthKey,
+          items: currentChunk,
+        });
+        currentChunk = [event];
+        continue;
+      }
+
+      currentChunk = nextChunk;
+    }
+
+    if (currentChunk.length > 0) {
+      monthChunks.push({
+        month: monthKey,
+        items: currentChunk,
+      });
+    }
+  }
+
+  return monthChunks;
+};
+
 const listGoogleCalendarEvents = async ({
   accessToken,
   calendarId,
@@ -830,6 +1017,14 @@ const listGoogleCalendarEvents = async ({
     url.searchParams.set("timeZone", timeZone);
   }
 
+  console.log("Listing Google Calendar events directly.", {
+    calendarId,
+    timeMin,
+    timeMax,
+    timeZone: timeZone ?? null,
+    query: url.toString(),
+  });
+
   const response = await fetch(url.toString(), {
     method: "GET",
     headers: {
@@ -841,26 +1036,578 @@ const listGoogleCalendarEvents = async ({
     error?: { message?: string };
   };
 
+  console.log("Google Calendar direct events response received.", {
+    calendarId,
+    ok: response.ok,
+    status: response.status,
+    itemCount: Array.isArray(responseBody.items) ? responseBody.items.length : 0,
+    errorMessage: responseBody.error?.message ?? null,
+  });
+
   if (!response.ok) {
     throw new Error(responseBody.error?.message || "Unable to load Google Calendar events.");
   }
 
   return (responseBody.items ?? [])
-    .filter((item) => item.id && item.status !== "cancelled")
-    .map((item) => ({
-      id: String(item.id),
-      title: item.summary || "(No title)",
-      status: item.status ?? "",
-      htmlLink: item.htmlLink ?? "",
-      location: item.location ?? "",
-      eventType: item.eventType ?? "default",
-      visibility: item.visibility ?? "default",
-      start: item.start?.dateTime || item.start?.date || "",
-      end: item.end?.dateTime || item.end?.date || "",
-      isAllDay: Boolean(item.start?.date && !item.start?.dateTime),
-      organizer:
-        item.organizer?.displayName || item.organizer?.email || "",
-    }));
+    .map(normalizeGoogleCalendarEvent)
+    .filter((item): item is StoredGoogleCalendarSyncedEventData => item !== null);
+};
+
+const listGoogleCalendarEventsSyncPage = async ({
+  accessToken,
+  calendarId,
+  syncToken,
+  pageToken,
+}: {
+  accessToken: string;
+  calendarId: string;
+  syncToken?: string;
+  pageToken?: string;
+}) => {
+  const url = new URL(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+  );
+  url.searchParams.set("singleEvents", "true");
+  url.searchParams.set("showDeleted", "true");
+  url.searchParams.set("maxResults", "2500");
+  if (syncToken) {
+    url.searchParams.set("syncToken", syncToken);
+  }
+  if (pageToken) {
+    url.searchParams.set("pageToken", pageToken);
+  }
+
+  console.log("Requesting Google Calendar sync page.", {
+    calendarId,
+    hasSyncToken: Boolean(syncToken),
+    hasPageToken: Boolean(pageToken),
+    query: url.toString(),
+  });
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  const responseBody = (await response.json()) as GoogleCalendarEventsListResponse & {
+    error?: { message?: string };
+    nextPageToken?: string;
+    nextSyncToken?: string;
+  };
+
+  console.log("Google Calendar sync page response received.", {
+    calendarId,
+    ok: response.ok,
+    status: response.status,
+    itemCount: Array.isArray(responseBody.items) ? responseBody.items.length : 0,
+    hasNextPageToken: Boolean(responseBody.nextPageToken),
+    hasNextSyncToken: Boolean(responseBody.nextSyncToken),
+    errorMessage: responseBody.error?.message ?? null,
+  });
+
+  if (!response.ok) {
+    const error = new Error(
+      responseBody.error?.message || "Unable to synchronize Google Calendar events.",
+    ) as Error & { statusCode?: number };
+    error.statusCode = response.status;
+    throw error;
+  }
+
+  return {
+    items: responseBody.items ?? [],
+    nextPageToken: responseBody.nextPageToken ?? "",
+    nextSyncToken: responseBody.nextSyncToken ?? "",
+  };
+};
+
+const getGoogleCalendarSyncState = async (
+  tableName: string,
+  userKey: string,
+  calendarId: string,
+) => {
+  console.log("Loading Google Calendar sync state.", {
+    tableName,
+    userKey,
+    calendarId,
+  });
+  const response = await dynamoClient.send(
+    new GetCommand({
+      TableName: tableName,
+      Key: {
+        pk: getGoogleEventSyncPartitionKey(userKey, calendarId),
+        sk: googleEventSyncStateSk,
+      },
+    }),
+  );
+
+  if (!response.Item?.data) {
+    console.log("Google Calendar sync state not found.", {
+      userKey,
+      calendarId,
+    });
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(String(response.Item.data)) as StoredGoogleCalendarSyncStateData;
+    console.log("Google Calendar sync state loaded.", {
+      userKey,
+      calendarId,
+      hasSyncToken: Boolean(parsed.syncToken),
+      lastSyncedAt: parsed.lastSyncedAt ?? null,
+    });
+    return parsed;
+  } catch {
+    console.error("Google Calendar sync state JSON parsing failed.", {
+      userKey,
+      calendarId,
+    });
+    return null;
+  }
+};
+
+const saveGoogleCalendarSyncState = async (
+  tableName: string,
+  userKey: string,
+  calendarId: string,
+  syncState: StoredGoogleCalendarSyncStateData,
+) => {
+  console.log("Saving Google Calendar sync state.", {
+    tableName,
+    userKey,
+    calendarId,
+    hasSyncToken: Boolean(syncState.syncToken),
+    lastSyncedAt: syncState.lastSyncedAt ?? null,
+  });
+  await dynamoClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item: {
+        pk: getGoogleEventSyncPartitionKey(userKey, calendarId),
+        sk: googleEventSyncStateSk,
+        data: JSON.stringify(syncState),
+      },
+    }),
+  );
+};
+
+const loadAllGoogleCalendarCachedEvents = async (
+  tableName: string,
+  userKey: string,
+  calendarId: string,
+) => {
+  console.log("Loading all cached Google Calendar month entries.", {
+    tableName,
+    userKey,
+    calendarId,
+  });
+  const response = await dynamoClient.send(
+    new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: "pk = :pk",
+      ExpressionAttributeValues: {
+        ":pk": getGoogleEventSyncPartitionKey(userKey, calendarId),
+      },
+    }),
+  );
+
+  const items = ((response.Items ?? []) as TableRow[])
+    .map((item) => {
+      const parsed = parseGoogleCalendarMonthCacheRow(item);
+
+      if (!parsed && isGoogleCalendarMonthCacheSortKey(item.sk)) {
+        console.error("Failed to parse Google Calendar month cache row.", {
+          userKey,
+          calendarId,
+          sortKey: item.sk,
+        });
+      }
+
+      return parsed;
+    })
+    .filter((item): item is StoredGoogleCalendarMonthCacheData => item !== null)
+    .flatMap((item) => item.items)
+    .sort((left, right) => left.start.localeCompare(right.start));
+
+  console.log("Loaded all cached Google Calendar month entries.", {
+    userKey,
+    calendarId,
+    rawItemCount: (response.Items ?? []).length,
+    eventCount: items.length,
+  });
+
+  return {
+    rows: (response.Items ?? []) as TableRow[],
+    items,
+  };
+};
+
+const clearGoogleCalendarCachedEvents = async (
+  tableName: string,
+  userKey: string,
+  calendarId: string,
+) => {
+  console.warn("Clearing Google Calendar cached events.", {
+    tableName,
+    userKey,
+    calendarId,
+  });
+  const response = await dynamoClient.send(
+    new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: "pk = :pk",
+      ExpressionAttributeValues: {
+        ":pk": getGoogleEventSyncPartitionKey(userKey, calendarId),
+      },
+    }),
+  );
+
+  console.warn("Google Calendar cached events query completed before clear.", {
+    userKey,
+    calendarId,
+    itemCount: (response.Items ?? []).length,
+  });
+
+  await Promise.all(
+    ((response.Items ?? []) as TableRow[]).map((item) =>
+      dynamoClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            pk: item.pk,
+            sk: item.sk,
+          },
+        }),
+      ),
+    ),
+  );
+};
+
+const rewriteGoogleCalendarMonthCache = async ({
+  tableName,
+  userKey,
+  calendarId,
+  rows,
+  events,
+}: {
+  tableName: string;
+  userKey: string;
+  calendarId: string;
+  rows: TableRow[];
+  events: StoredGoogleCalendarSyncedEventData[];
+}) => {
+  const monthRows = rows.filter((item) => isGoogleCalendarMonthCacheSortKey(item.sk));
+  const monthChunks = buildGoogleCalendarMonthCacheChunks(events);
+
+  console.log("Rewriting Google Calendar month cache.", {
+    tableName,
+    userKey,
+    calendarId,
+    previousMonthRowCount: monthRows.length,
+    nextMonthRowCount: monthChunks.length,
+    eventCount: events.length,
+  });
+
+  await Promise.all(
+    monthRows.map((item) =>
+      dynamoClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            pk: item.pk,
+            sk: item.sk,
+          },
+        }),
+      ),
+    ),
+  );
+
+  await Promise.all(
+    monthChunks.map((chunk, index) =>
+      dynamoClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            pk: getGoogleEventSyncPartitionKey(userKey, calendarId),
+            sk: getGoogleEventSyncMonthSortKey(chunk.month, index + 1),
+            data: JSON.stringify(chunk),
+          },
+        }),
+      ),
+    ),
+  );
+};
+
+const syncGoogleCalendarEventCache = async ({
+  tableName,
+  time,
+  userKey,
+  calendarId,
+  accessToken,
+}: {
+  tableName: string;
+  time: string;
+  userKey: string;
+  calendarId: string;
+  accessToken: string;
+}) => {
+  console.log("Starting Google Calendar event cache sync.", {
+    tableName,
+    userKey,
+    calendarId,
+  });
+  const syncState = await getGoogleCalendarSyncState(tableName, userKey, calendarId);
+  const priorSyncToken = syncState?.syncToken;
+  let cachedState:
+    | {
+        rows: TableRow[];
+        items: StoredGoogleCalendarSyncedEventData[];
+      }
+    | null = priorSyncToken
+    ? null
+    : {
+        rows: [] as TableRow[],
+        items: [] as StoredGoogleCalendarSyncedEventData[],
+      };
+  let cachedEventsById = new Map<string, StoredGoogleCalendarSyncedEventData>(
+    (cachedState?.items ?? []).map((item) => [item.id, item] as const),
+  );
+  let pageToken = "";
+  let nextSyncToken = "";
+  const changedResources: GoogleCalendarSyncChangedResource[] = [];
+  let pageCount = 0;
+
+  const ensureCachedEventsLoaded = async () => {
+    if (cachedState) {
+      return;
+    }
+
+    cachedState = await loadAllGoogleCalendarCachedEvents(tableName, userKey, calendarId);
+    cachedEventsById = new Map(cachedState.items.map((item) => [item.id, item] as const));
+  };
+
+  try {
+    do {
+      pageCount += 1;
+      const page = await listGoogleCalendarEventsSyncPage({
+        accessToken,
+        calendarId,
+        syncToken: priorSyncToken,
+        pageToken: pageToken || undefined,
+      });
+
+      console.log("Processing Google Calendar sync page.", {
+        calendarId,
+        userKey,
+        pageCount,
+        receivedItemCount: page.items.length,
+        hasNextPageToken: Boolean(page.nextPageToken),
+        hasNextSyncToken: Boolean(page.nextSyncToken),
+      });
+
+      for (const rawItem of page.items) {
+        if (!rawItem.id) {
+          console.warn("Skipping Google Calendar sync item without id.", {
+            calendarId,
+            userKey,
+          });
+          continue;
+        }
+
+        if (rawItem.status === "cancelled") {
+          await ensureCachedEventsLoaded();
+          changedResources.push({
+            id: String(rawItem.id),
+            status: rawItem.status ?? "cancelled",
+            changeType: "deleted",
+          });
+          cachedEventsById.delete(String(rawItem.id));
+          continue;
+        }
+
+        const normalizedEvent = normalizeGoogleCalendarEvent(rawItem);
+
+        if (!normalizedEvent) {
+          console.warn("Skipping Google Calendar sync item that could not be normalized.", {
+            calendarId,
+            userKey,
+            eventId: String(rawItem.id),
+            status: rawItem.status ?? null,
+          });
+          continue;
+        }
+
+        changedResources.push({
+          ...normalizedEvent,
+          changeType: "upsert",
+        });
+        await ensureCachedEventsLoaded();
+        cachedEventsById.set(normalizedEvent.id, normalizedEvent);
+      }
+
+      pageToken = page.nextPageToken;
+      nextSyncToken = page.nextSyncToken || nextSyncToken;
+    } while (pageToken);
+  } catch (error) {
+    const typedError = error as Error & { statusCode?: number };
+
+    if (typedError.statusCode === 410) {
+      console.warn("Google Calendar sync token expired; clearing cached events and retrying full sync.", {
+        calendarId,
+        userKey,
+        statusCode: typedError.statusCode,
+      });
+      await clearGoogleCalendarCachedEvents(tableName, userKey, calendarId);
+      return syncGoogleCalendarEventCache({
+        tableName,
+        time,
+        userKey,
+        calendarId,
+        accessToken,
+      });
+    }
+
+    console.error("Google Calendar sync cache update failed.", {
+      calendarId,
+      userKey,
+      hadPriorSyncToken: Boolean(priorSyncToken),
+      statusCode: typedError.statusCode ?? null,
+      errorMessage: typedError.message,
+    });
+    throw error;
+  }
+
+  if (nextSyncToken) {
+    await saveGoogleCalendarSyncState(tableName, userKey, calendarId, {
+      syncToken: nextSyncToken,
+      lastSyncedAt: time,
+    });
+  }
+
+  if (changedResources.length > 0) {
+    await rewriteGoogleCalendarMonthCache({
+      tableName,
+      userKey,
+      calendarId,
+      rows: cachedState?.rows ?? [],
+      events: Array.from(cachedEventsById.values()),
+    });
+  } else {
+    console.log("Skipping Google Calendar month cache rewrite because sync returned no changes.", {
+      calendarId,
+      userKey,
+      hadPriorSyncToken: Boolean(priorSyncToken),
+    });
+  }
+
+  console.log("Google Calendar event cache sync completed.", {
+    calendarId,
+    userKey,
+    pageCount,
+    changedResourceCount: changedResources.length,
+    hadPriorSyncToken: Boolean(priorSyncToken),
+    savedNextSyncToken: Boolean(nextSyncToken),
+  });
+
+  return {
+    changedResources,
+    hadPriorSyncToken: Boolean(priorSyncToken),
+  };
+};
+
+const getCachedGoogleCalendarEventsForRange = async ({
+  tableName,
+  userKey,
+  calendarId,
+  timeMin,
+  timeMax,
+  selectedYearMonth,
+}: {
+  tableName: string;
+  userKey: string;
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
+  selectedYearMonth?: string;
+}) => {
+  const windowStart = Date.parse(timeMin);
+  const windowEnd = Date.parse(timeMax);
+  const monthStart = new Date(timeMin);
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const monthKeys = new Set<string>();
+  const cursor = new Date(monthStart);
+
+  while (cursor.getTime() < windowEnd) {
+    monthKeys.add(cursor.toISOString().slice(0, 7));
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+
+  console.log("Loading cached Google Calendar events for range.", {
+    tableName,
+    userKey,
+    calendarId,
+    timeMin,
+    timeMax,
+    windowStart,
+    windowEnd,
+    monthKeys: Array.from(monthKeys.values()),
+    selectedYearMonth: selectedYearMonth ?? null,
+  });
+  const response = await dynamoClient.send(
+    new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression:
+        selectedYearMonth && monthKeys.size === 1
+          ? "pk = :pk AND begins_with(sk, :skPrefix)"
+          : "pk = :pk",
+      ExpressionAttributeValues: {
+        ":pk": getGoogleEventSyncPartitionKey(userKey, calendarId),
+        ...(selectedYearMonth && monthKeys.size === 1
+          ? {
+              ":skPrefix": `${googleEventSyncMonthSkPrefix}#${selectedYearMonth}#`,
+            }
+          : {}),
+      },
+    }),
+  );
+
+  const items = ((response.Items ?? []) as TableRow[])
+    .map((item) => {
+      const parsed = parseGoogleCalendarMonthCacheRow(item);
+
+      if (!parsed && isGoogleCalendarMonthCacheSortKey(item.sk)) {
+        console.error("Failed to parse cached Google Calendar month row while loading range.", {
+          userKey,
+          calendarId,
+          sortKey: item.sk,
+        });
+      }
+
+      return parsed;
+    })
+    .filter(
+      (item): item is StoredGoogleCalendarMonthCacheData =>
+        item !== null && monthKeys.has(item.month),
+    )
+    .flatMap((item) => item.items)
+    .filter((item) => {
+      const start = Date.parse(item.start);
+      const end = Date.parse(item.end);
+      return Number.isFinite(start) && Number.isFinite(end) && end > windowStart && start < windowEnd;
+    })
+    .sort((left, right) => left.start.localeCompare(right.start));
+
+  console.log("Loaded cached Google Calendar events for range.", {
+    userKey,
+    calendarId,
+    rawItemCount: (response.Items ?? []).length,
+    matchedItemCount: items.length,
+  });
+
+  return items;
 };
 
 const createGoogleCalendarEvent = async ({
@@ -939,7 +1686,132 @@ const createGoogleCalendarEvent = async ({
   };
 };
 
+const updateGoogleCalendarEvent = async ({
+  accessToken,
+  calendarId,
+  eventId,
+  title,
+  start,
+  end,
+  timeZone,
+  location,
+  isAllDay,
+}: {
+  accessToken: string;
+  calendarId: string;
+  eventId: string;
+  title: string;
+  start: string;
+  end: string;
+  timeZone?: string;
+  location?: string;
+  isAllDay?: boolean;
+}) => {
+  const response = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        summary: title,
+        location,
+        ...(isAllDay
+          ? {
+              start: {
+                date: start,
+              },
+              end: {
+                date: end,
+              },
+            }
+          : {
+              start: {
+                dateTime: start,
+                timeZone,
+              },
+              end: {
+                dateTime: end,
+                timeZone,
+              },
+            }),
+      }),
+    },
+  );
+
+  const responseBody = (await response.json()) as {
+    error?: { message?: string };
+    id?: string;
+    summary?: string;
+    status?: string;
+    htmlLink?: string;
+    location?: string;
+    eventType?: string;
+    visibility?: string;
+    start?: { dateTime?: string; date?: string };
+    end?: { dateTime?: string; date?: string };
+    organizer?: { email?: string; displayName?: string };
+  };
+
+  if (!response.ok || !responseBody.id) {
+    throw new Error(responseBody.error?.message || "Unable to update Google Calendar event.");
+  }
+
+  return {
+    id: responseBody.id,
+    title: responseBody.summary || title,
+    status: responseBody.status ?? "",
+    htmlLink: responseBody.htmlLink ?? "",
+    location: responseBody.location ?? location ?? "",
+    eventType: responseBody.eventType ?? "default",
+    visibility: responseBody.visibility ?? "default",
+    start: responseBody.start?.dateTime || responseBody.start?.date || start,
+    end: responseBody.end?.dateTime || responseBody.end?.date || end,
+    isAllDay: Boolean(responseBody.start?.date && !responseBody.start?.dateTime),
+    organizer: responseBody.organizer?.displayName || responseBody.organizer?.email || "",
+  };
+};
+
+const deleteGoogleCalendarEvent = async ({
+  accessToken,
+  calendarId,
+  eventId,
+}: {
+  accessToken: string;
+  calendarId: string;
+  eventId: string;
+}) => {
+  const response = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    let errorMessage = "Unable to delete Google Calendar event.";
+
+    try {
+      const responseBody = (await response.json()) as { error?: { message?: string } };
+      errorMessage = responseBody.error?.message || errorMessage;
+    } catch {
+      // Ignore empty or non-JSON delete responses.
+    }
+
+    throw new Error(errorMessage);
+  }
+};
+
 const getStoredGoogleConnection = async (tableName: string, email: string) => {
+  console.log("Loading stored Google Calendar connection.", {
+    tableName,
+    userKey: email,
+  });
   const response = await dynamoClient.send(
     new GetCommand({
       TableName: tableName,
@@ -951,12 +1823,26 @@ const getStoredGoogleConnection = async (tableName: string, email: string) => {
   );
 
   if (!response.Item?.data) {
+    console.warn("Stored Google Calendar connection not found.", {
+      userKey: email,
+    });
     return null;
   }
 
   try {
-    return JSON.parse(String(response.Item.data)) as StoredGoogleCalendarConnectionData;
+    const parsed = JSON.parse(String(response.Item.data)) as StoredGoogleCalendarConnectionData;
+    console.log("Stored Google Calendar connection loaded.", {
+      userKey: email,
+      hasAccessToken: Boolean(parsed.accessTokenEncrypted),
+      hasRefreshToken: Boolean(parsed.refreshTokenEncrypted),
+      accessTokenExpiresAt: parsed.accessTokenExpiresAt ?? null,
+      lastError: parsed.lastError ?? null,
+    });
+    return parsed;
   } catch {
+    console.error("Stored Google Calendar connection JSON parsing failed.", {
+      userKey: email,
+    });
     return null;
   }
 };
@@ -995,10 +1881,25 @@ const refreshGoogleAccessTokenIfNeeded = async ({
     !Number.isFinite(expiresAtMs) ||
     expiresAtMs <= Date.now() + googleAccessTokenExpiryBufferMs;
 
+  console.log("Checking whether Google access token refresh is needed.", {
+    userKey: email,
+    hasAccessToken: Boolean(connection.accessTokenEncrypted),
+    hasRefreshToken: Boolean(connection.refreshTokenEncrypted),
+    accessTokenExpiresAt: connection.accessTokenExpiresAt ?? null,
+    expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : null,
+    isExpiredOrMissing,
+  });
+
   if (!isExpiredOrMissing) {
+    console.log("Google access token refresh not needed.", {
+      userKey: email,
+    });
     return connection;
   }
 
+  console.log("Refreshing Google access token.", {
+    userKey: email,
+  });
   const refreshToken = decryptSecret(connection.refreshTokenEncrypted);
   const { clientId, clientSecret, callbackUrl } = getRequiredGoogleConfig();
 
@@ -1028,6 +1929,11 @@ const refreshGoogleAccessTokenIfNeeded = async ({
   };
 
   await saveStoredGoogleConnection(tableName, email, nextConnection);
+
+  console.log("Google access token refresh completed and saved.", {
+    userKey: email,
+    nextAccessTokenExpiresAt: nextConnection.accessTokenExpiresAt,
+  });
 
   return nextConnection;
 };
@@ -1443,6 +2349,15 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           }),
         };
       } catch (error) {
+        const typedError = error as Error & { statusCode?: number };
+        console.error("Google Calendar availability request failed.", {
+          calendarId,
+          userKey: requestUserKey,
+          timeMin,
+          timeMax,
+          statusCode: typedError.statusCode ?? null,
+          errorMessage: typedError.message,
+        });
         return {
           statusCode: 500,
           headers: responseHeaders,
@@ -1474,6 +2389,19 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       const timeMax = normalizeWhitespace(payload.timeMax);
       const timeZone = normalizeWhitespace(payload.timeZone);
       const calendarId = normalizeWhitespace(payload.calendarId) || "primary";
+      const useSyncCache = payload.useSyncCache === true;
+      const selectedYearMonth = normalizeWhitespace(payload.selectedYearMonth);
+
+      console.log("Google Calendar events request received.", {
+        requestPath,
+        userKey: requestUserKey,
+        calendarId,
+        timeMin,
+        timeMax,
+        timeZone: timeZone || null,
+        useSyncCache,
+        selectedYearMonth: selectedYearMonth || null,
+      });
 
       if (!timeMin || !timeMax) {
         return {
@@ -1503,6 +2431,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
       const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
 
+      console.log("Google Calendar events connection lookup completed.", {
+        userKey: requestUserKey,
+        calendarId,
+        hasConnection: Boolean(existingConnection),
+      });
+
       if (!existingConnection) {
         return {
           statusCode: 404,
@@ -1521,13 +2455,82 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           email: requestUserKey,
           connection: existingConnection,
         });
-        const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
-        const items = await listGoogleCalendarEvents({
-          accessToken,
+        console.log("Google Calendar events connection ready.", {
+          userKey: requestUserKey,
           calendarId,
-          timeMin,
-          timeMax,
-          timeZone,
+          accessTokenExpiresAt: currentConnection.accessTokenExpiresAt ?? null,
+        });
+        const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+        console.log("Google Calendar access token decrypted for events request.", {
+          userKey: requestUserKey,
+          calendarId,
+        });
+        const items = useSyncCache
+          ? await (async () => {
+              try {
+                const syncResult = await syncGoogleCalendarEventCache({
+                  tableName,
+                  time,
+                  userKey: requestUserKey,
+                  calendarId,
+                  accessToken,
+                });
+
+                const cachedItems = await getCachedGoogleCalendarEventsForRange({
+                  tableName,
+                  userKey: requestUserKey,
+                  calendarId,
+                  timeMin,
+                  timeMax,
+                  selectedYearMonth: selectedYearMonth || undefined,
+                });
+
+                return {
+                  items: cachedItems,
+                  changedResources: syncResult.changedResources,
+                  syncMode: syncResult.hadPriorSyncToken ? "incremental" : "full",
+                };
+              } catch (error) {
+                const typedError = error as Error & { statusCode?: number };
+                console.error("Google Calendar sync cache path failed; falling back to direct events fetch.", {
+                  calendarId,
+                  userKey: requestUserKey,
+                  timeMin,
+                  timeMax,
+                  statusCode: typedError.statusCode ?? null,
+                  errorMessage: typedError.message,
+                });
+                return {
+                  items: await listGoogleCalendarEvents({
+                    accessToken,
+                    calendarId,
+                    timeMin,
+                    timeMax,
+                    timeZone,
+                  }),
+                  changedResources: [] as GoogleCalendarSyncChangedResource[],
+                  syncMode: "direct" as const,
+                };
+              }
+            })()
+          : {
+              items: await listGoogleCalendarEvents({
+                accessToken,
+                calendarId,
+                timeMin,
+                timeMax,
+                timeZone,
+              }),
+              changedResources: [] as GoogleCalendarSyncChangedResource[],
+              syncMode: "direct" as const,
+            };
+
+        console.log("Google Calendar events request succeeded.", {
+          userKey: requestUserKey,
+          calendarId,
+          syncMode: items.syncMode,
+          itemCount: items.items.length,
+          changedResourceCount: items.changedResources.length,
         });
 
         return {
@@ -1539,10 +2542,22 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             calendarId,
             timeMin,
             timeMax,
-            items,
+            items: items.items,
+            changedResources: items.changedResources,
+            syncMode: items.syncMode,
           }),
         };
       } catch (error) {
+        const typedError = error as Error & { statusCode?: number };
+        console.error("Google Calendar events request failed.", {
+          calendarId,
+          userKey: requestUserKey,
+          timeMin,
+          timeMax,
+          useSyncCache,
+          statusCode: typedError.statusCode ?? null,
+          errorMessage: typedError.message,
+        });
         return {
           statusCode: 500,
           headers: responseHeaders,
@@ -1651,6 +2666,191 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           body: JSON.stringify({
             message:
               error instanceof Error ? error.message : "Unable to create Google Calendar event.",
+            time,
+          }),
+        };
+      }
+    }
+
+    if (requestPath.endsWith("/calendar/google/events/update")) {
+      if (!requestUserKey) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A signed-in user identifier is required to update calendar events.",
+            time,
+          }),
+        };
+      }
+
+      const payload = JSON.parse(event.body ?? "{}") as Partial<GoogleCalendarUpdateEventPayload>;
+      const calendarId = normalizeWhitespace(payload.calendarId) || "primary";
+      const eventId = normalizeWhitespace(payload.eventId);
+      const title = normalizeWhitespace(payload.title);
+      const start = normalizeWhitespace(payload.start);
+      const end = normalizeWhitespace(payload.end);
+      const timeZone = normalizeWhitespace(payload.timeZone);
+      const location = normalizeWhitespace(payload.location);
+      const isAllDay = payload.isAllDay === true;
+
+      if (!eventId || !title || !start || !end) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "eventId, title, start, and end are required.",
+            time,
+          }),
+        };
+      }
+
+      if (
+        (!isAllDay &&
+          (Number.isNaN(Date.parse(start)) ||
+            Number.isNaN(Date.parse(end)) ||
+            Date.parse(start) >= Date.parse(end))) ||
+        (isAllDay && start >= end)
+      ) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: isAllDay
+              ? "For all-day events, end must be later than start."
+              : "start must be earlier than end and both must be valid dates.",
+            time,
+          }),
+        };
+      }
+
+      const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
+
+      if (!existingConnection) {
+        return {
+          statusCode: 404,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar is not connected.",
+            time,
+          }),
+        };
+      }
+
+      try {
+        const currentConnection = await refreshGoogleAccessTokenIfNeeded({
+          tableName,
+          time,
+          email: requestUserKey,
+          connection: existingConnection,
+        });
+        const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+        const item = await updateGoogleCalendarEvent({
+          accessToken,
+          calendarId,
+          eventId,
+          title,
+          start,
+          end,
+          timeZone,
+          location,
+          isAllDay,
+        });
+
+        return {
+          statusCode: 200,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar event updated.",
+            time,
+            calendarId,
+            item,
+          }),
+        };
+      } catch (error) {
+        return {
+          statusCode: 500,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message:
+              error instanceof Error ? error.message : "Unable to update Google Calendar event.",
+            time,
+          }),
+        };
+      }
+    }
+
+    if (requestPath.endsWith("/calendar/google/events/delete")) {
+      if (!requestUserKey) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A signed-in user identifier is required to delete calendar events.",
+            time,
+          }),
+        };
+      }
+
+      const payload = JSON.parse(event.body ?? "{}") as Partial<GoogleCalendarDeleteEventPayload>;
+      const calendarId = normalizeWhitespace(payload.calendarId) || "primary";
+      const eventId = normalizeWhitespace(payload.eventId);
+
+      if (!eventId) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "eventId is required.",
+            time,
+          }),
+        };
+      }
+
+      const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
+
+      if (!existingConnection) {
+        return {
+          statusCode: 404,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar is not connected.",
+            time,
+          }),
+        };
+      }
+
+      try {
+        const currentConnection = await refreshGoogleAccessTokenIfNeeded({
+          tableName,
+          time,
+          email: requestUserKey,
+          connection: existingConnection,
+        });
+        const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+        await deleteGoogleCalendarEvent({
+          accessToken,
+          calendarId,
+          eventId,
+        });
+
+        return {
+          statusCode: 200,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "Google Calendar event deleted.",
+            time,
+            calendarId,
+            eventId,
+          }),
+        };
+      } catch (error) {
+        return {
+          statusCode: 500,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message:
+              error instanceof Error ? error.message : "Unable to delete Google Calendar event.",
             time,
           }),
         };
