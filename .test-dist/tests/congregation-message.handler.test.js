@@ -461,12 +461,14 @@ test("loads Google calendar events", async () => {
             status: "confirmed",
             htmlLink: "",
             location: "Main Hall",
+            description: "",
             eventType: "default",
             visibility: "private",
             start: "2026-04-27T15:00:00.000Z",
             end: "2026-04-27T16:00:00.000Z",
             isAllDay: false,
             organizer: "Admin",
+            congregationItems: [],
         },
     ]);
 });
@@ -564,12 +566,14 @@ test("loads Google calendar events from month-based sync cache", async () => {
             status: "confirmed",
             htmlLink: "",
             location: "Office",
+            description: "",
             eventType: "default",
             visibility: "default",
             start: "2026-05-03T15:00:00.000Z",
             end: "2026-05-03T16:00:00.000Z",
             isAllDay: false,
             organizer: "Admin",
+            congregationItems: [],
         },
     ]);
     const storedItems = Array.from(store.values());
@@ -653,12 +657,14 @@ test("falls back to direct Google calendar events when sync cache loading fails"
             status: "confirmed",
             htmlLink: "",
             location: "Library",
+            description: "",
             eventType: "default",
             visibility: "default",
             start: "2026-05-01T15:00:00.000Z",
             end: "2026-05-01T16:00:00.000Z",
             isAllDay: false,
             organizer: "Admin",
+            congregationItems: [],
         },
     ]);
 });
@@ -696,6 +702,7 @@ test("creates a Google calendar event", async () => {
             status: "confirmed",
             htmlLink: "https://calendar.google.com/event?eid=123",
             location: "Room A",
+            description: "Planning session",
             eventType: "default",
             visibility: "default",
             start: { dateTime: "2026-04-28T14:00:00.000Z" },
@@ -716,6 +723,15 @@ test("creates a Google calendar event", async () => {
             timeZone: "America/Toronto",
             location: "Room A",
             description: "Planning session",
+            congregationItems: [
+                {
+                    pk: "CONGREGATION",
+                    sk: "MEMBER#1",
+                    firstName: "Abouna",
+                    lastName: "Victor",
+                    phone: "6135550101",
+                },
+            ],
         },
     }));
     const body = parseBody(response.body);
@@ -723,6 +739,7 @@ test("creates a Google calendar event", async () => {
     assert.equal(response.statusCode, 201);
     assert.equal(body.message, "Google Calendar event created.");
     assert.equal(body.item.title, "Booked Event");
+    assert.deepEqual(body.item.congregationItems, [{ pk: "CONGREGATION", sk: "MEMBER#1", firstName: "Abouna", lastName: "Victor", phone: "6135550101" }]);
 });
 test("updates a Google calendar event", async () => {
     const originalFetch = globalThis.fetch;
@@ -758,6 +775,7 @@ test("updates a Google calendar event", async () => {
             status: "confirmed",
             htmlLink: "https://calendar.google.com/event?eid=123",
             location: "Room B",
+            description: "Updated planning session",
             eventType: "default",
             visibility: "default",
             start: { dateTime: "2026-04-29T14:00:00.000Z" },
@@ -778,6 +796,16 @@ test("updates a Google calendar event", async () => {
             end: "2026-04-29T15:30:00.000Z",
             timeZone: "America/Toronto",
             location: "Room B",
+            description: "Updated planning session",
+            congregationItems: [
+                {
+                    pk: "CONGREGATION",
+                    sk: "MEMBER#2",
+                    firstName: "Mary",
+                    lastName: "Zed",
+                    phone: "6135550202",
+                },
+            ],
         },
     }));
     const body = parseBody(response.body);
@@ -785,6 +813,8 @@ test("updates a Google calendar event", async () => {
     assert.equal(response.statusCode, 200);
     assert.equal(body.message, "Google Calendar event updated.");
     assert.equal(body.item.title, "Updated Event");
+    assert.equal(body.item.description, "Updated planning session");
+    assert.deepEqual(body.item.congregationItems, [{ pk: "CONGREGATION", sk: "MEMBER#2", firstName: "Mary", lastName: "Zed", phone: "6135550202" }]);
 });
 test("deletes a Google calendar event", async () => {
     const originalFetch = globalThis.fetch;
@@ -1963,5 +1993,49 @@ test("lists congregation members", async () => {
     assert.deepEqual(body.items, [
         { pk: "CONGREGATION", sk: "MEMBER#1", data: "{}" },
         { pk: "CONGREGATION", sk: "MEMBER#2", data: "{}" },
+    ]);
+});
+test("loads the congregation directory", async () => {
+    const dynamo = createMockClient((command) => {
+        assert.equal(command.constructor.name, "QueryCommand");
+        return {
+            Items: [
+                {
+                    pk: "CONGREGATION",
+                    sk: "MEMBER#2",
+                    data: JSON.stringify({ firstName: "Mary", lastName: "Zed", phone: "613-555-0202" }),
+                },
+                {
+                    pk: "CONGREGATION",
+                    sk: "MEMBER#1",
+                    data: JSON.stringify({
+                        firstName: "Abouna",
+                        lastName: "Victor",
+                        phone: "613-555-0101",
+                    }),
+                },
+            ],
+        };
+    });
+    setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+    const response = await invokeHandler(createEvent({ path: "/congregation/directory", groups: ["regular_user"] }));
+    const body = parseBody(response.body);
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.message, "Congregation directory loaded.");
+    assert.deepEqual(body.items, [
+        {
+            pk: "CONGREGATION",
+            sk: "MEMBER#1",
+            firstName: "Abouna",
+            lastName: "Victor",
+            phone: "613-555-0101",
+        },
+        {
+            pk: "CONGREGATION",
+            sk: "MEMBER#2",
+            firstName: "Mary",
+            lastName: "Zed",
+            phone: "613-555-0202",
+        },
     ]);
 });

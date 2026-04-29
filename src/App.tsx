@@ -473,7 +473,7 @@ type GoogleCalendarEventsResponse = {
   calendarId: string;
   timeMin: string;
   timeMax: string;
-  syncMode?: "full" | "incremental" | "direct";
+  syncMode?: "full" | "incremental" | "direct" | "cached";
   changedResources?: Array<
     | ({
         id: string;
@@ -500,12 +500,14 @@ type GoogleCalendarEventsResponse = {
     status: string;
     htmlLink: string;
     location: string;
+    description: string;
     eventType: string;
     visibility: string;
     start: string;
     end: string;
     isAllDay: boolean;
     organizer: string;
+    congregationItems?: CongregationDirectoryResponse["items"];
     calendarId?: string;
     calendarName?: string;
     calendarColor?: string;
@@ -521,6 +523,9 @@ type GoogleCalendarEventsPayload = {
   timeZone?: string;
   calendarId?: string;
   useSyncCache?: boolean;
+  cacheOnly?: boolean;
+  forceSync?: boolean;
+  congregationItems?: CongregationDirectoryResponse["items"];
   selectedYearMonth?: string;
 };
 
@@ -539,6 +544,20 @@ type GoogleCalendarDeleteEventResponse = {
   calendarId: string;
   eventId: string;
 };
+
+type CongregationDirectoryResponse = {
+  message: string;
+  time: string;
+  items: Array<{
+    pk: string;
+    sk: string;
+    firstName: string;
+    lastName: string;
+    phone: string;
+  }>;
+};
+
+type CongregationDirectoryItem = CongregationDirectoryResponse["items"][number];
 
 type CalendarTimeSlot = {
   start: string;
@@ -668,6 +687,36 @@ const formatDateInputValue = (value: Date) =>
     value.getDate(),
   ).padStart(2, "0")}`;
 
+const formatOrdinalDay = (day: number) => {
+  const remainder = day % 10;
+  const teenRemainder = day % 100;
+
+  if (teenRemainder >= 11 && teenRemainder <= 13) {
+    return `${day}th`;
+  }
+
+  if (remainder === 1) {
+    return `${day}st`;
+  }
+
+  if (remainder === 2) {
+    return `${day}nd`;
+  }
+
+  if (remainder === 3) {
+    return `${day}rd`;
+  }
+
+  return `${day}th`;
+};
+
+const formatCompactCalendarDayLabel = (value: Date) =>
+  `${value.toLocaleDateString(undefined, {
+    weekday: "short",
+  })} - ${value.toLocaleDateString(undefined, {
+    month: "long",
+  })} ${formatOrdinalDay(value.getDate())}`;
+
 const buildLocalDateTimeIso = (dateValue: string, timeValue: string) => {
   const [year, month, day] = dateValue.split("-").map(Number);
   const [hours, minutes] = timeValue.split(":").map(Number);
@@ -742,6 +791,85 @@ const getAllDayEventSpanDays = (start: string, end: string) => {
   return Math.max(1, daySpan);
 };
 
+const formatCongregationDirectoryItemLabel = (item: CongregationDirectoryItem) =>
+  `${item.firstName ?? ""} ${item.lastName ?? ""}`.trim();
+
+const formatCongregationDirectoryItemSubLabel = (item: CongregationDirectoryItem) =>
+  (item.phone ?? "").trim() || "No telephone";
+
+const normalizeCongregationPhone = (value?: string) => (value ?? "").replace(/[^\d+]/g, "");
+
+const extractCalendarEventCongregationDetails = (description: string | undefined) => {
+  const lines = (description ?? "").split("\n");
+  const congregationEntries: Array<{ name: string; phone: string }> = [];
+  const remainingLines: string[] = [];
+  let isReadingCongregationBlock = false;
+
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+
+    if (!isReadingCongregationBlock) {
+      if (trimmedLine === "Congregation:") {
+        isReadingCongregationBlock = true;
+        continue;
+      }
+
+      remainingLines.push(line);
+      continue;
+    }
+
+    if (!trimmedLine) {
+      isReadingCongregationBlock = false;
+      continue;
+    }
+
+    const match = /^-\s+(.*?)(?:\s+\((.*)\))?$/.exec(trimmedLine);
+
+    if (!match) {
+      isReadingCongregationBlock = false;
+      remainingLines.push(line);
+      continue;
+    }
+
+    congregationEntries.push({
+      name: (match[1] ?? "").trim(),
+      phone: (match[2] ?? "").trim(),
+    });
+  }
+
+  const cleanedDescription = remainingLines.join("\n").trim();
+
+  return {
+    congregationEntries,
+    description: cleanedDescription,
+  };
+};
+
+const buildCalendarEventDescription = (
+  description: string | undefined,
+  congregationItems: CongregationDirectoryItem[] = [],
+) => {
+  const trimmedDescription = (description ?? "").trim();
+
+  if (congregationItems.length === 0) {
+    return trimmedDescription;
+  }
+
+  const congregationLines = [
+    "Congregation:",
+    ...congregationItems.map(
+      (item) =>
+        `- ${formatCongregationDirectoryItemLabel(item)}${
+          (item.phone ?? "").trim() ? ` (${(item.phone ?? "").trim()})` : ""
+        }`,
+    ),
+  ];
+
+  return trimmedDescription
+    ? [...congregationLines, "", trimmedDescription].join("\n")
+    : congregationLines.join("\n");
+};
+
 const buildFreeTimeSlots = ({
   timeMin,
   timeMax,
@@ -808,12 +936,12 @@ const initialCalendarEventForm: CalendarEventFormState = {
 };
 
 const googleCalendarColorPalette = [
-  { color: "#5f8f6f", emoji: "🟢" },
-  { color: "#b56a6a", emoji: "🔴" },
-  { color: "#6c88b5", emoji: "🔵" },
-  { color: "#b7a15d", emoji: "🟡" },
-  { color: "#7b8fa8", emoji: "🔹" },
-  { color: "#9171ad", emoji: "🟣" },
+  { color: "#6f927b", emoji: "🟢" },
+  { color: "#b77a7a", emoji: "🔴" },
+  { color: "#738ab3", emoji: "🔵" },
+  { color: "#b9a76b", emoji: "🟡" },
+  { color: "#9476ad", emoji: "🟣" },
+  { color: "#9b8167", emoji: "🟤" },
 ] as const;
 
 const assignGoogleCalendarPalette = (
@@ -1162,6 +1290,7 @@ export default function App() {
   const contactsImportInputRef = useRef<HTMLInputElement | null>(null);
   const memberPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const isApplyingPopStateRef = useRef(false);
+  const calendarMonthEventsRequestRef = useRef(0);
   const memberLongPressTimerRef = useRef<number | null>(null);
   const suppressMemberClickRef = useRef(false);
   const initialGoogleCalendarCallbackState = getInitialCalendarCallbackState();
@@ -1204,6 +1333,15 @@ export default function App() {
   );
   const [selectedCalendarMonthEvent, setSelectedCalendarMonthEvent] =
     useState<SelectedCalendarMonthEventState>(null);
+  const [congregationDirectory, setCongregationDirectory] =
+    useState<CongregationDirectoryResponse["items"]>([]);
+  const [calendarCongregationQuery, setCalendarCongregationQuery] = useState("");
+  const [selectedCongregationDirectoryItems, setSelectedCongregationDirectoryItems] = useState<
+    CongregationDirectoryItem[]
+  >([]);
+  const [pendingCalendarCongregationEntries, setPendingCalendarCongregationEntries] = useState<
+    Array<{ name: string; phone: string }>
+  >([]);
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarListResponse["items"]>(
     [],
   );
@@ -1213,6 +1351,7 @@ export default function App() {
   const [calendarEvents, setCalendarEvents] = useState<GoogleCalendarEventsResponse | null>(null);
   const [calendarMonthEvents, setCalendarMonthEvents] =
     useState<GoogleCalendarEventsResponse | null>(null);
+  const [isCalendarMonthLoading, setIsCalendarMonthLoading] = useState(false);
   const [calendarEventForm, setCalendarEventForm] =
     useState<CalendarEventFormState>(initialCalendarEventForm);
   const [calendarEventFormStatus, setCalendarEventFormStatus] = useState<string | null>(null);
@@ -1373,6 +1512,7 @@ export default function App() {
     isGoogleCalendarLoading ||
     isGoogleCalendarConnecting ||
     isCalendarAvailabilityLoading ||
+    isCalendarMonthLoading ||
     isCalendarEventSubmitting ||
     isParkingRegistrationSubmitting ||
     isParkingManagementLoading ||
@@ -1520,6 +1660,27 @@ export default function App() {
         year: "numeric",
       })
     : "";
+  const normalizedCalendarCongregationQuery = calendarCongregationQuery.trim().toLowerCase();
+  const filteredCalendarCongregationSuggestions =
+    normalizedCalendarCongregationQuery
+      ? congregationDirectory
+          .filter((item) => {
+            const fullName = formatCongregationDirectoryItemLabel(item).toLowerCase();
+            const phoneLabel = formatCongregationDirectoryItemSubLabel(item).toLowerCase();
+            return (
+              fullName.includes(normalizedCalendarCongregationQuery) ||
+              phoneLabel.includes(normalizedCalendarCongregationQuery)
+            );
+          })
+          .filter(
+            (item) =>
+              !selectedCongregationDirectoryItems.some(
+                (selectedItem) =>
+                  selectedItem.pk === item.pk && selectedItem.sk === item.sk,
+              ),
+          )
+          .slice(0, 5)
+      : [];
   const visitationItems = visitationFocus
     ? (backendMessage?.items.filter(
         (item) => item.pk === visitationFocus.pk && item.sk === visitationFocus.sk,
@@ -1793,6 +1954,21 @@ export default function App() {
     }
   };
 
+  const loadCongregationDirectory = async () => {
+    if (!congregationApiName) {
+      return;
+    }
+
+    try {
+      const response = await authorizedGet<CongregationDirectoryResponse>(
+        "/congregation/directory",
+      );
+      setCongregationDirectory(response.items);
+    } catch {
+      setCongregationDirectory([]);
+    }
+  };
+
   const loadGoogleCalendarAvailability = async () => {
     if (!congregationApiName) {
       setCalendarAvailabilityStatus("Backend API is not configured yet.");
@@ -1852,10 +2028,16 @@ export default function App() {
     }
   };
 
-  const loadGoogleCalendarMonthEvents = async () => {
+  const loadGoogleCalendarMonthEvents = async ({
+    useSyncCache = true,
+  }: { useSyncCache?: boolean } = {}) => {
     if (!congregationApiName) {
       return;
     }
+
+    const requestId = calendarMonthEventsRequestRef.current + 1;
+    calendarMonthEventsRequestRef.current = requestId;
+    setIsCalendarMonthLoading(true);
 
     const monthStart = new Date(
       calendarMonthViewDate.getFullYear(),
@@ -1902,7 +2084,7 @@ export default function App() {
         timeMin: monthStart.toISOString(),
         timeMax: nextMonthStart.toISOString(),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        useSyncCache: true,
+        useSyncCache,
         selectedYearMonth,
       } satisfies Omit<GoogleCalendarEventsPayload, "calendarId">;
       console.log("Starting Google Calendar month events request", {
@@ -1911,45 +2093,160 @@ export default function App() {
         selectedYearMonth,
         requestPayload: basePayload,
       });
-      const calendarResponses = await Promise.all(
-        calendarsToLoad.map(async (calendar) => {
+      const loadedCalendarResponseMap = new Map<
+        string,
+        {
+          calendar: GoogleCalendarListResponse["items"][number];
+          payload: GoogleCalendarEventsResponse;
+        }
+      >();
+      const buildMergedPayload = () => {
+        const loadedCalendarResponses = Array.from(loadedCalendarResponseMap.values());
+        const mergedItems = loadedCalendarResponses
+          .flatMap(({ calendar, payload }) =>
+            payload.items.map((item) => ({
+              ...item,
+              calendarId: calendar.id,
+              calendarName: calendar.name,
+              calendarColor: calendar.calendarColor,
+              calendarColorEmoji: calendar.calendarColorEmoji,
+            })),
+          )
+          .sort((left, right) => left.start.localeCompare(right.start));
+
+        return {
+          message: "Google Calendar events loaded.",
+          time: new Date().toISOString(),
+          calendarId: "all",
+          timeMin: basePayload.timeMin,
+          timeMax: basePayload.timeMax,
+          items: mergedItems,
+          changedResources: loadedCalendarResponses.flatMap(
+            ({ payload }) => payload.changedResources ?? [],
+          ),
+          syncMode:
+            loadedCalendarResponses.length > 0 &&
+            loadedCalendarResponses.every(
+              ({ payload }) => payload.syncMode === loadedCalendarResponses[0]?.payload.syncMode,
+            )
+              ? loadedCalendarResponses[0]?.payload.syncMode
+              : undefined,
+        } satisfies GoogleCalendarEventsResponse;
+      };
+      const applyCalendarPayload = ({
+        calendar,
+        payload,
+        phase,
+      }: {
+        calendar: GoogleCalendarListResponse["items"][number];
+        payload: GoogleCalendarEventsResponse;
+        phase: "cache" | "sync" | "direct";
+      }) => {
+        if (calendarMonthEventsRequestRef.current !== requestId) {
+          return;
+        }
+
+        loadedCalendarResponseMap.set(calendar.id, {
+          calendar,
+          payload,
+        });
+        const mergedPayload = buildMergedPayload();
+        setCalendarMonthEvents(mergedPayload);
+        console.log("Google Calendar month events partial response received", {
+          label: requestLabel,
+          elapsedMs: Math.round(performance.now() - requestStartedAt),
+          calendarId: calendar.id,
+          calendarName: calendar.name,
+          phase,
+          loadedCalendarCount: loadedCalendarResponseMap.size,
+          totalCalendarCount: calendarsToLoad.length,
+          itemCount: mergedPayload.items.length,
+          syncMode: payload.syncMode ?? "unknown",
+          changedResourceCount: payload.changedResources?.length ?? 0,
+        });
+      };
+
+      setCalendarMonthEvents({
+        message: "Google Calendar events loading...",
+        time: new Date().toISOString(),
+        calendarId: "all",
+        timeMin: basePayload.timeMin,
+        timeMax: basePayload.timeMax,
+        items: [],
+        changedResources: [],
+      });
+
+      const calendarLoadPromises = calendarsToLoad.map(async (calendar) => {
+        try {
+          if (useSyncCache) {
+            const cacheResponse = await authorizedPost("/calendar/google/events", {
+              ...basePayload,
+              calendarId: calendar.id,
+              cacheOnly: true,
+            });
+            const cachePayload = (await cacheResponse.body.json()) as GoogleCalendarEventsResponse;
+            applyCalendarPayload({
+              calendar,
+              payload: cachePayload,
+              phase: "cache",
+            });
+
+            const syncResponse = await authorizedPost("/calendar/google/events", {
+              ...basePayload,
+              calendarId: calendar.id,
+              forceSync: true,
+            });
+            const syncPayload = (await syncResponse.body.json()) as GoogleCalendarEventsResponse;
+            applyCalendarPayload({
+              calendar,
+              payload: syncPayload,
+              phase: "sync",
+            });
+
+            return {
+              calendar,
+              payload: syncPayload,
+            };
+          }
+
           const response = await authorizedPost("/calendar/google/events", {
             ...basePayload,
             calendarId: calendar.id,
           });
           const payload = (await response.body.json()) as GoogleCalendarEventsResponse;
+          applyCalendarPayload({
+            calendar,
+            payload,
+            phase: "direct",
+          });
 
           return {
             calendar,
             payload,
           };
-        }),
-      );
-      const mergedItems = calendarResponses
-        .flatMap(({ calendar, payload }) =>
-          payload.items.map((item) => ({
-            ...item,
+        } catch (error) {
+          console.error("Google Calendar month events calendar load failed", {
+            label: requestLabel,
             calendarId: calendar.id,
             calendarName: calendar.name,
-            calendarColor: calendar.calendarColor,
-            calendarColorEmoji: calendar.calendarColorEmoji,
-          })),
-        )
-        .sort((left, right) => left.start.localeCompare(right.start));
-      const mergedPayload: GoogleCalendarEventsResponse = {
-        message: "Google Calendar events loaded.",
-        time: new Date().toISOString(),
-        calendarId: "all",
-        timeMin: basePayload.timeMin,
-        timeMax: basePayload.timeMax,
-        items: mergedItems,
-        changedResources: calendarResponses.flatMap(({ payload }) => payload.changedResources ?? []),
-        syncMode:
-          calendarResponses.length > 0 &&
-          calendarResponses.every(({ payload }) => payload.syncMode === calendarResponses[0]?.payload.syncMode)
-            ? calendarResponses[0]?.payload.syncMode
-            : undefined,
-      };
+            error,
+          });
+
+          throw error;
+        }
+      });
+
+      await Promise.allSettled(calendarLoadPromises);
+
+      if (calendarMonthEventsRequestRef.current !== requestId) {
+        return;
+      }
+
+      if (loadedCalendarResponseMap.size === 0) {
+        throw new Error("Unable to load month calendar events for any calendar.");
+      }
+
+      const mergedPayload = buildMergedPayload();
       console.log("Google Calendar month events response received", {
         label: requestLabel,
         elapsedMs: Math.round(performance.now() - requestStartedAt),
@@ -1960,7 +2257,7 @@ export default function App() {
         changedResourceCount: mergedPayload.changedResources?.length ?? 0,
       });
       console.log("Google Calendar modified resources since last sync", {
-        syncModes: calendarResponses.map(({ calendar, payload }) => ({
+        syncModes: Array.from(loadedCalendarResponseMap.values()).map(({ calendar, payload }) => ({
           calendarId: calendar.id,
           calendarName: calendar.name,
           syncMode: payload.syncMode ?? "unknown",
@@ -1969,22 +2266,35 @@ export default function App() {
       });
       setCalendarMonthEvents(mergedPayload);
     } catch (error) {
+      if (calendarMonthEventsRequestRef.current !== requestId) {
+        return;
+      }
       setCalendarMonthEvents(null);
       setCalendarEventFormStatus(
         await getErrorMessage(error, "Unable to load month calendar events."),
       );
+    } finally {
+      if (calendarMonthEventsRequestRef.current === requestId) {
+        setIsCalendarMonthLoading(false);
+      }
     }
   };
 
   const closeCalendarEventModal = () => {
     setCalendarMonthSelectedDate(null);
     setSelectedCalendarMonthEvent(null);
+    setCalendarCongregationQuery("");
+    setSelectedCongregationDirectoryItems([]);
+    setPendingCalendarCongregationEntries([]);
     setCalendarEventForm(initialCalendarEventForm);
   };
 
   const openCalendarEventCreateModal = (dateValue: string) => {
     setSelectedCalendarMonthEvent(null);
     setCalendarMonthSelectedDate(dateValue);
+    setCalendarCongregationQuery("");
+    setSelectedCongregationDirectoryItems([]);
+    setPendingCalendarCongregationEntries([]);
     setCalendarEventForm((current) => ({
       ...current,
       startTime: current.startTime || "09:00",
@@ -1997,14 +2307,22 @@ export default function App() {
     const eventDateValue = formatDateInputValue(
       parseCalendarEventDateValue(eventItem.start, eventItem.isAllDay),
     );
+    const extractedDetails = extractCalendarEventCongregationDetails(eventItem.description);
     setSelectedCalendarMonthEvent(eventItem);
     setCalendarMonthSelectedDate(eventDateValue);
+    setCalendarCongregationQuery("");
+    setSelectedCongregationDirectoryItems(eventItem.congregationItems ?? []);
+    setPendingCalendarCongregationEntries(
+      eventItem.congregationItems?.length
+        ? []
+        : extractedDetails.congregationEntries,
+    );
     setCalendarEventForm({
       title: eventItem.title,
       startTime: eventItem.isAllDay ? "09:00" : formatTimeInputValue(eventItem.start),
       endTime: eventItem.isAllDay ? "10:00" : formatTimeInputValue(eventItem.end),
       location: eventItem.location,
-      description: "",
+      description: extractedDetails.description,
     });
     setCalendarEventFormStatus(null);
   };
@@ -2059,6 +2377,11 @@ export default function App() {
             end,
             timeZone,
             location: calendarEventForm.location.trim(),
+            description: buildCalendarEventDescription(
+              calendarEventForm.description,
+              selectedCongregationDirectoryItems,
+            ),
+            congregationItems: selectedCongregationDirectoryItems,
             isAllDay,
           })
         : await authorizedPost("/calendar/google/events/create", {
@@ -2068,13 +2391,17 @@ export default function App() {
             end,
             timeZone,
             location: calendarEventForm.location.trim(),
-            description: calendarEventForm.description.trim(),
+            description: buildCalendarEventDescription(
+              calendarEventForm.description,
+              selectedCongregationDirectoryItems,
+            ),
+            congregationItems: selectedCongregationDirectoryItems,
           });
       const payload = (await response.body.json()) as
         | GoogleCalendarCreateEventResponse
         | GoogleCalendarUpdateEventResponse;
       setCalendarEventFormStatus(payload.message);
-      await loadGoogleCalendarMonthEvents();
+      await loadGoogleCalendarMonthEvents({ useSyncCache: false });
       if (activePage === "calendar-schedule") {
         await loadGoogleCalendarAvailability();
       }
@@ -2108,7 +2435,7 @@ export default function App() {
       });
       const payload = (await response.body.json()) as GoogleCalendarDeleteEventResponse;
       setCalendarEventFormStatus(payload.message);
-      await loadGoogleCalendarMonthEvents();
+      await loadGoogleCalendarMonthEvents({ useSyncCache: false });
       if (activePage === "calendar-schedule") {
         await loadGoogleCalendarAvailability();
       }
@@ -2738,6 +3065,7 @@ export default function App() {
 
     void loadGoogleCalendarConnection();
     void loadGoogleCalendars();
+    void loadCongregationDirectory();
   }, [activePage, authStatus]);
 
   useEffect(() => {
@@ -2777,6 +3105,34 @@ export default function App() {
     googleCalendars,
     calendarMonthViewDate,
   ]);
+
+  useEffect(() => {
+    if (pendingCalendarCongregationEntries.length === 0 || congregationDirectory.length === 0) {
+      return;
+    }
+
+    const matchedItems = pendingCalendarCongregationEntries
+      .map((entry) => {
+        const normalizedEntryName = entry.name.trim().toLowerCase();
+        const normalizedEntryPhone = normalizeCongregationPhone(entry.phone);
+
+        return congregationDirectory.find((item) => {
+          const normalizedItemName = formatCongregationDirectoryItemLabel(item)
+            .trim()
+            .toLowerCase();
+          const normalizedItemPhone = normalizeCongregationPhone(item.phone);
+
+          return (
+            normalizedItemName === normalizedEntryName &&
+            (!normalizedEntryPhone || normalizedItemPhone === normalizedEntryPhone)
+          );
+        });
+      })
+      .filter((item): item is CongregationDirectoryItem => item !== undefined);
+
+    setSelectedCongregationDirectoryItems(matchedItems);
+    setPendingCalendarCongregationEntries([]);
+  }, [congregationDirectory, pendingCalendarCongregationEntries]);
 
   useEffect(() => {
     if (authStatus !== "signed-in" || typeof window === "undefined") {
@@ -6346,7 +6702,7 @@ export default function App() {
                           }}
                           aria-label="Refresh month view"
                           title="Refresh month view"
-                          disabled={isCalendarAvailabilityLoading}
+                          disabled={isCalendarMonthLoading}
                         >
                           ↻
                         </button>
@@ -6402,7 +6758,11 @@ export default function App() {
                             }}
                           >
                             <div className="visitation-calendar-day-header">
-                              <p className="visitation-calendar-day-number">{day.getDate()}</p>
+                              <p className="visitation-calendar-day-number">
+                                {isCompactMobileViewport
+                                  ? formatCompactCalendarDayLabel(day)
+                                  : day.getDate()}
+                              </p>
                               {dayEvents.length > 0 ? (
                                 <p className="visitation-calendar-day-count">
                                   {dayEvents.length}
@@ -6432,21 +6792,41 @@ export default function App() {
                                       openCalendarEventEditModal(eventItem);
                                     }}
                                   >
-                                    <span
-                                      className="calendar-month-event-dot"
-                                      aria-hidden="true"
-                                      style={{
-                                        backgroundColor:
-                                          eventItem.calendarColor || "var(--accent-strong)",
-                                      }}
-                                    />
-                                    <span className="visitation-calendar-event-time">
-                                      {eventItem.isAllDay
-                                        ? "All day"
-                                        : formatTimeLabel(eventItem.start)}
+                                    <span className="calendar-month-event-row">
+                                      <span
+                                        className="calendar-month-event-dot"
+                                        aria-hidden="true"
+                                        style={{
+                                          backgroundColor:
+                                            eventItem.calendarColor || "var(--accent-strong)",
+                                        }}
+                                      />
+                                      <span className="visitation-calendar-event-time">
+                                        {eventItem.isAllDay
+                                          ? "All day"
+                                          : formatTimeLabel(eventItem.start)}
+                                      </span>
+                                      <span className="visitation-calendar-event-name">
+                                        {eventItem.title}
+                                      </span>
                                     </span>
-                                    <span className="visitation-calendar-event-name">
-                                      {eventItem.title}
+                                    <span className="calendar-month-event-hover-details">
+                                      <span className="calendar-month-event-hover-title">
+                                        {eventItem.title}
+                                      </span>
+                                      <span>
+                                        {formatEventDateTimeLabel(
+                                          eventItem.start,
+                                          eventItem.end,
+                                          eventItem.isAllDay,
+                                        )}
+                                      </span>
+                                      {eventItem.calendarName ? (
+                                        <span>Calendar: {eventItem.calendarName}</span>
+                                      ) : null}
+                                      {eventItem.location ? (
+                                        <span>Location: {eventItem.location}</span>
+                                      ) : null}
                                     </span>
                                   </button>
                                 ))
@@ -7634,8 +8014,18 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="calendar-booking-modal-title"
+            aria-busy={isCalendarEventSubmitting || isCalendarEventDeleting}
             onClick={(event) => event.stopPropagation()}
           >
+            <button
+              type="button"
+              className="calendar-booking-close-button"
+              onClick={closeCalendarEventModal}
+              disabled={isCalendarEventSubmitting || isCalendarEventDeleting}
+              aria-label="Close event modal"
+            >
+              ×
+            </button>
             <div className="member-form-header visitation-calendar-schedule-header">
               <div>
                 <p className="member-form-mode">
@@ -7658,13 +8048,6 @@ export default function App() {
                   </p>
                 ) : null}
               </div>
-              <button
-                type="button"
-                className="member-cancel-button"
-                onClick={closeCalendarEventModal}
-              >
-                Close
-              </button>
             </div>
 
             <form className="modal-form calendar-booking-form" onSubmit={handleCalendarEventSubmit}>
@@ -7676,6 +8059,85 @@ export default function App() {
                     value={calendarMonthSelectedDate}
                     onChange={(event) => setCalendarMonthSelectedDate(event.target.value)}
                   />
+                </label>
+
+                <label className="member-field member-field-full">
+                  <span>Congregation</span>
+                  <input
+                    type="text"
+                    value={calendarCongregationQuery}
+                    onChange={(event) => {
+                      setCalendarCongregationQuery(event.target.value);
+                    }}
+                    placeholder="Search congregation directory"
+                    autoComplete="off"
+                  />
+                  {selectedCongregationDirectoryItems.length > 0 ? (
+                    <div className="calendar-congregation-selection-list">
+                      {selectedCongregationDirectoryItems.map((item) => (
+                        <button
+                          key={`${item.pk}-${item.sk}`}
+                          type="button"
+                          className="calendar-congregation-selection-chip"
+                          onClick={() => {
+                            setSelectedCongregationDirectoryItems((current) =>
+                              current.filter(
+                                (selectedItem) =>
+                                  !(
+                                    selectedItem.pk === item.pk &&
+                                    selectedItem.sk === item.sk
+                                  ),
+                              ),
+                            );
+                          }}
+                        >
+                          <span className="calendar-congregation-selection-chip-primary">
+                            {formatCongregationDirectoryItemLabel(item)}
+                          </span>
+                          <span className="calendar-congregation-selection-chip-secondary">
+                            {formatCongregationDirectoryItemSubLabel(item)}
+                          </span>
+                          <span
+                            className="calendar-congregation-selection-chip-remove"
+                            aria-hidden="true"
+                          >
+                            ×
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {filteredCalendarCongregationSuggestions.length > 0 ? (
+                    <div className="calendar-congregation-suggestions">
+                      {filteredCalendarCongregationSuggestions.map((item) => (
+                        <button
+                          key={`${item.pk}-${item.sk}`}
+                          type="button"
+                          className="calendar-congregation-suggestion"
+                          onClick={() => {
+                            setSelectedCongregationDirectoryItems((current) => [
+                              ...current,
+                              item,
+                            ]);
+                            setCalendarCongregationQuery("");
+                          }}
+                        >
+                          <span className="calendar-congregation-suggestion-primary">
+                            {formatCongregationDirectoryItemLabel(item)}
+                          </span>
+                          <span className="calendar-congregation-suggestion-secondary">
+                            {formatCongregationDirectoryItemSubLabel(item)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {normalizedCalendarCongregationQuery &&
+                  filteredCalendarCongregationSuggestions.length === 0 ? (
+                    <p className="calendar-congregation-selection">
+                      No matching congregation entries found.
+                    </p>
+                  ) : null}
                 </label>
 
                 <label className="member-field member-field-full">
@@ -7745,25 +8207,33 @@ export default function App() {
                   />
                 </label>
 
-                {!selectedCalendarMonthEvent ? (
-                  <label className="member-field member-field-full">
-                    <span>Description</span>
-                    <textarea
-                      rows={4}
-                      value={calendarEventForm.description}
-                      onChange={(event) =>
-                        setCalendarEventForm((current) => ({
-                          ...current,
-                          description: event.target.value,
-                        }))
-                      }
-                      placeholder="Optional description"
-                    />
-                  </label>
-                ) : null}
+                <label className="member-field member-field-full">
+                  <span>Description</span>
+                  <textarea
+                    rows={4}
+                    value={calendarEventForm.description}
+                    onChange={(event) =>
+                      setCalendarEventForm((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                    placeholder="Optional description"
+                  />
+                </label>
               </div>
 
               <div className="modal-actions">
+                {isCalendarEventSubmitting ? (
+                  <p className="modal-submit-message">
+                    {selectedCalendarMonthEvent
+                      ? "Saving changes..."
+                      : "Booking event..."}
+                  </p>
+                ) : null}
+                {isCalendarEventDeleting ? (
+                  <p className="modal-submit-message">Deleting event...</p>
+                ) : null}
                 {selectedCalendarMonthEvent ? (
                   <button
                     type="button"
@@ -7779,11 +8249,15 @@ export default function App() {
                 <button
                   type="button"
                   className="modal-secondary-button"
+                  disabled={isCalendarEventSubmitting || isCalendarEventDeleting}
                   onClick={() => {
                     if (selectedCalendarMonthEvent) {
                       openCalendarEventEditModal(selectedCalendarMonthEvent);
                     } else {
                       setCalendarEventForm(initialCalendarEventForm);
+                      setCalendarCongregationQuery("");
+                      setSelectedCongregationDirectoryItems([]);
+                      setPendingCalendarCongregationEntries([]);
                       setCalendarEventFormStatus(null);
                     }
                   }}
@@ -7797,8 +8271,8 @@ export default function App() {
                 >
                   {isCalendarEventSubmitting
                     ? selectedCalendarMonthEvent
-                      ? "Saving..."
-                      : "Booking..."
+                      ? "Saving Changes..."
+                      : "Booking Event..."
                     : selectedCalendarMonthEvent
                       ? "Save Changes"
                       : "Book Event"}

@@ -11,6 +11,27 @@ const normalizeLicensePlate = (value) => normalizeWhitespace(value).replace(/[\s
 const isParkingMonthValue = (value) => /^\d{4}-\d{2}$/.test(value ?? "");
 const normalizeName = (firstName, lastName, displayName) => normalizeWhitespace([firstName, lastName].filter(Boolean).join(" ") || displayName || "").toLowerCase();
 const getStoredMemberName = (firstName, lastName) => [firstName, lastName].filter(Boolean).join(" ").trim();
+const normalizeGoogleCalendarCongregationMetadataItems = (items) => (items ?? [])
+    .map((item) => ({
+    pk: normalizeWhitespace(item.pk),
+    sk: normalizeWhitespace(item.sk),
+    firstName: normalizeWhitespace(item.firstName),
+    lastName: normalizeWhitespace(item.lastName),
+    phone: normalizeWhitespace(item.phone),
+}))
+    .filter((item) => item.pk && item.sk);
+const parseGoogleCalendarCongregationMetadata = (value) => {
+    if (!value) {
+        return [];
+    }
+    try {
+        const parsed = JSON.parse(value);
+        return normalizeGoogleCalendarCongregationMetadataItems(parsed);
+    }
+    catch {
+        return [];
+    }
+};
 const isActiveParkingPlacementStatus = (value) => value === "assigned" || value === "available" || value === "active";
 const decodeVcfValue = (value) => value
     .replace(/\\n/gi, "\n")
@@ -148,9 +169,11 @@ const googleOauthStatePk = "CALENDAR_OAUTH_STATE";
 const googleEventSyncPkPrefix = "CALENDAR_EVENT_SYNC";
 const googleEventSyncStateSk = "SYNC_STATE";
 const googleEventSyncMonthSkPrefix = "MONTH";
+const googleCalendarCongregationMetadataKey = "shepherdHubCongregation";
 const googleOauthStateTtlMs = 10 * 60 * 1000;
 const googleAccessTokenExpiryBufferMs = 60 * 1000;
 const googleCalendarMonthCacheTargetBytes = 350 * 1024;
+const googleCalendarCacheFreshMs = 2 * 60 * 1000;
 const getRequestGroups = (event) => {
     const claims = event.requestContext
         .authorizer?.jwt?.claims ?? {};
@@ -362,12 +385,14 @@ const normalizeGoogleCalendarEvent = (item) => {
         status: item.status ?? "",
         htmlLink: item.htmlLink ?? "",
         location: item.location ?? "",
+        description: item.description ?? "",
         eventType: item.eventType ?? "default",
         visibility: item.visibility ?? "default",
         start,
         end,
         isAllDay: Boolean(item.start?.date && !item.start?.dateTime),
         organizer: item.organizer?.displayName || item.organizer?.email || "",
+        congregationItems: parseGoogleCalendarCongregationMetadata(item.extendedProperties?.private?.[googleCalendarCongregationMetadataKey]),
     };
 };
 const getGoogleCalendarEventMonthKey = (event) => event.start.slice(0, 7);
@@ -860,7 +885,8 @@ const getCachedGoogleCalendarEventsForRange = async ({ tableName, userKey, calen
     });
     return items;
 };
-const createGoogleCalendarEvent = async ({ accessToken, calendarId, title, start, end, timeZone, location, description, }) => {
+const createGoogleCalendarEvent = async ({ accessToken, calendarId, title, start, end, timeZone, location, description, congregationItems, }) => {
+    const normalizedCongregationItems = normalizeGoogleCalendarCongregationMetadataItems(congregationItems);
     const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`, {
         method: "POST",
         headers: {
@@ -871,6 +897,13 @@ const createGoogleCalendarEvent = async ({ accessToken, calendarId, title, start
             summary: title,
             location,
             description,
+            extendedProperties: normalizedCongregationItems.length > 0
+                ? {
+                    private: {
+                        [googleCalendarCongregationMetadataKey]: JSON.stringify(normalizedCongregationItems),
+                    },
+                }
+                : undefined,
             start: {
                 dateTime: start,
                 timeZone,
@@ -891,15 +924,20 @@ const createGoogleCalendarEvent = async ({ accessToken, calendarId, title, start
         status: responseBody.status ?? "",
         htmlLink: responseBody.htmlLink ?? "",
         location: responseBody.location ?? location ?? "",
+        description: responseBody.description ?? description ?? "",
         eventType: responseBody.eventType ?? "default",
         visibility: responseBody.visibility ?? "default",
         start: responseBody.start?.dateTime || responseBody.start?.date || start,
         end: responseBody.end?.dateTime || responseBody.end?.date || end,
         isAllDay: Boolean(responseBody.start?.date && !responseBody.start?.dateTime),
         organizer: responseBody.organizer?.displayName || responseBody.organizer?.email || "",
+        congregationItems: parseGoogleCalendarCongregationMetadata(responseBody.extendedProperties?.private?.[googleCalendarCongregationMetadataKey]).length > 0
+            ? parseGoogleCalendarCongregationMetadata(responseBody.extendedProperties?.private?.[googleCalendarCongregationMetadataKey])
+            : normalizedCongregationItems,
     };
 };
-const updateGoogleCalendarEvent = async ({ accessToken, calendarId, eventId, title, start, end, timeZone, location, isAllDay, }) => {
+const updateGoogleCalendarEvent = async ({ accessToken, calendarId, eventId, title, start, end, timeZone, location, description, congregationItems, isAllDay, }) => {
+    const normalizedCongregationItems = normalizeGoogleCalendarCongregationMetadataItems(congregationItems);
     const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
         method: "PATCH",
         headers: {
@@ -909,6 +947,14 @@ const updateGoogleCalendarEvent = async ({ accessToken, calendarId, eventId, tit
         body: JSON.stringify({
             summary: title,
             location,
+            description,
+            extendedProperties: {
+                private: {
+                    [googleCalendarCongregationMetadataKey]: normalizedCongregationItems.length > 0
+                        ? JSON.stringify(normalizedCongregationItems)
+                        : "",
+                },
+            },
             ...(isAllDay
                 ? {
                     start: {
@@ -940,12 +986,16 @@ const updateGoogleCalendarEvent = async ({ accessToken, calendarId, eventId, tit
         status: responseBody.status ?? "",
         htmlLink: responseBody.htmlLink ?? "",
         location: responseBody.location ?? location ?? "",
+        description: responseBody.description ?? description ?? "",
         eventType: responseBody.eventType ?? "default",
         visibility: responseBody.visibility ?? "default",
         start: responseBody.start?.dateTime || responseBody.start?.date || start,
         end: responseBody.end?.dateTime || responseBody.end?.date || end,
         isAllDay: Boolean(responseBody.start?.date && !responseBody.start?.dateTime),
         organizer: responseBody.organizer?.displayName || responseBody.organizer?.email || "",
+        congregationItems: parseGoogleCalendarCongregationMetadata(responseBody.extendedProperties?.private?.[googleCalendarCongregationMetadataKey]).length > 0
+            ? parseGoogleCalendarCongregationMetadata(responseBody.extendedProperties?.private?.[googleCalendarCongregationMetadataKey])
+            : normalizedCongregationItems,
     };
 };
 const deleteGoogleCalendarEvent = async ({ accessToken, calendarId, eventId, }) => {
@@ -1425,6 +1475,8 @@ export const handler = async (event) => {
             const timeZone = normalizeWhitespace(payload.timeZone);
             const calendarId = normalizeWhitespace(payload.calendarId) || "primary";
             const useSyncCache = payload.useSyncCache === true;
+            const cacheOnly = payload.cacheOnly === true;
+            const forceSync = payload.forceSync === true;
             const selectedYearMonth = normalizeWhitespace(payload.selectedYearMonth);
             console.log("Google Calendar events request received.", {
                 requestPath,
@@ -1434,6 +1486,8 @@ export const handler = async (event) => {
                 timeMax,
                 timeZone: timeZone || null,
                 useSyncCache,
+                cacheOnly,
+                forceSync,
                 selectedYearMonth: selectedYearMonth || null,
             });
             if (!timeMin || !timeMax) {
@@ -1494,6 +1548,57 @@ export const handler = async (event) => {
                 const items = useSyncCache
                     ? await (async () => {
                         try {
+                            const syncState = await getGoogleCalendarSyncState(tableName, requestUserKey, calendarId);
+                            if (cacheOnly) {
+                                console.log("Serving Google Calendar events from DynamoDB cache only.", {
+                                    calendarId,
+                                    userKey: requestUserKey,
+                                    selectedYearMonth: selectedYearMonth || null,
+                                    hasSyncToken: Boolean(syncState?.syncToken),
+                                });
+                                const cachedItems = await getCachedGoogleCalendarEventsForRange({
+                                    tableName,
+                                    userKey: requestUserKey,
+                                    calendarId,
+                                    timeMin,
+                                    timeMax,
+                                    selectedYearMonth: selectedYearMonth || undefined,
+                                });
+                                return {
+                                    items: cachedItems,
+                                    changedResources: [],
+                                    syncMode: "cached",
+                                };
+                            }
+                            const syncStateAgeMs = syncState?.lastSyncedAt
+                                ? Date.parse(time) - Date.parse(syncState.lastSyncedAt)
+                                : Number.NaN;
+                            const shouldServeFreshCacheOnly = !forceSync &&
+                                Boolean(syncState?.syncToken) &&
+                                Number.isFinite(syncStateAgeMs) &&
+                                syncStateAgeMs >= 0 &&
+                                syncStateAgeMs < googleCalendarCacheFreshMs;
+                            if (shouldServeFreshCacheOnly) {
+                                console.log("Serving Google Calendar events directly from fresh DynamoDB cache.", {
+                                    calendarId,
+                                    userKey: requestUserKey,
+                                    selectedYearMonth: selectedYearMonth || null,
+                                    syncStateAgeMs,
+                                });
+                                const cachedItems = await getCachedGoogleCalendarEventsForRange({
+                                    tableName,
+                                    userKey: requestUserKey,
+                                    calendarId,
+                                    timeMin,
+                                    timeMax,
+                                    selectedYearMonth: selectedYearMonth || undefined,
+                                });
+                                return {
+                                    items: cachedItems,
+                                    changedResources: [],
+                                    syncMode: "cached",
+                                };
+                            }
                             const syncResult = await syncGoogleCalendarEventCache({
                                 tableName,
                                 time,
@@ -1611,6 +1716,7 @@ export const handler = async (event) => {
             const timeZone = normalizeWhitespace(payload.timeZone);
             const location = normalizeWhitespace(payload.location);
             const description = normalizeWhitespace(payload.description);
+            const congregationItems = normalizeGoogleCalendarCongregationMetadataItems(payload.congregationItems);
             if (!title || !start || !end) {
                 return {
                     statusCode: 400,
@@ -1661,6 +1767,7 @@ export const handler = async (event) => {
                     timeZone,
                     location,
                     description,
+                    congregationItems,
                 });
                 return {
                     statusCode: 201,
@@ -1703,6 +1810,8 @@ export const handler = async (event) => {
             const end = normalizeWhitespace(payload.end);
             const timeZone = normalizeWhitespace(payload.timeZone);
             const location = normalizeWhitespace(payload.location);
+            const description = normalizeWhitespace(payload.description);
+            const congregationItems = normalizeGoogleCalendarCongregationMetadataItems(payload.congregationItems);
             const isAllDay = payload.isAllDay === true;
             if (!eventId || !title || !start || !end) {
                 return {
@@ -1758,6 +1867,8 @@ export const handler = async (event) => {
                     end,
                     timeZone,
                     location,
+                    description,
+                    congregationItems,
                     isAllDay,
                 });
                 return {
@@ -3153,6 +3264,47 @@ export const handler = async (event) => {
             headers: responseHeaders,
             body: JSON.stringify({
                 message: "Parking registrations loaded.",
+                time,
+                items,
+            }),
+        };
+    }
+    if (requestPath.endsWith("/congregation/directory")) {
+        const response = await dynamoClient.send(new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "pk = :pk",
+            ExpressionAttributeValues: {
+                ":pk": "CONGREGATION",
+            },
+        }));
+        const items = (response.Items ?? [])
+            .map((item) => {
+            try {
+                const parsed = JSON.parse(item.data);
+                const firstName = normalizeWhitespace(parsed.firstName);
+                const lastName = normalizeWhitespace(parsed.lastName);
+                if (!firstName && !lastName) {
+                    return null;
+                }
+                return {
+                    pk: item.pk,
+                    sk: item.sk,
+                    firstName,
+                    lastName,
+                    phone: normalizeWhitespace(parsed.phone),
+                };
+            }
+            catch {
+                return null;
+            }
+        })
+            .filter((item) => item !== null)
+            .sort((left, right) => `${left.firstName} ${left.lastName}`.localeCompare(`${right.firstName} ${right.lastName}`));
+        return {
+            statusCode: 200,
+            headers: responseHeaders,
+            body: JSON.stringify({
+                message: "Congregation directory loaded.",
                 time,
                 items,
             }),

@@ -150,6 +150,15 @@ congregationApi.addRoutes({
 });
 
 congregationApi.addRoutes({
+  path: "/congregation/directory",
+  methods: [HttpMethod.GET],
+  integration: new HttpLambdaIntegration(
+    "CongregationDirectoryIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
   path: "/calendar/google/connect/start",
   methods: [HttpMethod.POST],
   integration: new HttpLambdaIntegration(

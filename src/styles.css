@@ -1685,29 +1685,70 @@ button {
 
 .calendar-month-event-chip {
   cursor: default;
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
+  position: relative;
+  z-index: 1;
+  display: block;
   width: 100%;
   border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 12px;
-  padding: 0.42rem 0.5rem;
+  border-radius: 10px;
+  padding: 0.12rem 0.28rem;
   text-align: left;
   transition: transform 140ms ease, box-shadow 140ms ease;
+  overflow: visible;
+}
+
+.calendar-month-event-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
 }
 
 .calendar-month-event-dot {
-  width: 0.65rem;
-  height: 0.65rem;
+  width: 0.5rem;
+  height: 0.5rem;
   border-radius: 999px;
   flex: 0 0 auto;
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 
+.calendar-month-event-hover-details {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.45rem);
+  z-index: 24;
+  display: none;
+  min-width: 220px;
+  max-width: 260px;
+  border-radius: 14px;
+  padding: 0.65rem 0.75rem;
+  background: rgba(15, 23, 42, 0.96);
+  color: #f8fafc;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.24);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.calendar-month-event-hover-details span {
+  display: block;
+}
+
+.calendar-month-event-hover-title {
+  margin-bottom: 0.2rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .calendar-month-event-chip:hover,
 .calendar-month-event-chip:focus-visible {
+  z-index: 32;
   transform: translateY(-1px);
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.calendar-month-event-chip:hover .calendar-month-event-hover-details,
+.calendar-month-event-chip:focus-visible .calendar-month-event-hover-details {
+  display: block;
 }
 
 .calendar-booking-card {
@@ -1716,6 +1757,136 @@ button {
 
 .calendar-booking-empty {
   margin-top: 0;
+}
+
+.calendar-booking-modal {
+  position: relative;
+  padding-top: 2.25rem;
+}
+
+.calendar-booking-close-button {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.calendar-booking-close-button:hover,
+.calendar-booking-close-button:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.24);
+  outline: none;
+}
+
+.calendar-booking-close-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.calendar-booking-modal .member-form-mode,
+.calendar-booking-modal .visitation-calendar-schedule-copy,
+.calendar-booking-modal .member-field span {
+  color: #d9aa34;
+}
+
+.calendar-congregation-selection {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted-light);
+}
+
+.calendar-congregation-selection-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.calendar-congregation-selection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 196, 48, 0.4);
+  background: rgba(244, 196, 48, 0.16);
+  color: #dba93a;
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.calendar-congregation-selection-chip-primary {
+  color: #dba93a;
+  font-weight: 700;
+}
+
+.calendar-congregation-selection-chip-secondary {
+  color: #f1d489;
+}
+
+.calendar-congregation-selection-chip-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  background: rgba(244, 196, 48, 0.22);
+  color: #fff3cf;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.calendar-congregation-selection-chip:hover,
+.calendar-congregation-selection-chip:focus-visible {
+  border-color: rgba(244, 196, 48, 0.6);
+  background: rgba(244, 196, 48, 0.22);
+  outline: none;
+}
+
+.calendar-congregation-suggestions {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.calendar-congregation-suggestion {
+  width: 100%;
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(100, 116, 139, 0.32);
+  background: rgba(248, 250, 252, 0.92);
+  color: #1e293b;
+  text-align: left;
+  font-size: 0.82rem;
+}
+
+.calendar-congregation-suggestion-primary {
+  color: #1e293b;
+  font-weight: 700;
+}
+
+.calendar-congregation-suggestion-secondary {
+  color: #475569;
+  font-size: 0.74rem;
+}
+
+.calendar-congregation-suggestion:hover,
+.calendar-congregation-suggestion:focus-visible {
+  border-color: rgba(217, 170, 52, 0.6);
+  background: #fff4cf;
+  outline: none;
 }
 
 .calendar-schedule-results {
@@ -3519,6 +3690,8 @@ button {
 
 .visitation-calendar-day {
   min-height: 9.5rem;
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 0.6rem;
@@ -3532,10 +3705,12 @@ button {
     transform 140ms ease,
     box-shadow 140ms ease,
     border-color 140ms ease;
+  overflow: visible;
 }
 
 .visitation-calendar-day:hover,
 .visitation-calendar-day:focus-visible {
+  z-index: 12;
   transform: translateY(-2px);
   border-color: rgba(59, 130, 246, 0.24);
   box-shadow: 0 18px 36px rgba(59, 130, 246, 0.12);
@@ -3577,16 +3752,18 @@ button {
 .visitation-calendar-events {
   display: grid;
   align-content: start;
-  gap: 0.45rem;
+  gap: 0.2rem;
+  position: relative;
+  overflow: visible;
 }
 
 .visitation-calendar-event {
   width: 100%;
   display: grid;
-  gap: 0.12rem;
+  gap: 0.02rem;
   border: 1px solid rgba(96, 165, 250, 0.22);
-  border-radius: 14px;
-  padding: 0.5rem 0.55rem;
+  border-radius: 5px;
+  padding: 0.05rem 0.2rem;
   background: rgba(59, 130, 246, 0.12);
   color: var(--dark-card-text);
   text-align: left;
@@ -3602,11 +3779,16 @@ button {
   font-size: 0.72rem;
   font-weight: 700;
   color: var(--muted-light);
+  flex: 0 0 auto;
 }
 
 .visitation-calendar-event-name {
   font-size: 0.84rem;
   font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .visitation-calendar-event-priest {
@@ -4310,6 +4492,15 @@ button {
   .content-panel {
     padding: 0.5rem;
     gap: 1rem;
+  }
+
+  .visitation-calendar-day-header {
+    align-items: flex-start;
+  }
+
+  .visitation-calendar-day-number {
+    font-size: 0.95rem;
+    line-height: 1.2;
   }
 
   .hero-card {

@@ -113,7 +113,17 @@ type GoogleCalendarEventsPayload = {
   timeZone?: string;
   calendarId?: string;
   useSyncCache?: boolean;
+  cacheOnly?: boolean;
+  forceSync?: boolean;
   selectedYearMonth?: string;
+};
+
+type GoogleCalendarCongregationMetadataItem = {
+  pk: string;
+  sk: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
 };
 
 type GoogleCalendarCreateEventPayload = {
@@ -124,6 +134,7 @@ type GoogleCalendarCreateEventPayload = {
   timeZone?: string;
   location?: string;
   description?: string;
+  congregationItems?: GoogleCalendarCongregationMetadataItem[];
 };
 
 type GoogleCalendarUpdateEventPayload = {
@@ -134,12 +145,28 @@ type GoogleCalendarUpdateEventPayload = {
   end: string;
   timeZone?: string;
   location?: string;
+  description?: string;
+  congregationItems?: GoogleCalendarCongregationMetadataItem[];
   isAllDay?: boolean;
 };
 
 type GoogleCalendarDeleteEventPayload = {
   calendarId?: string;
   eventId: string;
+};
+
+type CongregationDirectoryItem = {
+  pk: string;
+  sk: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+};
+
+type CongregationDirectoryResponse = {
+  message: string;
+  time: string;
+  items: CongregationDirectoryItem[];
 };
 
 type UpdateParkingRegistrationStatusPayload = {
@@ -241,12 +268,14 @@ type StoredGoogleCalendarSyncedEventData = {
   status: string;
   htmlLink: string;
   location: string;
+  description: string;
   eventType: string;
   visibility: string;
   start: string;
   end: string;
   isAllDay: boolean;
   organizer: string;
+  congregationItems?: GoogleCalendarCongregationMetadataItem[];
 };
 
 type StoredGoogleCalendarMonthCacheData = {
@@ -385,6 +414,34 @@ const normalizeName = (
 
 const getStoredMemberName = (firstName?: string, lastName?: string) =>
   [firstName, lastName].filter(Boolean).join(" ").trim();
+const normalizeGoogleCalendarCongregationMetadataItems = (
+  items: GoogleCalendarCongregationMetadataItem[] | undefined,
+) =>
+  (items ?? [])
+    .map((item) => ({
+      pk: normalizeWhitespace(item.pk),
+      sk: normalizeWhitespace(item.sk),
+      firstName: normalizeWhitespace(item.firstName),
+      lastName: normalizeWhitespace(item.lastName),
+      phone: normalizeWhitespace(item.phone),
+    }))
+    .filter((item) => item.pk && item.sk);
+
+const parseGoogleCalendarCongregationMetadata = (
+  value: string | undefined,
+): GoogleCalendarCongregationMetadataItem[] => {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as GoogleCalendarCongregationMetadataItem[];
+    return normalizeGoogleCalendarCongregationMetadataItems(parsed);
+  } catch {
+    return [];
+  }
+};
+
 const isActiveParkingPlacementStatus = (value?: string) =>
   value === "assigned" || value === "available" || value === "active";
 
@@ -560,9 +617,11 @@ const googleOauthStatePk = "CALENDAR_OAUTH_STATE";
 const googleEventSyncPkPrefix = "CALENDAR_EVENT_SYNC";
 const googleEventSyncStateSk = "SYNC_STATE";
 const googleEventSyncMonthSkPrefix = "MONTH";
+const googleCalendarCongregationMetadataKey = "shepherdHubCongregation";
 const googleOauthStateTtlMs = 10 * 60 * 1000;
 const googleAccessTokenExpiryBufferMs = 60 * 1000;
 const googleCalendarMonthCacheTargetBytes = 350 * 1024;
+const googleCalendarCacheFreshMs = 2 * 60 * 1000;
 
 const getRequestGroups = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
   const claims =
@@ -871,6 +930,10 @@ const normalizeGoogleCalendarEvent = (item: {
   status?: string;
   htmlLink?: string;
   location?: string;
+  description?: string;
+  extendedProperties?: {
+    private?: Record<string, string | undefined>;
+  };
   eventType?: string;
   visibility?: string;
   start?: {
@@ -903,12 +966,16 @@ const normalizeGoogleCalendarEvent = (item: {
     status: item.status ?? "",
     htmlLink: item.htmlLink ?? "",
     location: item.location ?? "",
+    description: item.description ?? "",
     eventType: item.eventType ?? "default",
     visibility: item.visibility ?? "default",
     start,
     end,
     isAllDay: Boolean(item.start?.date && !item.start?.dateTime),
     organizer: item.organizer?.displayName || item.organizer?.email || "",
+    congregationItems: parseGoogleCalendarCongregationMetadata(
+      item.extendedProperties?.private?.[googleCalendarCongregationMetadataKey],
+    ),
   };
 };
 
@@ -1619,6 +1686,7 @@ const createGoogleCalendarEvent = async ({
   timeZone,
   location,
   description,
+  congregationItems,
 }: {
   accessToken: string;
   calendarId: string;
@@ -1628,7 +1696,11 @@ const createGoogleCalendarEvent = async ({
   timeZone?: string;
   location?: string;
   description?: string;
+  congregationItems?: GoogleCalendarCongregationMetadataItem[];
 }) => {
+  const normalizedCongregationItems = normalizeGoogleCalendarCongregationMetadataItems(
+    congregationItems,
+  );
   const response = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
     {
@@ -1641,6 +1713,16 @@ const createGoogleCalendarEvent = async ({
         summary: title,
         location,
         description,
+        extendedProperties:
+          normalizedCongregationItems.length > 0
+            ? {
+                private: {
+                  [googleCalendarCongregationMetadataKey]: JSON.stringify(
+                    normalizedCongregationItems,
+                  ),
+                },
+              }
+            : undefined,
         start: {
           dateTime: start,
           timeZone,
@@ -1660,6 +1742,10 @@ const createGoogleCalendarEvent = async ({
     status?: string;
     htmlLink?: string;
     location?: string;
+    description?: string;
+    extendedProperties?: {
+      private?: Record<string, string | undefined>;
+    };
     eventType?: string;
     visibility?: string;
     start?: { dateTime?: string; date?: string };
@@ -1677,12 +1763,21 @@ const createGoogleCalendarEvent = async ({
     status: responseBody.status ?? "",
     htmlLink: responseBody.htmlLink ?? "",
     location: responseBody.location ?? location ?? "",
+    description: responseBody.description ?? description ?? "",
     eventType: responseBody.eventType ?? "default",
     visibility: responseBody.visibility ?? "default",
     start: responseBody.start?.dateTime || responseBody.start?.date || start,
     end: responseBody.end?.dateTime || responseBody.end?.date || end,
     isAllDay: Boolean(responseBody.start?.date && !responseBody.start?.dateTime),
     organizer: responseBody.organizer?.displayName || responseBody.organizer?.email || "",
+    congregationItems:
+      parseGoogleCalendarCongregationMetadata(
+        responseBody.extendedProperties?.private?.[googleCalendarCongregationMetadataKey],
+      ).length > 0
+        ? parseGoogleCalendarCongregationMetadata(
+            responseBody.extendedProperties?.private?.[googleCalendarCongregationMetadataKey],
+          )
+        : normalizedCongregationItems,
   };
 };
 
@@ -1695,6 +1790,8 @@ const updateGoogleCalendarEvent = async ({
   end,
   timeZone,
   location,
+  description,
+  congregationItems,
   isAllDay,
 }: {
   accessToken: string;
@@ -1705,8 +1802,13 @@ const updateGoogleCalendarEvent = async ({
   end: string;
   timeZone?: string;
   location?: string;
+  description?: string;
+  congregationItems?: GoogleCalendarCongregationMetadataItem[];
   isAllDay?: boolean;
 }) => {
+  const normalizedCongregationItems = normalizeGoogleCalendarCongregationMetadataItems(
+    congregationItems,
+  );
   const response = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
     {
@@ -1718,6 +1820,15 @@ const updateGoogleCalendarEvent = async ({
       body: JSON.stringify({
         summary: title,
         location,
+        description,
+        extendedProperties: {
+          private: {
+            [googleCalendarCongregationMetadataKey]:
+              normalizedCongregationItems.length > 0
+                ? JSON.stringify(normalizedCongregationItems)
+                : "",
+          },
+        },
         ...(isAllDay
           ? {
               start: {
@@ -1748,6 +1859,10 @@ const updateGoogleCalendarEvent = async ({
     status?: string;
     htmlLink?: string;
     location?: string;
+    description?: string;
+    extendedProperties?: {
+      private?: Record<string, string | undefined>;
+    };
     eventType?: string;
     visibility?: string;
     start?: { dateTime?: string; date?: string };
@@ -1765,12 +1880,21 @@ const updateGoogleCalendarEvent = async ({
     status: responseBody.status ?? "",
     htmlLink: responseBody.htmlLink ?? "",
     location: responseBody.location ?? location ?? "",
+    description: responseBody.description ?? description ?? "",
     eventType: responseBody.eventType ?? "default",
     visibility: responseBody.visibility ?? "default",
     start: responseBody.start?.dateTime || responseBody.start?.date || start,
     end: responseBody.end?.dateTime || responseBody.end?.date || end,
     isAllDay: Boolean(responseBody.start?.date && !responseBody.start?.dateTime),
     organizer: responseBody.organizer?.displayName || responseBody.organizer?.email || "",
+    congregationItems:
+      parseGoogleCalendarCongregationMetadata(
+        responseBody.extendedProperties?.private?.[googleCalendarCongregationMetadataKey],
+      ).length > 0
+        ? parseGoogleCalendarCongregationMetadata(
+            responseBody.extendedProperties?.private?.[googleCalendarCongregationMetadataKey],
+          )
+        : normalizedCongregationItems,
   };
 };
 
@@ -2390,6 +2514,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       const timeZone = normalizeWhitespace(payload.timeZone);
       const calendarId = normalizeWhitespace(payload.calendarId) || "primary";
       const useSyncCache = payload.useSyncCache === true;
+      const cacheOnly = payload.cacheOnly === true;
+      const forceSync = payload.forceSync === true;
       const selectedYearMonth = normalizeWhitespace(payload.selectedYearMonth);
 
       console.log("Google Calendar events request received.", {
@@ -2400,6 +2526,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         timeMax,
         timeZone: timeZone || null,
         useSyncCache,
+        cacheOnly,
+        forceSync,
         selectedYearMonth: selectedYearMonth || null,
       });
 
@@ -2468,6 +2596,64 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         const items = useSyncCache
           ? await (async () => {
               try {
+                const syncState = await getGoogleCalendarSyncState(tableName, requestUserKey, calendarId);
+
+                if (cacheOnly) {
+                  console.log("Serving Google Calendar events from DynamoDB cache only.", {
+                    calendarId,
+                    userKey: requestUserKey,
+                    selectedYearMonth: selectedYearMonth || null,
+                    hasSyncToken: Boolean(syncState?.syncToken),
+                  });
+                  const cachedItems = await getCachedGoogleCalendarEventsForRange({
+                    tableName,
+                    userKey: requestUserKey,
+                    calendarId,
+                    timeMin,
+                    timeMax,
+                    selectedYearMonth: selectedYearMonth || undefined,
+                  });
+
+                  return {
+                    items: cachedItems,
+                    changedResources: [] as GoogleCalendarSyncChangedResource[],
+                    syncMode: "cached" as const,
+                  };
+                }
+
+                const syncStateAgeMs = syncState?.lastSyncedAt
+                  ? Date.parse(time) - Date.parse(syncState.lastSyncedAt)
+                  : Number.NaN;
+                const shouldServeFreshCacheOnly =
+                  !forceSync &&
+                  Boolean(syncState?.syncToken) &&
+                  Number.isFinite(syncStateAgeMs) &&
+                  syncStateAgeMs >= 0 &&
+                  syncStateAgeMs < googleCalendarCacheFreshMs;
+
+                if (shouldServeFreshCacheOnly) {
+                  console.log("Serving Google Calendar events directly from fresh DynamoDB cache.", {
+                    calendarId,
+                    userKey: requestUserKey,
+                    selectedYearMonth: selectedYearMonth || null,
+                    syncStateAgeMs,
+                  });
+                  const cachedItems = await getCachedGoogleCalendarEventsForRange({
+                    tableName,
+                    userKey: requestUserKey,
+                    calendarId,
+                    timeMin,
+                    timeMax,
+                    selectedYearMonth: selectedYearMonth || undefined,
+                  });
+
+                  return {
+                    items: cachedItems,
+                    changedResources: [] as GoogleCalendarSyncChangedResource[],
+                    syncMode: "cached" as const,
+                  };
+                }
+
                 const syncResult = await syncGoogleCalendarEventCache({
                   tableName,
                   time,
@@ -2590,6 +2776,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       const timeZone = normalizeWhitespace(payload.timeZone);
       const location = normalizeWhitespace(payload.location);
       const description = normalizeWhitespace(payload.description);
+      const congregationItems = normalizeGoogleCalendarCongregationMetadataItems(
+        payload.congregationItems,
+      );
 
       if (!title || !start || !end) {
         return {
@@ -2647,6 +2836,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           timeZone,
           location,
           description,
+          congregationItems,
         });
 
         return {
@@ -2692,6 +2882,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       const end = normalizeWhitespace(payload.end);
       const timeZone = normalizeWhitespace(payload.timeZone);
       const location = normalizeWhitespace(payload.location);
+      const description = normalizeWhitespace(payload.description);
+      const congregationItems = normalizeGoogleCalendarCongregationMetadataItems(
+        payload.congregationItems,
+      );
       const isAllDay = payload.isAllDay === true;
 
       if (!eventId || !title || !start || !end) {
@@ -2754,6 +2948,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           end,
           timeZone,
           location,
+          description,
+          congregationItems,
           isAllDay,
         });
 
@@ -4477,6 +4673,57 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         time,
         items,
       } satisfies ParkingRegistrationsResponse),
+    };
+  }
+
+  if (requestPath.endsWith("/congregation/directory")) {
+    const response = await dynamoClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: {
+          ":pk": "CONGREGATION",
+        },
+      }),
+    );
+
+    const items = ((response.Items ?? []) as TableRow[])
+      .map((item) => {
+        try {
+          const parsed = JSON.parse(item.data) as StoredMemberData;
+          const firstName = normalizeWhitespace(parsed.firstName);
+          const lastName = normalizeWhitespace(parsed.lastName);
+
+          if (!firstName && !lastName) {
+            return null;
+          }
+
+          return {
+            pk: item.pk,
+            sk: item.sk,
+            firstName,
+            lastName,
+            phone: normalizeWhitespace(parsed.phone),
+          } satisfies CongregationDirectoryItem;
+        } catch {
+          return null;
+        }
+      })
+      .filter((item): item is CongregationDirectoryItem => item !== null)
+      .sort((left, right) =>
+        `${left.firstName} ${left.lastName}`.localeCompare(
+          `${right.firstName} ${right.lastName}`,
+        ),
+      );
+
+    return {
+      statusCode: 200,
+      headers: responseHeaders,
+      body: JSON.stringify({
+        message: "Congregation directory loaded.",
+        time,
+        items,
+      } satisfies CongregationDirectoryResponse),
     };
   }
 
