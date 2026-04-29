@@ -163,8 +163,8 @@ const navSections: Array<{
     items: [
       { key: "calendar-dashboard", label: "Dashboard" },
       { key: "calendar-connect", label: "Connect Calendar" },
-      { key: "calendar-month", label: "Month View" },
-      { key: "calendar-schedule", label: "Schedule" },
+      { key: "calendar-month", label: "Schedule" },
+      { key: "calendar-schedule", label: "Free time" },
       { key: "calendar-reporting", label: "Reporting" },
     ],
   },
@@ -545,6 +545,12 @@ type GoogleCalendarDeleteEventResponse = {
   eventId: string;
 };
 
+type CalendarDashboardSummary = {
+  weekEventCount: number;
+  monthEventCount: number;
+  upcomingEvents: GoogleCalendarEventItem[];
+};
+
 type CongregationDirectoryResponse = {
   message: string;
   time: string;
@@ -781,6 +787,12 @@ const addDaysToDateInputValue = (dateValue: string, daysToAdd: number) => {
   const nextDate = new Date(year, (month || 1) - 1, day || 1, 0, 0, 0, 0);
   nextDate.setDate(nextDate.getDate() + daysToAdd);
   return formatDateInputValue(nextDate);
+};
+
+const startOfWeek = (value = new Date()) => {
+  const nextDate = new Date(value.getFullYear(), value.getMonth(), value.getDate(), 0, 0, 0, 0);
+  nextDate.setDate(nextDate.getDate() - nextDate.getDay());
+  return nextDate;
 };
 
 const getAllDayEventSpanDays = (start: string, end: string) => {
@@ -1216,7 +1228,6 @@ const extractGroupsFromClaim = (value: unknown) => {
 };
 
 const placeholderPages: PageKey[] = [
-  "calendar-dashboard",
   "calendar-reporting",
   "events",
   "sunday-school",
@@ -1286,6 +1297,7 @@ const getIsCompactMobileViewport = () =>
 export default function App() {
   const sidePanelRef = useRef<HTMLElement | null>(null);
   const betaMemberMenuRef = useRef<HTMLDivElement | null>(null);
+  const calendarBookingModalRef = useRef<HTMLDivElement | null>(null);
   const memberContextMenuRef = useRef<HTMLDivElement | null>(null);
   const contactsImportInputRef = useRef<HTMLInputElement | null>(null);
   const memberPhotoInputRef = useRef<HTMLInputElement | null>(null);
@@ -1351,6 +1363,10 @@ export default function App() {
   const [calendarEvents, setCalendarEvents] = useState<GoogleCalendarEventsResponse | null>(null);
   const [calendarMonthEvents, setCalendarMonthEvents] =
     useState<GoogleCalendarEventsResponse | null>(null);
+  const [calendarDashboardSummary, setCalendarDashboardSummary] =
+    useState<CalendarDashboardSummary | null>(null);
+  const [calendarDashboardStatus, setCalendarDashboardStatus] = useState<string | null>(null);
+  const [isCalendarDashboardLoading, setIsCalendarDashboardLoading] = useState(false);
   const [isCalendarMonthLoading, setIsCalendarMonthLoading] = useState(false);
   const [calendarEventForm, setCalendarEventForm] =
     useState<CalendarEventFormState>(initialCalendarEventForm);
@@ -1511,6 +1527,7 @@ export default function App() {
     isContactsImporting ||
     isGoogleCalendarLoading ||
     isGoogleCalendarConnecting ||
+    isCalendarDashboardLoading ||
     isCalendarAvailabilityLoading ||
     isCalendarMonthLoading ||
     isCalendarEventSubmitting ||
@@ -1966,6 +1983,119 @@ export default function App() {
       setCongregationDirectory(response.items);
     } catch {
       setCongregationDirectory([]);
+    }
+  };
+
+  const loadGoogleCalendarEventsAcrossCalendars = async ({
+    timeMin,
+    timeMax,
+    useSyncCache = true,
+    cacheOnly = false,
+    forceSync = false,
+  }: {
+    timeMin: string;
+    timeMax: string;
+    useSyncCache?: boolean;
+    cacheOnly?: boolean;
+    forceSync?: boolean;
+  }) => {
+    const calendarsToLoad =
+      googleCalendars.length > 0
+        ? googleCalendars
+        : [
+            ...assignGoogleCalendarPalette([
+              {
+                id: "primary",
+                name: "Primary Calendar",
+                primary: true,
+                accessRole: "",
+                timeZone: "",
+                hidden: false,
+                selected: false,
+              },
+            ]),
+          ];
+
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const responses = await Promise.all(
+      calendarsToLoad.map(async (calendar) => {
+        const response = await authorizedPost("/calendar/google/events", {
+          calendarId: calendar.id,
+          timeMin,
+          timeMax,
+          timeZone,
+          useSyncCache,
+          cacheOnly,
+          forceSync,
+          selectedYearMonth: timeMin.slice(0, 7),
+        });
+        const payload = (await response.body.json()) as GoogleCalendarEventsResponse;
+        return {
+          calendar,
+          payload,
+        };
+      }),
+    );
+
+    return responses
+      .flatMap(({ calendar, payload }) =>
+        payload.items.map((item) => ({
+          ...item,
+          calendarId: calendar.id,
+          calendarName: calendar.name,
+          calendarColor: calendar.calendarColor,
+          calendarColorEmoji: calendar.calendarColorEmoji,
+        })),
+      )
+      .sort((left, right) => left.start.localeCompare(right.start));
+  };
+
+  const loadCalendarDashboardSummary = async () => {
+    if (!congregationApiName) {
+      setCalendarDashboardStatus("Backend API is not configured yet.");
+      return;
+    }
+
+    setIsCalendarDashboardLoading(true);
+    setCalendarDashboardStatus(null);
+
+    try {
+      const now = new Date();
+      const weekStart = startOfWeek(now);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 7);
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+      const upcomingEnd = new Date(now);
+      upcomingEnd.setDate(upcomingEnd.getDate() + 60);
+
+      const [weekEvents, monthEvents, upcomingEvents] = await Promise.all([
+        loadGoogleCalendarEventsAcrossCalendars({
+          timeMin: weekStart.toISOString(),
+          timeMax: weekEnd.toISOString(),
+        }),
+        loadGoogleCalendarEventsAcrossCalendars({
+          timeMin: monthStart.toISOString(),
+          timeMax: monthEnd.toISOString(),
+        }),
+        loadGoogleCalendarEventsAcrossCalendars({
+          timeMin: now.toISOString(),
+          timeMax: upcomingEnd.toISOString(),
+        }),
+      ]);
+
+      setCalendarDashboardSummary({
+        weekEventCount: weekEvents.length,
+        monthEventCount: monthEvents.length,
+        upcomingEvents: upcomingEvents.slice(0, 8),
+      });
+    } catch (error) {
+      setCalendarDashboardSummary(null);
+      setCalendarDashboardStatus(
+        await getErrorMessage(error, "Unable to load Calendar dashboard."),
+      );
+    } finally {
+      setIsCalendarDashboardLoading(false);
     }
   };
 
@@ -3042,6 +3172,15 @@ export default function App() {
   }, [activePage, authStatus, canManageParking]);
 
   useEffect(() => {
+    if (authStatus !== "signed-in" || activePage !== "calendar-dashboard") {
+      return;
+    }
+
+    void loadGoogleCalendarConnection();
+    void loadGoogleCalendars();
+  }, [activePage, authStatus]);
+
+  useEffect(() => {
     if (authStatus !== "signed-in" || activePage !== "calendar-connect") {
       return;
     }
@@ -3067,6 +3206,18 @@ export default function App() {
     void loadGoogleCalendars();
     void loadCongregationDirectory();
   }, [activePage, authStatus]);
+
+  useEffect(() => {
+    if (
+      authStatus !== "signed-in" ||
+      activePage !== "calendar-dashboard" ||
+      !googleCalendarConnection?.connected
+    ) {
+      return;
+    }
+
+    void loadCalendarDashboardSummary();
+  }, [activePage, authStatus, googleCalendarConnection?.connected, googleCalendars]);
 
   useEffect(() => {
     if (
@@ -3357,6 +3508,67 @@ export default function App() {
       body.style.touchAction = previousTouchAction;
     };
   }, [isMobileMenuOpen]);
+
+  useEffect(() => {
+    if (!calendarMonthSelectedDate || !isMobileMenuOpen) {
+      return;
+    }
+
+    setIsMobileMenuOpen(false);
+  }, [calendarMonthSelectedDate, isMobileMenuOpen]);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof window === "undefined") {
+      return;
+    }
+
+    if (!calendarMonthSelectedDate) {
+      return;
+    }
+
+    const body = document.body;
+    const previousOverflow = body.style.overflow;
+    const previousPosition = body.style.position;
+    const previousTop = body.style.top;
+    const previousWidth = body.style.width;
+    const scrollY = window.scrollY;
+
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+
+    return () => {
+      body.style.overflow = previousOverflow;
+      body.style.position = previousPosition;
+      body.style.top = previousTop;
+      body.style.width = previousWidth;
+      window.scrollTo(0, scrollY);
+    };
+  }, [calendarMonthSelectedDate]);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || !calendarMonthSelectedDate) {
+      return;
+    }
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const modalElement = calendarBookingModalRef.current;
+      const target = event.target;
+
+      if (modalElement && target instanceof Node && modalElement.contains(target)) {
+        return;
+      }
+
+      event.preventDefault();
+    };
+
+    document.addEventListener("touchmove", handleTouchMove, { passive: false });
+
+    return () => {
+      document.removeEventListener("touchmove", handleTouchMove);
+    };
+  }, [calendarMonthSelectedDate]);
 
   useEffect(() => {
     if (!isBetaMemberMenuOpen) {
@@ -6299,6 +6511,123 @@ export default function App() {
             </div>
           ) : null}
 
+          {activePage === "calendar-dashboard" ? (
+            <div className="calendar-schedule-layout">
+              <section className="placeholder-page-card calendar-dashboard-card">
+                <div className="calendar-schedule-header">
+                  <div>
+                    <p className="placeholder-page-kicker">Google Calendar</p>
+                    <h3 className="calendar-connect-title">Dashboard</h3>
+                    <p className="placeholder-page-copy calendar-connect-copy">
+                      A quick view of your upcoming schedule across connected calendars.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="member-submit-button"
+                    onClick={() => {
+                      void loadCalendarDashboardSummary();
+                    }}
+                    disabled={isCalendarDashboardLoading}
+                  >
+                    {isCalendarDashboardLoading ? "Refreshing..." : "Refresh Dashboard"}
+                  </button>
+                </div>
+
+                {!googleCalendarConnection?.connected ? (
+                  <div className="calendar-schedule-empty">
+                    <p className="placeholder-page-copy">
+                      Connect Google Calendar first from{" "}
+                      <code>Calendar -&gt; Connect Calendar</code> before using the
+                      dashboard.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {calendarDashboardStatus ? (
+                      <p className="member-submit-message calendar-schedule-status">
+                        {calendarDashboardStatus}
+                      </p>
+                    ) : null}
+
+                    <div className="calendar-dashboard-grid">
+                      <article className="calendar-dashboard-metric">
+                        <p className="calendar-dashboard-metric-label">
+                          Meetings this week
+                        </p>
+                        <p className="calendar-dashboard-metric-value">
+                          {calendarDashboardSummary?.weekEventCount ?? 0}
+                        </p>
+                      </article>
+
+                      <article className="calendar-dashboard-metric">
+                        <p className="calendar-dashboard-metric-label">
+                          Meetings this month
+                        </p>
+                        <p className="calendar-dashboard-metric-value">
+                          {calendarDashboardSummary?.monthEventCount ?? 0}
+                        </p>
+                      </article>
+                    </div>
+
+                    <div className="calendar-dashboard-upcoming">
+                      <div className="calendar-schedule-section-header">
+                        <p className="placeholder-page-kicker">Upcoming</p>
+                        <h4 className="calendar-schedule-section-title">Next Events</h4>
+                      </div>
+
+                      {(calendarDashboardSummary?.upcomingEvents.length ?? 0) > 0 ? (
+                        <div className="calendar-dashboard-list">
+                          {calendarDashboardSummary!.upcomingEvents.map((eventItem) => (
+                            <article
+                              key={`${eventItem.calendarId || "calendar"}-${eventItem.id}-${eventItem.start}`}
+                              className="calendar-dashboard-event"
+                            >
+                              <div className="calendar-dashboard-event-top">
+                                <p className="calendar-dashboard-event-day">
+                                  {parseCalendarEventDateValue(
+                                    eventItem.start,
+                                    eventItem.isAllDay,
+                                  ).toLocaleDateString(undefined, {
+                                    weekday: "short",
+                                    month: "short",
+                                    day: "numeric",
+                                  })}
+                                </p>
+                                <p className="calendar-dashboard-event-time">
+                                  {eventItem.isAllDay
+                                    ? "All day"
+                                    : formatEventDateTimeLabel(
+                                        eventItem.start,
+                                        eventItem.end,
+                                        false,
+                                      )}
+                                </p>
+                              </div>
+                              <p className="calendar-dashboard-event-title">
+                                {eventItem.title || "Untitled event"}
+                              </p>
+                              <p className="calendar-dashboard-event-calendar">
+                                {eventItem.calendarName || "Primary Calendar"}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="calendar-schedule-empty">
+                          <p className="placeholder-page-copy">
+                            No upcoming events were found.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </section>
+            </div>
+          ) : null}
+
           {activePage === "calendar-connect" ? (
             <div className="calendar-connect-layout">
               <section className="placeholder-page-card calendar-connect-card">
@@ -8011,6 +8340,7 @@ export default function App() {
         >
           <div
             className="modal-card calendar-booking-modal"
+            ref={calendarBookingModalRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="calendar-booking-modal-title"
