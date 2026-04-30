@@ -580,6 +580,166 @@ test("loads Google calendar events from month-based sync cache", async () => {
     assert.ok(storedItems.some((item) => item.sk === "SYNC_STATE"));
     assert.ok(storedItems.some((item) => String(item.sk).startsWith("MONTH#2026-05#")));
 });
+test("loads Google calendar reporting rows from cached event metadata", async () => {
+    const originalFetch = globalThis.fetch;
+    const connectionData = {
+        email: "user@example.com",
+        refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+        accessTokenEncrypted: encryptTestSecret("access-token"),
+        accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+        connectedAt: "2026-04-26T12:00:00.000Z",
+        updatedAt: "2026-04-26T12:05:00.000Z",
+        refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+        tokenScope: "https://www.googleapis.com/auth/calendar",
+        tokenType: "Bearer",
+        lastError: null,
+    };
+    const dynamo = createMockClient((command) => {
+        if (command.constructor.name === "GetCommand") {
+            return {
+                Item: {
+                    pk: "CALENDAR_INTEGRATION",
+                    sk: "GOOGLE#00000000-0000-4000-8000-000000000001",
+                    data: JSON.stringify(connectionData),
+                },
+            };
+        }
+        if (command.constructor.name === "QueryCommand") {
+            const values = command.input?.ExpressionAttributeValues;
+            if (values?.[":pk"] === "CONGREGATION") {
+                return {
+                    Items: [
+                        {
+                            pk: "CONGREGATION",
+                            sk: "MEMBER#1",
+                            data: JSON.stringify({
+                                firstName: "Mary",
+                                lastName: "Alpha",
+                                phone: "1111111111",
+                            }),
+                        },
+                        {
+                            pk: "CONGREGATION",
+                            sk: "MEMBER#2",
+                            data: JSON.stringify({
+                                firstName: "John",
+                                lastName: "Beta",
+                                phone: "2222222222",
+                            }),
+                        },
+                    ],
+                };
+            }
+            if (values?.[":pk"] === "CALENDAR_EVENT_SYNC#00000000-0000-4000-8000-000000000001#primary") {
+                return {
+                    Items: [
+                        {
+                            pk: values[":pk"],
+                            sk: "MONTH#2026-05#001",
+                            data: JSON.stringify({
+                                month: "2026-05",
+                                items: [
+                                    {
+                                        id: "event-1",
+                                        title: "Visit A",
+                                        status: "confirmed",
+                                        htmlLink: "",
+                                        location: "",
+                                        description: "",
+                                        eventType: "default",
+                                        visibility: "default",
+                                        start: "2026-05-03T15:00:00.000Z",
+                                        end: "2026-05-03T16:00:00.000Z",
+                                        isAllDay: false,
+                                        organizer: "Admin",
+                                        congregationItems: [
+                                            {
+                                                pk: "CONGREGATION",
+                                                sk: "MEMBER#1",
+                                                firstName: "Mary",
+                                                lastName: "Alpha",
+                                                phone: "1111111111",
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        id: "event-2",
+                                        title: "Visit B",
+                                        status: "confirmed",
+                                        htmlLink: "",
+                                        location: "",
+                                        description: "",
+                                        eventType: "default",
+                                        visibility: "default",
+                                        start: "2026-05-06T15:00:00.000Z",
+                                        end: "2026-05-06T16:00:00.000Z",
+                                        isAllDay: false,
+                                        organizer: "Admin",
+                                        congregationItems: [
+                                            {
+                                                pk: "CONGREGATION",
+                                                sk: "MEMBER#1",
+                                                firstName: "Mary",
+                                                lastName: "Alpha",
+                                                phone: "1111111111",
+                                            },
+                                            {
+                                                pk: "CONGREGATION",
+                                                sk: "MEMBER#2",
+                                                firstName: "John",
+                                                lastName: "Beta",
+                                                phone: "2222222222",
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }),
+                        },
+                    ],
+                };
+            }
+            return {
+                Items: [],
+            };
+        }
+        throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+    globalThis.fetch = async () => {
+        throw new Error("Fetch should not be called for cache-only reporting.");
+    };
+    setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+    const response = await invokeHandler(createEvent({
+        path: "/calendar/google/reporting",
+        method: "POST",
+        groups: ["admin"],
+        body: {
+            year: 2026,
+            calendarIds: ["primary"],
+            cacheOnly: true,
+        },
+    }));
+    const body = parseBody(response.body);
+    globalThis.fetch = originalFetch;
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.syncMode, "cached");
+    assert.equal(body.eventCount, 2);
+    assert.deepEqual(body.rows, [
+        {
+            pk: "CONGREGATION",
+            sk: "MEMBER#2",
+            memberName: "John Beta",
+            eventCountThisYear: 1,
+            lastEventDate: "2026-05-06T15:00:00.000Z",
+        },
+        {
+            pk: "CONGREGATION",
+            sk: "MEMBER#1",
+            memberName: "Mary Alpha",
+            eventCountThisYear: 2,
+            lastEventDate: "2026-05-06T15:00:00.000Z",
+        },
+    ]);
+});
 test("falls back to direct Google calendar events when sync cache loading fails", async () => {
     const originalFetch = globalThis.fetch;
     const connectionData = {

@@ -551,6 +551,25 @@ type CalendarDashboardSummary = {
   upcomingEvents: GoogleCalendarEventItem[];
 };
 
+type GoogleCalendarReportingResponse = {
+  message: string;
+  time: string;
+  year: number;
+  eventCount: number;
+  syncMode?: "full" | "incremental" | "direct" | "cached";
+  syncModes?: Array<{
+    calendarId: string;
+    syncMode: "full" | "incremental" | "direct" | "cached";
+  }>;
+  rows: Array<{
+    pk: string;
+    sk: string;
+    memberName: string;
+    eventCountThisYear: number;
+    lastEventDate: string | null;
+  }>;
+};
+
 type CongregationDirectoryResponse = {
   message: string;
   time: string;
@@ -1228,7 +1247,6 @@ const extractGroupsFromClaim = (value: unknown) => {
 };
 
 const placeholderPages: PageKey[] = [
-  "calendar-reporting",
   "events",
   "sunday-school",
   "summer-camp",
@@ -1298,6 +1316,7 @@ export default function App() {
   const sidePanelRef = useRef<HTMLElement | null>(null);
   const betaMemberMenuRef = useRef<HTMLDivElement | null>(null);
   const calendarBookingModalRef = useRef<HTMLDivElement | null>(null);
+  const calendarDayEventsModalRef = useRef<HTMLDivElement | null>(null);
   const memberContextMenuRef = useRef<HTMLDivElement | null>(null);
   const contactsImportInputRef = useRef<HTMLInputElement | null>(null);
   const memberPhotoInputRef = useRef<HTMLInputElement | null>(null);
@@ -1340,6 +1359,7 @@ export default function App() {
   const [calendarMonthViewDate, setCalendarMonthViewDate] = useState(() =>
     startOfMonth(new Date()),
   );
+  const [calendarMonthExpandedDate, setCalendarMonthExpandedDate] = useState<string | null>(null);
   const [calendarMonthSelectedDate, setCalendarMonthSelectedDate] = useState<string | null>(
     null,
   );
@@ -1367,6 +1387,11 @@ export default function App() {
     useState<CalendarDashboardSummary | null>(null);
   const [calendarDashboardStatus, setCalendarDashboardStatus] = useState<string | null>(null);
   const [isCalendarDashboardLoading, setIsCalendarDashboardLoading] = useState(false);
+  const [calendarReportingRows, setCalendarReportingRows] = useState<
+    GoogleCalendarReportingResponse["rows"]
+  >([]);
+  const [calendarReportingStatus, setCalendarReportingStatus] = useState<string | null>(null);
+  const [isCalendarReportingLoading, setIsCalendarReportingLoading] = useState(false);
   const [isCalendarMonthLoading, setIsCalendarMonthLoading] = useState(false);
   const [calendarEventForm, setCalendarEventForm] =
     useState<CalendarEventFormState>(initialCalendarEventForm);
@@ -1528,6 +1553,7 @@ export default function App() {
     isGoogleCalendarLoading ||
     isGoogleCalendarConnecting ||
     isCalendarDashboardLoading ||
+    isCalendarReportingLoading ||
     isCalendarAvailabilityLoading ||
     isCalendarMonthLoading ||
     isCalendarEventSubmitting ||
@@ -1677,6 +1703,21 @@ export default function App() {
         year: "numeric",
       })
     : "";
+  const calendarMonthExpandedDateLabel = calendarMonthExpandedDate
+    ? new Date(`${calendarMonthExpandedDate}T00:00`).toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "";
+  const calendarMonthExpandedDayEvents = calendarMonthExpandedDate
+    ? (calendarMonthEvents?.items ?? []).filter((eventItem) =>
+        formatDateInputValue(
+          parseCalendarEventDateValue(eventItem.start, eventItem.isAllDay),
+        ) === calendarMonthExpandedDate,
+      )
+    : [];
   const normalizedCalendarCongregationQuery = calendarCongregationQuery.trim().toLowerCase();
   const filteredCalendarCongregationSuggestions =
     normalizedCalendarCongregationQuery
@@ -1817,6 +1858,7 @@ export default function App() {
       year: "numeric",
     },
   );
+  const currentCalendarReportYear = new Date().getFullYear();
   const announcementWeeks =
     announcements?.items
       .slice()
@@ -2096,6 +2138,60 @@ export default function App() {
       );
     } finally {
       setIsCalendarDashboardLoading(false);
+    }
+  };
+
+  const loadCalendarReporting = async () => {
+    if (!congregationApiName) {
+      setCalendarReportingStatus("Backend API is not configured yet.");
+      return;
+    }
+
+    if (!googleCalendarConnection?.connected) {
+      setCalendarReportingRows([]);
+      setCalendarReportingStatus("Google Calendar is not connected.");
+      return;
+    }
+
+    setIsCalendarReportingLoading(true);
+    setCalendarReportingStatus(null);
+
+    try {
+      const calendarIds =
+        googleCalendars.length > 0 ? googleCalendars.map((calendar) => calendar.id) : ["primary"];
+      const year = new Date().getFullYear();
+
+      const cacheResponse = await authorizedPost("/calendar/google/reporting", {
+        year,
+        calendarIds,
+        cacheOnly: true,
+      });
+      const cachePayload = (await cacheResponse.body.json()) as GoogleCalendarReportingResponse;
+      setCalendarReportingRows(cachePayload.rows);
+
+      try {
+        const syncResponse = await authorizedPost("/calendar/google/reporting", {
+          year,
+          calendarIds,
+          forceSync: true,
+        });
+        const syncPayload = (await syncResponse.body.json()) as GoogleCalendarReportingResponse;
+        setCalendarReportingRows(syncPayload.rows);
+      } catch (error) {
+        setCalendarReportingStatus(
+          await getErrorMessage(
+            error,
+            "Showing cached reporting data because the Google refresh did not finish.",
+          ),
+        );
+      }
+    } catch (error) {
+      setCalendarReportingRows([]);
+      setCalendarReportingStatus(
+        await getErrorMessage(error, "Unable to load calendar reporting."),
+      );
+    } finally {
+      setIsCalendarReportingLoading(false);
     }
   };
 
@@ -2419,7 +2515,17 @@ export default function App() {
     setCalendarEventForm(initialCalendarEventForm);
   };
 
+  const closeCalendarDayEventsModal = () => {
+    setCalendarMonthExpandedDate(null);
+  };
+
+  const openCalendarDayEventsModal = (dateValue: string) => {
+    setCalendarMonthExpandedDate(dateValue);
+    setCalendarEventFormStatus(null);
+  };
+
   const openCalendarEventCreateModal = (dateValue: string) => {
+    setCalendarMonthExpandedDate(null);
     setSelectedCalendarMonthEvent(null);
     setCalendarMonthSelectedDate(dateValue);
     setCalendarCongregationQuery("");
@@ -2438,6 +2544,7 @@ export default function App() {
       parseCalendarEventDateValue(eventItem.start, eventItem.isAllDay),
     );
     const extractedDetails = extractCalendarEventCongregationDetails(eventItem.description);
+    setCalendarMonthExpandedDate(null);
     setSelectedCalendarMonthEvent(eventItem);
     setCalendarMonthSelectedDate(eventDateValue);
     setCalendarCongregationQuery("");
@@ -3189,6 +3296,27 @@ export default function App() {
   }, [activePage, authStatus]);
 
   useEffect(() => {
+    if (authStatus !== "signed-in" || activePage !== "calendar-reporting") {
+      return;
+    }
+
+    void loadGoogleCalendarConnection();
+    void loadGoogleCalendars();
+  }, [activePage, authStatus]);
+
+  useEffect(() => {
+    if (
+      authStatus !== "signed-in" ||
+      activePage !== "calendar-reporting" ||
+      !googleCalendarConnection?.connected
+    ) {
+      return;
+    }
+
+    void loadCalendarReporting();
+  }, [activePage, authStatus, googleCalendarConnection?.connected, googleCalendars]);
+
+  useEffect(() => {
     if (authStatus !== "signed-in" || activePage !== "calendar-schedule") {
       return;
     }
@@ -3510,19 +3638,19 @@ export default function App() {
   }, [isMobileMenuOpen]);
 
   useEffect(() => {
-    if (!calendarMonthSelectedDate || !isMobileMenuOpen) {
+    if (!(calendarMonthSelectedDate || calendarMonthExpandedDate) || !isMobileMenuOpen) {
       return;
     }
 
     setIsMobileMenuOpen(false);
-  }, [calendarMonthSelectedDate, isMobileMenuOpen]);
+  }, [calendarMonthExpandedDate, calendarMonthSelectedDate, isMobileMenuOpen]);
 
   useEffect(() => {
     if (typeof document === "undefined" || typeof window === "undefined") {
       return;
     }
 
-    if (!calendarMonthSelectedDate) {
+    if (!(calendarMonthSelectedDate || calendarMonthExpandedDate)) {
       return;
     }
 
@@ -3545,18 +3673,23 @@ export default function App() {
       body.style.width = previousWidth;
       window.scrollTo(0, scrollY);
     };
-  }, [calendarMonthSelectedDate]);
+  }, [calendarMonthExpandedDate, calendarMonthSelectedDate]);
 
   useEffect(() => {
-    if (typeof document === "undefined" || !calendarMonthSelectedDate) {
+    if (typeof document === "undefined" || !(calendarMonthSelectedDate || calendarMonthExpandedDate)) {
       return;
     }
 
     const handleTouchMove = (event: TouchEvent) => {
-      const modalElement = calendarBookingModalRef.current;
+      const bookingModalElement = calendarBookingModalRef.current;
+      const dayEventsModalElement = calendarDayEventsModalRef.current;
       const target = event.target;
 
-      if (modalElement && target instanceof Node && modalElement.contains(target)) {
+      if (
+        target instanceof Node &&
+        ((bookingModalElement && bookingModalElement.contains(target)) ||
+          (dayEventsModalElement && dayEventsModalElement.contains(target)))
+      ) {
         return;
       }
 
@@ -3568,7 +3701,7 @@ export default function App() {
     return () => {
       document.removeEventListener("touchmove", handleTouchMove);
     };
-  }, [calendarMonthSelectedDate]);
+  }, [calendarMonthExpandedDate, calendarMonthSelectedDate]);
 
   useEffect(() => {
     if (!isBetaMemberMenuOpen) {
@@ -7101,64 +7234,78 @@ export default function App() {
 
                             <div className="visitation-calendar-events">
                               {dayEvents.length > 0 ? (
-                                dayEvents.slice(0, 3).map((eventItem) => (
-                                  <button
-                                    type="button"
-                                    className="visitation-calendar-event calendar-month-event-chip"
-                                    key={eventItem.id}
-                                    style={{
-                                      backgroundColor: hexToRgba(
-                                        eventItem.calendarColor || "#6c88b5",
-                                        0.14,
-                                      ),
-                                      borderColor: hexToRgba(
-                                        eventItem.calendarColor || "#6c88b5",
-                                        0.34,
-                                      ),
-                                    }}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      openCalendarEventEditModal(eventItem);
-                                    }}
-                                  >
-                                    <span className="calendar-month-event-row">
-                                      <span
-                                        className="calendar-month-event-dot"
-                                        aria-hidden="true"
-                                        style={{
-                                          backgroundColor:
-                                            eventItem.calendarColor || "var(--accent-strong)",
-                                        }}
-                                      />
-                                      <span className="visitation-calendar-event-time">
-                                        {eventItem.isAllDay
-                                          ? "All day"
-                                          : formatTimeLabel(eventItem.start)}
+                                <>
+                                  {dayEvents.slice(0, 3).map((eventItem) => (
+                                    <button
+                                      type="button"
+                                      className="visitation-calendar-event calendar-month-event-chip"
+                                      key={eventItem.id}
+                                      style={{
+                                        backgroundColor: hexToRgba(
+                                          eventItem.calendarColor || "#6c88b5",
+                                          0.14,
+                                        ),
+                                        borderColor: hexToRgba(
+                                          eventItem.calendarColor || "#6c88b5",
+                                          0.34,
+                                        ),
+                                      }}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openCalendarEventEditModal(eventItem);
+                                      }}
+                                    >
+                                      <span className="calendar-month-event-row">
+                                        <span
+                                          className="calendar-month-event-dot"
+                                          aria-hidden="true"
+                                          style={{
+                                            backgroundColor:
+                                              eventItem.calendarColor || "var(--accent-strong)",
+                                          }}
+                                        />
+                                        <span className="visitation-calendar-event-time">
+                                          {eventItem.isAllDay
+                                            ? "All day"
+                                            : formatTimeLabel(eventItem.start)}
+                                        </span>
+                                        <span className="visitation-calendar-event-name">
+                                          {eventItem.title}
+                                        </span>
                                       </span>
-                                      <span className="visitation-calendar-event-name">
-                                        {eventItem.title}
+                                      <span className="calendar-month-event-hover-details">
+                                        <span className="calendar-month-event-hover-title">
+                                          {eventItem.title}
+                                        </span>
+                                        <span>
+                                          {formatEventDateTimeLabel(
+                                            eventItem.start,
+                                            eventItem.end,
+                                            eventItem.isAllDay,
+                                          )}
+                                        </span>
+                                        {eventItem.calendarName ? (
+                                          <span>Calendar: {eventItem.calendarName}</span>
+                                        ) : null}
+                                        {eventItem.location ? (
+                                          <span>Location: {eventItem.location}</span>
+                                        ) : null}
                                       </span>
-                                    </span>
-                                    <span className="calendar-month-event-hover-details">
-                                      <span className="calendar-month-event-hover-title">
-                                        {eventItem.title}
-                                      </span>
-                                      <span>
-                                        {formatEventDateTimeLabel(
-                                          eventItem.start,
-                                          eventItem.end,
-                                          eventItem.isAllDay,
-                                        )}
-                                      </span>
-                                      {eventItem.calendarName ? (
-                                        <span>Calendar: {eventItem.calendarName}</span>
-                                      ) : null}
-                                      {eventItem.location ? (
-                                        <span>Location: {eventItem.location}</span>
-                                      ) : null}
-                                    </span>
-                                  </button>
-                                ))
+                                    </button>
+                                  ))}
+                                  {dayEvents.length > 3 ? (
+                                    <button
+                                      type="button"
+                                      className="calendar-month-more-events"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openCalendarDayEventsModal(dayValue);
+                                      }}
+                                    >
+                                      +{dayEvents.length - 3} more
+                                    </button>
+                                  ) : null}
+                                </>
                               ) : (
                                 <div className="visitation-calendar-empty-slot" />
                               )}
@@ -7175,6 +7322,78 @@ export default function App() {
                         </p>
                       </div>
                     ) : null}
+                  </>
+                )}
+              </section>
+            </div>
+          ) : null}
+
+          {activePage === "calendar-reporting" ? (
+            <div className="calendar-schedule-layout">
+              <section className="placeholder-page-card calendar-schedule-card">
+                <div className="calendar-schedule-header">
+                  <div>
+                    <p className="placeholder-page-kicker">Calendar Reporting</p>
+                    <h3 className="calendar-connect-title">Congregation Event Summary</h3>
+                    <p className="placeholder-page-copy calendar-connect-copy">
+                      Congregation members sorted by the fewest attached calendar events first for{" "}
+                      {currentCalendarReportYear}.
+                    </p>
+                  </div>
+                </div>
+
+                {!googleCalendarConnection?.connected ? (
+                  <div className="calendar-schedule-empty">
+                    <p className="placeholder-page-copy">
+                      Connect Google Calendar first from{" "}
+                      <code>Calendar -&gt; Connect Calendar</code> before using this report.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {calendarReportingStatus ? (
+                      <p className="member-submit-message calendar-schedule-status">
+                        {calendarReportingStatus}
+                      </p>
+                    ) : null}
+
+                    <div className="parking-table-wrap">
+                      <table className="parking-table calendar-reporting-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Person Name</th>
+                            <th scope="col">Events This Year</th>
+                            <th scope="col">Last Event Date</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {calendarReportingRows.map((row) => (
+                            <tr key={`${row.pk}-${row.sk}`}>
+                              <td data-label="Person Name">
+                                <div className="parking-table-primary">
+                                  <span className="parking-table-name">{row.memberName}</span>
+                                </div>
+                              </td>
+                              <td data-label="Events This Year">
+                                {row.eventCountThisYear}
+                              </td>
+                              <td data-label="Last Event Date">
+                                {row.lastEventDate
+                                  ? new Date(row.lastEventDate).toLocaleDateString(
+                                      undefined,
+                                      {
+                                        year: "numeric",
+                                        month: "short",
+                                        day: "numeric",
+                                      },
+                                    )
+                                  : "No attached event yet"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </>
                 )}
               </section>
@@ -8326,6 +8545,103 @@ export default function App() {
                 onClick={() => setParkingHistoryModal(null)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {calendarMonthExpandedDate ? (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onClick={closeCalendarDayEventsModal}
+        >
+          <div
+            className="modal-card calendar-day-events-modal"
+            ref={calendarDayEventsModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calendar-day-events-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="member-form-header visitation-calendar-schedule-header">
+              <div>
+                <p className="member-form-mode">Day Events</p>
+                <h2 className="modal-title" id="calendar-day-events-title">
+                  {calendarMonthExpandedDateLabel}
+                </h2>
+                <p className="visitation-calendar-schedule-copy">
+                  View every event scheduled for this day.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="calendar-booking-close-button"
+                onClick={closeCalendarDayEventsModal}
+                aria-label="Close day events modal"
+              >
+                ×
+              </button>
+            </div>
+
+            {calendarMonthExpandedDayEvents.length > 0 ? (
+              <div className="calendar-day-events-list">
+                {calendarMonthExpandedDayEvents.map((eventItem) => (
+                  <button
+                    type="button"
+                    key={`${eventItem.calendarId || "calendar"}-${eventItem.id}-${eventItem.start}`}
+                    className="calendar-day-events-item"
+                    onClick={() => {
+                      openCalendarEventEditModal(eventItem);
+                    }}
+                  >
+                    <div className="calendar-day-events-item-top">
+                      <p className="calendar-day-events-item-time">
+                        {eventItem.isAllDay
+                          ? "All day"
+                          : formatEventDateTimeLabel(
+                              eventItem.start,
+                              eventItem.end,
+                              false,
+                            )}
+                      </p>
+                      <p className="calendar-day-events-item-calendar">
+                        {eventItem.calendarName || "Primary Calendar"}
+                      </p>
+                    </div>
+                    <p className="calendar-day-events-item-title">
+                      {eventItem.title || "Untitled event"}
+                    </p>
+                    {eventItem.location ? (
+                      <p className="calendar-day-events-item-meta">
+                        Location: {eventItem.location}
+                      </p>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="modal-copy">No events were found for this day.</p>
+            )}
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-secondary-button"
+                onClick={closeCalendarDayEventsModal}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="member-submit-button"
+                onClick={() => {
+                  openCalendarEventCreateModal(calendarMonthExpandedDate);
+                }}
+              >
+                Add Event
               </button>
             </div>
           </div>
