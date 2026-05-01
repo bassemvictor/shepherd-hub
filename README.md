@@ -193,6 +193,71 @@ Sync cache notes:
 - if a month would grow too large for one item, it is split into multiple month chunks such as `MONTH#2026-05#001` and `MONTH#2026-05#002`
 - if Google invalidates the sync token, the cache can be cleared and rebuilt
 
+## Calendar Schedule Sequence
+
+The `Calendar -> Schedule` page uses a two-stage load:
+
+- first request returns fast from DynamoDB cache
+- second request checks Google Calendar, refreshes cache if needed, and returns the accurate result
+
+The flow below shows one calendar. In the real UI, the frontend repeats this for each connected calendar and progressively merges the results into the month grid.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as React Schedule UI
+    participant API as API Gateway
+    participant Lambda as congregation-message Lambda
+    participant Dynamo as DynamoDB
+    participant Google as Google Calendar API
+
+    Note over UI: User opens Calendar -> Schedule
+    UI->>API: POST /calendar/google/events<br/>calendarId, timeMin, timeMax,<br/>useSyncCache=true, cacheOnly=true
+    API->>Lambda: Invoke route
+    Note over Lambda: cacheOnly path does not load Google connection,<br/>does not refresh token, and does not call Google
+    Lambda->>Dynamo: Query CALENDAR_EVENT_SYNC#userKey#calendarId<br/>month rows for requested range
+    Dynamo-->>Lambda: Cached MONTH#yyyy-mm#chunk rows
+    Lambda-->>API: 200 syncMode=cached, items=[cached events]
+    API-->>UI: Cached month events for this calendar
+    Note over UI: UI renders cached events immediately
+
+    UI->>API: POST /calendar/google/events<br/>calendarId, timeMin, timeMax,<br/>useSyncCache=true, forceSync=true
+    API->>Lambda: Invoke route
+    Lambda->>Dynamo: Get SYNC_STATE for calendar
+    Dynamo-->>Lambda: syncToken + lastSyncedAt
+    Lambda->>Dynamo: Get CALENDAR_INTEGRATION / GOOGLE#userKey
+    Dynamo-->>Lambda: Stored encrypted tokens
+    Lambda->>Lambda: refreshGoogleAccessTokenIfNeeded()
+    Lambda->>Lambda: decryptSecret(accessTokenEncrypted)
+    alt incremental sync token is valid
+        Lambda->>Google: GET events?syncToken=...
+        Google-->>Lambda: Changed resources + nextSyncToken
+    else first sync or expired token
+        Lambda->>Google: GET events?singleEvents=true&showDeleted=true
+        Google-->>Lambda: Full event page(s) + nextSyncToken
+    end
+    Lambda->>Dynamo: Put SYNC_STATE with new nextSyncToken
+    Lambda->>Dynamo: Rewrite MONTH#yyyy-mm#chunk cache rows
+    Lambda->>Dynamo: Query month rows for requested range
+    Dynamo-->>Lambda: Fresh cached rows
+    Lambda-->>API: 200 syncMode=full|incremental,<br/>items=[fresh events], changedResources=[...]
+    API-->>UI: Accurate month events for this calendar
+    Note over UI: UI replaces cached rows with refreshed rows
+```
+
+Fallback behavior:
+
+- Lambda now lazy-loads the Google connection record, so pure cache reads can return without touching `CALENDAR_INTEGRATION`
+- if the sync-cache update fails, Lambda falls back to a direct Google `events.list` call and returns `syncMode=direct`
+- after create, update, or delete event actions, the UI forces a fresh read so the month grid shows the change immediately
+- cache rows are stored per signed-in user and per Google calendar
+
+Relevant files:
+
+- frontend schedule page: `src/App.tsx`
+- backend route logic: `amplify/functions/congregation-message/handler.ts`
+- API route registration: `amplify/backend.ts`
+
 ## RBAC
 
 Shepherd Hub uses Amazon Cognito groups for role-based access control.

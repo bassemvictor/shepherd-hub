@@ -60,7 +60,7 @@ const pageContent: Record<
     description: "",
   },
   "calendar-month": {
-    eyebrow: "Calendar Month View",
+    eyebrow: "Calendar Schedule",
     description: "",
   },
   "calendar-schedule": {
@@ -7088,7 +7088,7 @@ export default function App() {
                 <div className="calendar-schedule-header">
                   <div>
                     <p className="placeholder-page-kicker">Google Calendar</p>
-                    <h3 className="calendar-connect-title">Month View</h3>
+                    <h3 className="calendar-connect-title">Schedule</h3>
                     <p className="placeholder-page-copy calendar-connect-copy">
                       Browse a full month of events across all connected calendars and
                       choose which calendar to use when booking a new event.
@@ -7162,8 +7162,8 @@ export default function App() {
                           onClick={() => {
                             void loadGoogleCalendarMonthEvents();
                           }}
-                          aria-label="Refresh month view"
-                          title="Refresh month view"
+                          aria-label="Refresh schedule"
+                          title="Refresh schedule"
                           disabled={isCalendarMonthLoading}
                         >
                           ↻
@@ -7317,9 +7317,6 @@ export default function App() {
 
                     {!calendarMonthSelectedDate ? (
                       <div className="calendar-schedule-empty calendar-booking-empty">
-                        <p className="placeholder-page-copy">
-                          Click any day on the calendar to open the add-event form.
-                        </p>
                       </div>
                     ) : null}
                   </>

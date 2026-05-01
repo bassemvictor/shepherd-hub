@@ -486,7 +486,29 @@ const listGoogleCalendarEvents = async ({ accessToken, calendarId, timeMin, time
         .map(normalizeGoogleCalendarEvent)
         .filter((item) => item !== null);
 };
-const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, calendarId, timeMin, timeMax, timeZone, useSyncCache, cacheOnly, forceSync, selectedYearMonth, existingConnection, }) => {
+const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, calendarId, timeMin, timeMax, timeZone, useSyncCache, cacheOnly, forceSync, selectedYearMonth, }) => {
+    let existingConnection;
+    const loadExistingConnection = async () => {
+        if (existingConnection !== undefined) {
+            return existingConnection;
+        }
+        existingConnection = await getStoredGoogleConnection(tableName, userKey);
+        console.log("Google Calendar events connection lookup completed.", {
+            userKey,
+            calendarId,
+            hasConnection: Boolean(existingConnection),
+        });
+        return existingConnection;
+    };
+    const requireExistingConnection = async () => {
+        const connection = await loadExistingConnection();
+        if (!connection) {
+            throw Object.assign(new Error("Google Calendar is not connected."), {
+                statusCode: 404,
+            });
+        }
+        return connection;
+    };
     if (useSyncCache) {
         try {
             if (cacheOnly) {
@@ -539,11 +561,12 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                     syncMode: "cached",
                 };
             }
+            const connection = await requireExistingConnection();
             const currentConnection = await refreshGoogleAccessTokenIfNeeded({
                 tableName,
                 time,
                 email: userKey,
-                connection: existingConnection,
+                connection,
             });
             console.log("Google Calendar events connection ready.", {
                 userKey,
@@ -578,6 +601,9 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
         }
         catch (error) {
             const typedError = error;
+            if (typedError.statusCode === 404) {
+                throw error;
+            }
             console.error("Google Calendar sync cache path failed; falling back to direct events fetch.", {
                 calendarId,
                 userKey,
@@ -586,11 +612,12 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                 statusCode: typedError.statusCode ?? null,
                 errorMessage: typedError.message,
             });
+            const connection = await requireExistingConnection();
             const currentConnection = await refreshGoogleAccessTokenIfNeeded({
                 tableName,
                 time,
                 email: userKey,
-                connection: existingConnection,
+                connection,
             });
             console.log("Google Calendar events connection ready for direct fallback.", {
                 userKey,
@@ -615,11 +642,12 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
             };
         }
     }
+    const connection = await requireExistingConnection();
     const currentConnection = await refreshGoogleAccessTokenIfNeeded({
         tableName,
         time,
         email: userKey,
-        connection: existingConnection,
+        connection,
     });
     console.log("Google Calendar events connection ready.", {
         userKey,
@@ -1730,22 +1758,6 @@ export const handler = async (event) => {
                     }),
                 };
             }
-            const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
-            console.log("Google Calendar events connection lookup completed.", {
-                userKey: requestUserKey,
-                calendarId,
-                hasConnection: Boolean(existingConnection),
-            });
-            if (!existingConnection) {
-                return {
-                    statusCode: 404,
-                    headers: responseHeaders,
-                    body: JSON.stringify({
-                        message: "Google Calendar is not connected.",
-                        time,
-                    }),
-                };
-            }
             try {
                 const items = await loadGoogleCalendarEventsForCalendar({
                     tableName,
@@ -1759,7 +1771,6 @@ export const handler = async (event) => {
                     cacheOnly,
                     forceSync,
                     selectedYearMonth: selectedYearMonth || undefined,
-                    existingConnection,
                 });
                 console.log("Google Calendar events request succeeded.", {
                     userKey: requestUserKey,
@@ -1795,7 +1806,7 @@ export const handler = async (event) => {
                     errorMessage: typedError.message,
                 });
                 return {
-                    statusCode: 500,
+                    statusCode: typedError.statusCode ?? 500,
                     headers: responseHeaders,
                     body: JSON.stringify({
                         message: error instanceof Error ? error.message : "Unable to load Google Calendar events.",
@@ -1839,22 +1850,6 @@ export const handler = async (event) => {
                 cacheOnly,
                 forceSync,
             });
-            const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
-            console.log("Google Calendar reporting connection lookup completed.", {
-                userKey: requestUserKey,
-                hasConnection: Boolean(existingConnection),
-                calendarCount: calendarIds.length,
-            });
-            if (!existingConnection) {
-                return {
-                    statusCode: 404,
-                    headers: responseHeaders,
-                    body: JSON.stringify({
-                        message: "Google Calendar is not connected.",
-                        time,
-                    }),
-                };
-            }
             try {
                 const [congregationItems, calendarResults] = await Promise.all([
                     loadCongregationDirectoryItems(tableName),
@@ -1870,7 +1865,6 @@ export const handler = async (event) => {
                         cacheOnly,
                         forceSync,
                         selectedYearMonth: undefined,
-                        existingConnection,
                     }).then((result) => ({
                         calendarId,
                         ...result,
@@ -1929,7 +1923,7 @@ export const handler = async (event) => {
                     errorMessage: typedError.message,
                 });
                 return {
-                    statusCode: 500,
+                    statusCode: typedError.statusCode ?? 500,
                     headers: responseHeaders,
                     body: JSON.stringify({
                         message: error instanceof Error
