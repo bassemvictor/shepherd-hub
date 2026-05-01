@@ -474,6 +474,16 @@ type GoogleCalendarEventsResponse = {
   timeMin: string;
   timeMax: string;
   syncMode?: "full" | "incremental" | "direct" | "cached";
+  debug?: {
+    preFilterItemCount: number;
+    returnedItemCount: number;
+    filteredOutItems: Array<{
+      id: string;
+      title: string;
+      start: string;
+      end: string;
+    }>;
+  };
   changedResources?: Array<
     | ({
         id: string;
@@ -1393,6 +1403,24 @@ export default function App() {
   const [calendarReportingStatus, setCalendarReportingStatus] = useState<string | null>(null);
   const [isCalendarReportingLoading, setIsCalendarReportingLoading] = useState(false);
   const [isCalendarMonthLoading, setIsCalendarMonthLoading] = useState(false);
+  const [calendarMonthLoadBadge, setCalendarMonthLoadBadge] = useState<{
+    label: string;
+    tone: "neutral" | "success";
+  } | null>(null);
+  const [calendarMonthDebugInfo, setCalendarMonthDebugInfo] = useState<{
+    selectedYearMonth: string;
+    stage1ItemCount: number | null;
+    stage2ItemCount: number | null;
+    stage2ChangedResourceCount: number | null;
+    stage2Items: Array<{ id: string; title: string; calendarName?: string }>;
+    stage2PreFilterItemCount: number | null;
+    stage2FilteredOutItems: Array<{
+      id: string;
+      title: string;
+      start: string;
+      end: string;
+    }>;
+  } | null>(null);
   const [calendarEventForm, setCalendarEventForm] =
     useState<CalendarEventFormState>(initialCalendarEventForm);
   const [calendarEventFormStatus, setCalendarEventFormStatus] = useState<string | null>(null);
@@ -2264,6 +2292,8 @@ export default function App() {
     const requestId = calendarMonthEventsRequestRef.current + 1;
     calendarMonthEventsRequestRef.current = requestId;
     setIsCalendarMonthLoading(true);
+    setCalendarEventFormStatus(null);
+    const previouslyVisibleMonthEvents = calendarMonthEvents;
 
     const monthStart = new Date(
       calendarMonthViewDate.getFullYear(),
@@ -2290,6 +2320,15 @@ export default function App() {
       ).padStart(2, "0")}`;
       const requestLabel = `Google Calendar month events ${selectedYearMonth}`;
       const requestStartedAt = performance.now();
+      setCalendarMonthDebugInfo({
+        selectedYearMonth,
+        stage1ItemCount: null,
+        stage2ItemCount: null,
+        stage2ChangedResourceCount: null,
+        stage2Items: [],
+        stage2PreFilterItemCount: null,
+        stage2FilteredOutItems: [],
+      });
       const calendarsToLoad =
         googleCalendars.length > 0
           ? googleCalendars
@@ -2326,6 +2365,33 @@ export default function App() {
           payload: GoogleCalendarEventsResponse;
         }
       >();
+      let receivedCalendarResponseCount = 0;
+      let hasAppliedGoogleUpdate = false;
+
+      calendarsToLoad.forEach((calendar) => {
+        const previousItemsForCalendar = (previouslyVisibleMonthEvents?.items ?? []).filter(
+          (item) => (item.calendarId ?? "primary") === calendar.id,
+        );
+
+        if (previousItemsForCalendar.length === 0) {
+          return;
+        }
+
+        loadedCalendarResponseMap.set(calendar.id, {
+          calendar,
+          payload: {
+            message: previouslyVisibleMonthEvents?.message ?? "Google Calendar events loaded.",
+            time: previouslyVisibleMonthEvents?.time ?? new Date().toISOString(),
+            calendarId: calendar.id,
+            timeMin: previouslyVisibleMonthEvents?.timeMin ?? basePayload.timeMin,
+            timeMax: previouslyVisibleMonthEvents?.timeMax ?? basePayload.timeMax,
+            items: previousItemsForCalendar,
+            changedResources: [],
+            syncMode: previouslyVisibleMonthEvents?.syncMode,
+          },
+        });
+      });
+
       const buildMergedPayload = () => {
         const loadedCalendarResponses = Array.from(loadedCalendarResponseMap.values());
         const mergedItems = loadedCalendarResponses
@@ -2372,10 +2438,49 @@ export default function App() {
           return;
         }
 
+        receivedCalendarResponseCount += 1;
         loadedCalendarResponseMap.set(calendar.id, {
           calendar,
           payload,
         });
+
+        if (phase === "sync" || phase === "direct") {
+          hasAppliedGoogleUpdate = true;
+          setCalendarMonthLoadBadge({
+            label: "Updated from Google",
+            tone: "success",
+          });
+          setCalendarMonthDebugInfo((current) =>
+            current && current.selectedYearMonth === selectedYearMonth
+              ? {
+                  ...current,
+                  stage2ItemCount: mergedPayload.items.length,
+                  stage2ChangedResourceCount: mergedPayload.changedResources?.length ?? 0,
+                  stage2PreFilterItemCount: payload.debug?.preFilterItemCount ?? null,
+                  stage2FilteredOutItems: payload.debug?.filteredOutItems ?? [],
+                  stage2Items: mergedPayload.items.map((item) => ({
+                    id: item.id,
+                    title: item.title,
+                    calendarName: item.calendarName,
+                  })),
+                }
+              : current,
+          );
+        } else if (!hasAppliedGoogleUpdate) {
+          setCalendarMonthLoadBadge({
+            label: "Loaded from cache",
+            tone: "neutral",
+          });
+          setCalendarMonthDebugInfo((current) =>
+            current && current.selectedYearMonth === selectedYearMonth
+              ? {
+                  ...current,
+                  stage1ItemCount: mergedPayload.items.length,
+                }
+              : current,
+          );
+        }
+
         const mergedPayload = buildMergedPayload();
         setCalendarMonthEvents(mergedPayload);
         console.log("Google Calendar month events partial response received", {
@@ -2391,16 +2496,6 @@ export default function App() {
           changedResourceCount: payload.changedResources?.length ?? 0,
         });
       };
-
-      setCalendarMonthEvents({
-        message: "Google Calendar events loading...",
-        time: new Date().toISOString(),
-        calendarId: "all",
-        timeMin: basePayload.timeMin,
-        timeMax: basePayload.timeMax,
-        items: [],
-        changedResources: [],
-      });
 
       const calendarLoadPromises = calendarsToLoad.map(async (calendar) => {
         try {
@@ -2468,7 +2563,7 @@ export default function App() {
         return;
       }
 
-      if (loadedCalendarResponseMap.size === 0) {
+      if (receivedCalendarResponseCount === 0) {
         throw new Error("Unable to load month calendar events for any calendar.");
       }
 
@@ -2495,7 +2590,9 @@ export default function App() {
       if (calendarMonthEventsRequestRef.current !== requestId) {
         return;
       }
-      setCalendarMonthEvents(null);
+      if (!previouslyVisibleMonthEvents) {
+        setCalendarMonthEvents(null);
+      }
       setCalendarEventFormStatus(
         await getErrorMessage(error, "Unable to load month calendar events."),
       );
@@ -7174,6 +7271,75 @@ export default function App() {
                     <p className="placeholder-page-copy calendar-connect-copy">
                       Month view is showing events from all connected calendars.
                     </p>
+
+                    {calendarMonthLoadBadge ? (
+                      <p
+                        className={`calendar-month-load-badge ${calendarMonthLoadBadge.tone}`}
+                        role="status"
+                      >
+                        {calendarMonthLoadBadge.label}
+                      </p>
+                    ) : null}
+
+                    {calendarMonthDebugInfo ? (
+                      <div className="calendar-month-debug-panel">
+                        <p className="calendar-month-debug-title">
+                          Debug for {calendarMonthDebugInfo.selectedYearMonth}
+                        </p>
+                        <p className="calendar-month-debug-line">
+                          Stage 1 item count:{" "}
+                          {calendarMonthDebugInfo.stage1ItemCount ?? "pending"}
+                        </p>
+                        <p className="calendar-month-debug-line">
+                          Stage 2 pre-filter item count:{" "}
+                          {calendarMonthDebugInfo.stage2PreFilterItemCount ?? "pending"}
+                        </p>
+                        <p className="calendar-month-debug-line">
+                          Stage 2 item count:{" "}
+                          {calendarMonthDebugInfo.stage2ItemCount ?? "pending"}
+                        </p>
+                        <p className="calendar-month-debug-line">
+                          Stage 2 changed-resource count:{" "}
+                          {calendarMonthDebugInfo.stage2ChangedResourceCount ?? "pending"}
+                        </p>
+                        <div className="calendar-month-debug-events">
+                          <p className="calendar-month-debug-events-title">
+                            Stage 2 returned events
+                          </p>
+                          {calendarMonthDebugInfo.stage2Items.length > 0 ? (
+                            <ul className="calendar-month-debug-events-list">
+                              {calendarMonthDebugInfo.stage2Items.map((item) => (
+                                <li key={`${item.calendarName ?? "calendar"}-${item.id}`}>
+                                  <code>{item.id}</code> {item.title}
+                                  {item.calendarName ? ` (${item.calendarName})` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="calendar-month-debug-line">No stage 2 events yet.</p>
+                          )}
+                        </div>
+                        <div className="calendar-month-debug-events">
+                          <p className="calendar-month-debug-events-title">
+                            Stage 2 filtered out by Lambda
+                          </p>
+                          {calendarMonthDebugInfo.stage2FilteredOutItems.length > 0 ? (
+                            <ul className="calendar-month-debug-events-list">
+                              {calendarMonthDebugInfo.stage2FilteredOutItems.map((item) => (
+                                <li key={`filtered-${item.id}`}>
+                                  <code>{item.id}</code> {item.title}
+                                  {` [${item.start} -> ${item.end}]`}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="calendar-month-debug-line">
+                              No Lambda-filtered stage 2 events.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
 
                     {calendarEventFormStatus ? (
                       <p className="member-submit-message calendar-schedule-status">

@@ -740,6 +740,131 @@ test("loads Google calendar reporting rows from cached event metadata", async ()
         },
     ]);
 });
+test("keeps cached Google calendar events visible when incremental sync returns no changes", async () => {
+    const originalFetch = globalThis.fetch;
+    const connectionData = {
+        email: "user@example.com",
+        refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+        accessTokenEncrypted: encryptTestSecret("access-token"),
+        accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+        connectedAt: "2026-04-26T12:00:00.000Z",
+        updatedAt: "2026-04-26T12:05:00.000Z",
+        refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+        tokenScope: "https://www.googleapis.com/auth/calendar",
+        tokenType: "Bearer",
+        lastError: null,
+    };
+    const store = new Map();
+    const keyFor = (pk, sk) => `${pk}||${sk}`;
+    const syncPk = "CALENDAR_EVENT_SYNC#00000000-0000-4000-8000-000000000001#primary";
+    store.set(keyFor(syncPk, "SYNC_STATE"), {
+        pk: syncPk,
+        sk: "SYNC_STATE",
+        data: JSON.stringify({
+            syncToken: "sync-token-existing",
+        }),
+    });
+    store.set(keyFor(syncPk, "MONTH#2026-05#001"), {
+        pk: syncPk,
+        sk: "MONTH#2026-05#001",
+        data: JSON.stringify({
+            month: "2026-05",
+            items: [
+                {
+                    id: "event-existing",
+                    title: "Already Cached",
+                    status: "confirmed",
+                    htmlLink: "",
+                    location: "Office",
+                    description: "",
+                    eventType: "default",
+                    visibility: "default",
+                    start: "2026-05-03T15:00:00.000Z",
+                    end: "2026-05-03T16:00:00.000Z",
+                    isAllDay: false,
+                    organizer: "Admin",
+                    congregationItems: [],
+                },
+            ],
+        }),
+    });
+    const dynamo = createMockClient((command) => {
+        if (command.constructor.name === "GetCommand") {
+            const key = command.input?.Key;
+            if (key.pk === "CALENDAR_INTEGRATION") {
+                return {
+                    Item: {
+                        pk: key.pk,
+                        sk: key.sk,
+                        data: JSON.stringify(connectionData),
+                    },
+                };
+            }
+            return {
+                Item: store.get(keyFor(key.pk, key.sk)),
+            };
+        }
+        if (command.constructor.name === "PutCommand") {
+            const item = command.input?.Item;
+            store.set(keyFor(String(item.pk), String(item.sk)), item);
+            return {};
+        }
+        if (command.constructor.name === "DeleteCommand") {
+            const key = command.input?.Key;
+            store.delete(keyFor(key.pk, key.sk));
+            return {};
+        }
+        if (command.constructor.name === "QueryCommand") {
+            const values = command.input?.ExpressionAttributeValues;
+            const pk = values?.[":pk"];
+            return {
+                Items: Array.from(store.values()).filter((item) => item.pk === pk),
+            };
+        }
+        throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+    globalThis.fetch = async () => ({
+        ok: true,
+        json: async () => ({
+            items: [],
+            nextSyncToken: "sync-token-next",
+        }),
+    });
+    setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+    const response = await invokeHandler(createEvent({
+        path: "/calendar/google/events",
+        method: "POST",
+        groups: ["admin"],
+        body: {
+            timeMin: "2026-05-01T00:00:00.000Z",
+            timeMax: "2026-06-01T00:00:00.000Z",
+            timeZone: "America/Toronto",
+            calendarId: "primary",
+            useSyncCache: true,
+        },
+    }));
+    const body = parseBody(response.body);
+    globalThis.fetch = originalFetch;
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.syncMode, "incremental");
+    assert.deepEqual(body.items, [
+        {
+            id: "event-existing",
+            title: "Already Cached",
+            status: "confirmed",
+            htmlLink: "",
+            location: "Office",
+            description: "",
+            eventType: "default",
+            visibility: "default",
+            start: "2026-05-03T15:00:00.000Z",
+            end: "2026-05-03T16:00:00.000Z",
+            isAllDay: false,
+            organizer: "Admin",
+            congregationItems: [],
+        },
+    ]);
+});
 test("falls back to direct Google calendar events when sync cache loading fails", async () => {
     const originalFetch = globalThis.fetch;
     const connectionData = {

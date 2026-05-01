@@ -157,8 +157,7 @@ The sync-state `data` attribute looks like:
 
 ```json
 {
-  "syncToken": "CPDAlvWDx70CEPDAlvWDx70CGAU=",
-  "lastSyncedAt": "2026-04-28T12:15:00.000Z"
+  "syncToken": "CPDAlvWDx70CEPDAlvWDx70CGAU="
 }
 ```
 
@@ -224,7 +223,7 @@ sequenceDiagram
     UI->>API: POST /calendar/google/events<br/>calendarId, timeMin, timeMax,<br/>useSyncCache=true, forceSync=true
     API->>Lambda: Invoke route
     Lambda->>Dynamo: Get SYNC_STATE for calendar
-    Dynamo-->>Lambda: syncToken + lastSyncedAt
+    Dynamo-->>Lambda: syncToken
     Lambda->>Dynamo: Get CALENDAR_INTEGRATION / GOOGLE#userKey
     Dynamo-->>Lambda: Stored encrypted tokens
     Lambda->>Lambda: refreshGoogleAccessTokenIfNeeded()

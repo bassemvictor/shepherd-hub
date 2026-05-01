@@ -180,6 +180,22 @@ type GoogleCalendarLoadedEventsResult = {
   items: StoredGoogleCalendarSyncedEventData[];
   changedResources: GoogleCalendarSyncChangedResource[];
   syncMode: "full" | "incremental" | "direct" | "cached";
+  debug?: {
+    preFilterItemCount: number;
+    returnedItemCount: number;
+    filteredOutItems: Array<{
+      id: string;
+      title: string;
+      start: string;
+      end: string;
+    }>;
+  };
+};
+
+type GoogleCalendarSyncedCacheResult = {
+  changedResources: GoogleCalendarSyncChangedResource[];
+  hadPriorSyncToken: boolean;
+  events: StoredGoogleCalendarSyncedEventData[];
 };
 
 type UpdateParkingRegistrationStatusPayload = {
@@ -272,7 +288,6 @@ type StoredGoogleOAuthStateData = {
 
 type StoredGoogleCalendarSyncStateData = {
   syncToken: string;
-  lastSyncedAt: string;
 };
 
 type StoredGoogleCalendarSyncedEventData = {
@@ -634,8 +649,6 @@ const googleCalendarCongregationMetadataKey = "shepherdHubCongregation";
 const googleOauthStateTtlMs = 10 * 60 * 1000;
 const googleAccessTokenExpiryBufferMs = 60 * 1000;
 const googleCalendarMonthCacheTargetBytes = 350 * 1024;
-const googleCalendarCacheFreshMs = 2 * 60 * 1000;
-
 const getRequestGroups = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
   const claims =
     ((event.requestContext as { authorizer?: { jwt?: { claims?: Record<string, unknown> } } })
@@ -1158,10 +1171,27 @@ const loadGoogleCalendarEventsForCalendar = async ({
   forceSync: boolean;
   selectedYearMonth?: string;
 }): Promise<GoogleCalendarLoadedEventsResult> => {
+  console.log("loadGoogleCalendarEventsForCalendar started.", {
+    tableName,
+    userKey,
+    calendarId,
+    timeMin,
+    timeMax,
+    timeZone: timeZone ?? null,
+    useSyncCache,
+    cacheOnly,
+    forceSync,
+    selectedYearMonth: selectedYearMonth ?? null,
+  });
   let existingConnection: StoredGoogleCalendarConnectionData | null | undefined;
 
   const loadExistingConnection = async () => {
     if (existingConnection !== undefined) {
+      console.log("Reusing previously loaded Google Calendar connection state.", {
+        userKey,
+        calendarId,
+        hasConnection: Boolean(existingConnection),
+      });
       return existingConnection;
     }
 
@@ -1180,11 +1210,19 @@ const loadGoogleCalendarEventsForCalendar = async ({
     const connection = await loadExistingConnection();
 
     if (!connection) {
+      console.warn("Google Calendar connection is required but missing.", {
+        userKey,
+        calendarId,
+      });
       throw Object.assign(new Error("Google Calendar is not connected."), {
         statusCode: 404,
       });
     }
 
+    console.log("Google Calendar connection requirement satisfied.", {
+      userKey,
+      calendarId,
+    });
     return connection;
   };
 
@@ -1204,45 +1242,20 @@ const loadGoogleCalendarEventsForCalendar = async ({
           timeMax,
           selectedYearMonth: selectedYearMonth || undefined,
         });
-
-        return {
-          items: cachedItems,
-          changedResources: [],
-          syncMode: "cached",
-        };
-      }
-
-      const syncState = await getGoogleCalendarSyncState(tableName, userKey, calendarId);
-      const syncStateAgeMs = syncState?.lastSyncedAt
-        ? Date.parse(time) - Date.parse(syncState.lastSyncedAt)
-        : Number.NaN;
-      const shouldServeFreshCacheOnly =
-        !forceSync &&
-        Boolean(syncState?.syncToken) &&
-        Number.isFinite(syncStateAgeMs) &&
-        syncStateAgeMs >= 0 &&
-        syncStateAgeMs < googleCalendarCacheFreshMs;
-
-      if (shouldServeFreshCacheOnly) {
-        console.log("Serving Google Calendar events directly from fresh DynamoDB cache.", {
-          calendarId,
-          userKey,
-          selectedYearMonth: selectedYearMonth || null,
-          syncStateAgeMs,
-        });
-        const cachedItems = await getCachedGoogleCalendarEventsForRange({
-          tableName,
+        console.log("Google Calendar cache-only load completed.", {
           userKey,
           calendarId,
-          timeMin,
-          timeMax,
-          selectedYearMonth: selectedYearMonth || undefined,
+          cachedItemCount: cachedItems.length,
         });
 
         return {
           items: cachedItems,
           changedResources: [],
           syncMode: "cached",
+          debug: buildGoogleCalendarEventsRangeDebug({
+            allItems: cachedItems,
+            returnedItems: cachedItems,
+          }),
         };
       }
 
@@ -1270,20 +1283,68 @@ const loadGoogleCalendarEventsForCalendar = async ({
         calendarId,
         accessToken,
       });
-
-      const cachedItems = await getCachedGoogleCalendarEventsForRange({
-        tableName,
+      console.log("Google Calendar sync result ready for range filtering.", {
         userKey,
         calendarId,
+        totalSyncedEventCount: syncResult.events.length,
+        changedResourceCount: syncResult.changedResources.length,
+        hadPriorSyncToken: syncResult.hadPriorSyncToken,
+      });
+      const monthCandidateItems = syncResult.events.filter((item) => {
+        if (!selectedYearMonth) {
+          return true;
+        }
+
+        const start = Date.parse(item.start);
+        const end = Date.parse(item.end);
+
+        if (!Number.isFinite(start) || !Number.isFinite(end)) {
+          return false;
+        }
+
+        const relevantMonthKeys = new Set<string>([item.start.slice(0, 7)]);
+        relevantMonthKeys.add(new Date(Math.max(start, end - 1)).toISOString().slice(0, 7));
+        return relevantMonthKeys.has(selectedYearMonth);
+      });
+      console.log("Google Calendar month candidate filtering completed.", {
+        userKey,
+        calendarId,
+        selectedYearMonth: selectedYearMonth ?? null,
+        monthCandidateCount: monthCandidateItems.length,
+        monthCandidatePreview: monthCandidateItems.slice(0, 10).map((item) => ({
+          id: item.id,
+          title: item.title,
+          start: item.start,
+          end: item.end,
+        })),
+      });
+      const returnedItems = filterGoogleCalendarEventsForRange({
+        items: syncResult.events,
         timeMin,
         timeMax,
-        selectedYearMonth: selectedYearMonth || undefined,
+        selectedYearMonth,
+      });
+      console.log("Google Calendar stage 2 range filtering completed.", {
+        userKey,
+        calendarId,
+        returnedItemCount: returnedItems.length,
+        returnedItemPreview: returnedItems.slice(0, 10).map((item) => ({
+          id: item.id,
+          title: item.title,
+          start: item.start,
+          end: item.end,
+        })),
       });
 
       return {
-        items: cachedItems,
+        items: returnedItems,
         changedResources: syncResult.changedResources,
         syncMode: syncResult.hadPriorSyncToken ? "incremental" : "full",
+        debug: buildGoogleCalendarEventsRangeDebug({
+          allItems: syncResult.events,
+          candidateItems: monthCandidateItems,
+          returnedItems,
+        }),
       };
     } catch (error) {
       const typedError = error as Error & { statusCode?: number };
@@ -1315,16 +1376,29 @@ const loadGoogleCalendarEventsForCalendar = async ({
         userKey,
         calendarId,
       });
+      const directFallbackItems = await listGoogleCalendarEvents({
+        accessToken,
+        calendarId,
+        timeMin,
+        timeMax,
+        timeZone,
+      });
+      console.log("Google Calendar direct fallback load completed.", {
+        userKey,
+        calendarId,
+        itemCount: directFallbackItems.length,
+        itemPreview: directFallbackItems.slice(0, 10).map((item) => ({
+          id: item.id,
+          title: item.title,
+          start: item.start,
+          end: item.end,
+        })),
+      });
       return {
-        items: await listGoogleCalendarEvents({
-          accessToken,
-          calendarId,
-          timeMin,
-          timeMax,
-          timeZone,
-        }),
+        items: directFallbackItems,
         changedResources: [],
         syncMode: "direct",
+        debug: undefined,
       };
     }
   }
@@ -1346,16 +1420,32 @@ const loadGoogleCalendarEventsForCalendar = async ({
     userKey,
     calendarId,
   });
+  const directItems = await listGoogleCalendarEvents({
+    accessToken,
+    calendarId,
+    timeMin,
+    timeMax,
+    timeZone,
+  });
+  console.log("Google Calendar direct non-cache load completed.", {
+    userKey,
+    calendarId,
+    itemCount: directItems.length,
+    itemPreview: directItems.slice(0, 10).map((item) => ({
+      id: item.id,
+      title: item.title,
+      start: item.start,
+      end: item.end,
+    })),
+  });
   return {
-    items: await listGoogleCalendarEvents({
-      accessToken,
-      calendarId,
-      timeMin,
-      timeMax,
-      timeZone,
-    }),
+    items: directItems,
     changedResources: [],
     syncMode: "direct",
+    debug: buildGoogleCalendarEventsRangeDebug({
+      allItems: directItems,
+      returnedItems: directItems,
+    }),
   };
 };
 
@@ -1462,7 +1552,6 @@ const getGoogleCalendarSyncState = async (
       userKey,
       calendarId,
       hasSyncToken: Boolean(parsed.syncToken),
-      lastSyncedAt: parsed.lastSyncedAt ?? null,
     });
     return parsed;
   } catch {
@@ -1485,7 +1574,6 @@ const saveGoogleCalendarSyncState = async (
     userKey,
     calendarId,
     hasSyncToken: Boolean(syncState.syncToken),
-    lastSyncedAt: syncState.lastSyncedAt ?? null,
   });
   await dynamoClient.send(
     new PutCommand({
@@ -1658,7 +1746,7 @@ const syncGoogleCalendarEventCache = async ({
   userKey: string;
   calendarId: string;
   accessToken: string;
-}) => {
+}): Promise<GoogleCalendarSyncedCacheResult> => {
   console.log("Starting Google Calendar event cache sync.", {
     tableName,
     userKey,
@@ -1788,7 +1876,6 @@ const syncGoogleCalendarEventCache = async ({
   if (nextSyncToken) {
     await saveGoogleCalendarSyncState(tableName, userKey, calendarId, {
       syncToken: nextSyncToken,
-      lastSyncedAt: time,
     });
   }
 
@@ -1817,9 +1904,101 @@ const syncGoogleCalendarEventCache = async ({
     savedNextSyncToken: Boolean(nextSyncToken),
   });
 
+  await ensureCachedEventsLoaded();
+
   return {
     changedResources,
     hadPriorSyncToken: Boolean(priorSyncToken),
+    events: Array.from(cachedEventsById.values()).sort((left, right) =>
+      left.start.localeCompare(right.start),
+    ),
+  };
+};
+
+const filterGoogleCalendarEventsForRange = ({
+  items,
+  timeMin,
+  timeMax,
+  selectedYearMonth,
+}: {
+  items: StoredGoogleCalendarSyncedEventData[];
+  timeMin: string;
+  timeMax: string;
+  selectedYearMonth?: string;
+}) => {
+  const windowStart = Date.parse(timeMin);
+  const windowEnd = Date.parse(timeMax);
+  const monthStart = new Date(timeMin);
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const monthKeys = new Set<string>();
+  const cursor = new Date(monthStart);
+
+  while (cursor.getTime() < windowEnd) {
+    monthKeys.add(cursor.toISOString().slice(0, 7));
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+
+  const candidateItems = items.filter((item) => {
+    const start = Date.parse(item.start);
+    const end = Date.parse(item.end);
+
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+      return false;
+    }
+
+    const relevantMonthKeys = new Set<string>([item.start.slice(0, 7)]);
+    relevantMonthKeys.add(new Date(Math.max(start, end - 1)).toISOString().slice(0, 7));
+
+    if (selectedYearMonth && monthKeys.size === 1) {
+      return relevantMonthKeys.has(selectedYearMonth);
+    }
+
+    return Array.from(relevantMonthKeys).some((monthKey) => monthKeys.has(monthKey));
+  });
+
+  if (selectedYearMonth && monthKeys.size === 1) {
+    return candidateItems.slice().sort((left, right) => left.start.localeCompare(right.start));
+  }
+
+  return candidateItems
+    .filter((item) => {
+      const start = Date.parse(item.start);
+      const end = Date.parse(item.end);
+      return (
+        Number.isFinite(start) &&
+        Number.isFinite(end) &&
+        end > windowStart &&
+        start < windowEnd
+      );
+    })
+    .sort((left, right) => left.start.localeCompare(right.start));
+};
+
+const buildGoogleCalendarEventsRangeDebug = ({
+  allItems,
+  candidateItems,
+  returnedItems,
+}: {
+  allItems: StoredGoogleCalendarSyncedEventData[];
+  candidateItems?: StoredGoogleCalendarSyncedEventData[];
+  returnedItems: StoredGoogleCalendarSyncedEventData[];
+}) => {
+  const debugSourceItems = candidateItems ?? allItems;
+  const returnedIds = new Set(returnedItems.map((item) => item.id));
+
+  return {
+    preFilterItemCount: debugSourceItems.length,
+    returnedItemCount: returnedItems.length,
+    filteredOutItems: debugSourceItems
+      .filter((item) => !returnedIds.has(item.id))
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        start: item.start,
+        end: item.end,
+      }))
+      .slice(0, 25),
   };
 };
 
@@ -1880,7 +2059,8 @@ const getCachedGoogleCalendarEventsForRange = async ({
     }),
   );
 
-  const items = ((response.Items ?? []) as TableRow[])
+  const items = filterGoogleCalendarEventsForRange({
+    items: ((response.Items ?? []) as TableRow[])
     .map((item) => {
       const parsed = parseGoogleCalendarMonthCacheRow(item);
 
@@ -1898,13 +2078,11 @@ const getCachedGoogleCalendarEventsForRange = async ({
       (item): item is StoredGoogleCalendarMonthCacheData =>
         item !== null && monthKeys.has(item.month),
     )
-    .flatMap((item) => item.items)
-    .filter((item) => {
-      const start = Date.parse(item.start);
-      const end = Date.parse(item.end);
-      return Number.isFinite(start) && Number.isFinite(end) && end > windowStart && start < windowEnd;
-    })
-    .sort((left, right) => left.start.localeCompare(right.start));
+    .flatMap((item) => item.items),
+    timeMin,
+    timeMax,
+    selectedYearMonth,
+  });
 
   console.log("Loaded cached Google Calendar events for range.", {
     userKey,
@@ -2916,6 +3094,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             items: items.items,
             changedResources: items.changedResources,
             syncMode: items.syncMode,
+            debug: items.debug,
           }),
         };
       } catch (error) {
