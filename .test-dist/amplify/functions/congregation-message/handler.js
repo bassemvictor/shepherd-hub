@@ -486,33 +486,12 @@ const listGoogleCalendarEvents = async ({ accessToken, calendarId, timeMin, time
         .filter((item) => item !== null);
 };
 const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, calendarId, timeMin, timeMax, timeZone, useSyncCache, cacheOnly, selectedYearMonth, }) => {
-    console.log("loadGoogleCalendarEventsForCalendar started.", {
-        tableName,
-        userKey,
-        calendarId,
-        timeMin,
-        timeMax,
-        timeZone: timeZone ?? null,
-        useSyncCache,
-        cacheOnly,
-        selectedYearMonth: selectedYearMonth ?? null,
-    });
     let existingConnection;
     const loadExistingConnection = async () => {
         if (existingConnection !== undefined) {
-            console.log("Reusing previously loaded Google Calendar connection state.", {
-                userKey,
-                calendarId,
-                hasConnection: Boolean(existingConnection),
-            });
             return existingConnection;
         }
         existingConnection = await getStoredGoogleConnection(tableName, userKey);
-        console.log("Google Calendar events connection lookup completed.", {
-            userKey,
-            calendarId,
-            hasConnection: Boolean(existingConnection),
-        });
         return existingConnection;
     };
     const requireExistingConnection = async () => {
@@ -526,20 +505,11 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                 statusCode: 404,
             });
         }
-        console.log("Google Calendar connection requirement satisfied.", {
-            userKey,
-            calendarId,
-        });
         return connection;
     };
     if (useSyncCache) {
         try {
             if (cacheOnly) {
-                console.log("Serving Google Calendar events from DynamoDB cache only.", {
-                    calendarId,
-                    userKey,
-                    selectedYearMonth: selectedYearMonth || null,
-                });
                 const cachedItems = await getCachedGoogleCalendarEventsForRange({
                     tableName,
                     userKey,
@@ -547,11 +517,6 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                     timeMin,
                     timeMax,
                     selectedYearMonth: selectedYearMonth || undefined,
-                });
-                console.log("Google Calendar cache-only load completed.", {
-                    userKey,
-                    calendarId,
-                    cachedItemCount: cachedItems.length,
                 });
                 return {
                     items: cachedItems,
@@ -570,29 +535,13 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                 email: userKey,
                 connection,
             });
-            console.log("Google Calendar events connection ready.", {
-                userKey,
-                calendarId,
-                accessTokenExpiresAt: currentConnection.accessTokenExpiresAt ?? null,
-            });
             const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
-            console.log("Google Calendar access token decrypted for events request.", {
-                userKey,
-                calendarId,
-            });
             const syncResult = await syncGoogleCalendarEventCache({
                 tableName,
                 time,
                 userKey,
                 calendarId,
                 accessToken,
-            });
-            console.log("Google Calendar sync result ready for range filtering.", {
-                userKey,
-                calendarId,
-                totalSyncedEventCount: syncResult.events.length,
-                changedResourceCount: syncResult.changedResources.length,
-                hadPriorSyncToken: syncResult.hadPriorSyncToken,
             });
             const monthCandidateItems = syncResult.events.filter((item) => {
                 if (!selectedYearMonth) {
@@ -607,34 +556,11 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                 relevantMonthKeys.add(new Date(Math.max(start, end - 1)).toISOString().slice(0, 7));
                 return relevantMonthKeys.has(selectedYearMonth);
             });
-            console.log("Google Calendar month candidate filtering completed.", {
-                userKey,
-                calendarId,
-                selectedYearMonth: selectedYearMonth ?? null,
-                monthCandidateCount: monthCandidateItems.length,
-                monthCandidatePreview: monthCandidateItems.slice(0, 10).map((item) => ({
-                    id: item.id,
-                    title: item.title,
-                    start: item.start,
-                    end: item.end,
-                })),
-            });
             const returnedItems = filterGoogleCalendarEventsForRange({
                 items: syncResult.events,
                 timeMin,
                 timeMax,
                 selectedYearMonth,
-            });
-            console.log("Google Calendar stage 2 range filtering completed.", {
-                userKey,
-                calendarId,
-                returnedItemCount: returnedItems.length,
-                returnedItemPreview: returnedItems.slice(0, 10).map((item) => ({
-                    id: item.id,
-                    title: item.title,
-                    start: item.start,
-                    end: item.end,
-                })),
             });
             return {
                 items: returnedItems,
@@ -667,33 +593,13 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                 email: userKey,
                 connection,
             });
-            console.log("Google Calendar events connection ready for direct fallback.", {
-                userKey,
-                calendarId,
-                accessTokenExpiresAt: currentConnection.accessTokenExpiresAt ?? null,
-            });
             const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
-            console.log("Google Calendar access token decrypted for direct fallback.", {
-                userKey,
-                calendarId,
-            });
             const directFallbackItems = await listGoogleCalendarEvents({
                 accessToken,
                 calendarId,
                 timeMin,
                 timeMax,
                 timeZone,
-            });
-            console.log("Google Calendar direct fallback load completed.", {
-                userKey,
-                calendarId,
-                itemCount: directFallbackItems.length,
-                itemPreview: directFallbackItems.slice(0, 10).map((item) => ({
-                    id: item.id,
-                    title: item.title,
-                    start: item.start,
-                    end: item.end,
-                })),
             });
             return {
                 items: directFallbackItems,
@@ -710,33 +616,13 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
         email: userKey,
         connection,
     });
-    console.log("Google Calendar events connection ready.", {
-        userKey,
-        calendarId,
-        accessTokenExpiresAt: currentConnection.accessTokenExpiresAt ?? null,
-    });
     const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
-    console.log("Google Calendar access token decrypted for events request.", {
-        userKey,
-        calendarId,
-    });
     const directItems = await listGoogleCalendarEvents({
         accessToken,
         calendarId,
         timeMin,
         timeMax,
         timeZone,
-    });
-    console.log("Google Calendar direct non-cache load completed.", {
-        userKey,
-        calendarId,
-        itemCount: directItems.length,
-        itemPreview: directItems.slice(0, 10).map((item) => ({
-            id: item.id,
-            title: item.title,
-            start: item.start,
-            end: item.end,
-        })),
     });
     return {
         items: directItems,
@@ -938,21 +824,9 @@ const rewriteGoogleCalendarMonthCache = async ({ tableName, userKey, calendarId,
     }))));
 };
 const syncGoogleCalendarEventCache = async ({ tableName, time, userKey, calendarId, accessToken, }) => {
-    console.log("Starting Google Calendar event cache sync.", {
-        tableName,
-        userKey,
-        calendarId,
-    });
     const syncState = await getGoogleCalendarSyncState(tableName, userKey, calendarId);
     const priorSyncToken = syncState?.syncToken;
     const cachedState = await loadAllGoogleCalendarCachedEvents(tableName, userKey, calendarId);
-    console.log("Google Calendar cached baseline loaded for sync.", {
-        calendarId,
-        userKey,
-        hadPriorSyncToken: Boolean(priorSyncToken),
-        cachedRowCount: cachedState.rows.length,
-        cachedEventCount: cachedState.items.length,
-    });
     const cachedEventsById = new Map(cachedState.items.map((item) => [item.id, item]));
     let pageToken = "";
     let nextSyncToken = "";
@@ -966,14 +840,6 @@ const syncGoogleCalendarEventCache = async ({ tableName, time, userKey, calendar
                 calendarId,
                 syncToken: priorSyncToken,
                 pageToken: pageToken || undefined,
-            });
-            console.log("Processing Google Calendar sync page.", {
-                calendarId,
-                userKey,
-                pageCount,
-                receivedItemCount: page.items.length,
-                hasNextPageToken: Boolean(page.nextPageToken),
-                hasNextSyncToken: Boolean(page.nextSyncToken),
             });
             for (const rawItem of page.items) {
                 if (!rawItem.id) {
@@ -1052,21 +918,6 @@ const syncGoogleCalendarEventCache = async ({ tableName, time, userKey, calendar
             events: Array.from(cachedEventsById.values()),
         });
     }
-    else {
-        console.log("Skipping Google Calendar month cache rewrite because sync returned no changes.", {
-            calendarId,
-            userKey,
-            hadPriorSyncToken: Boolean(priorSyncToken),
-        });
-    }
-    console.log("Google Calendar event cache sync completed.", {
-        calendarId,
-        userKey,
-        pageCount,
-        changedResourceCount: changedResources.length,
-        hadPriorSyncToken: Boolean(priorSyncToken),
-        savedNextSyncToken: Boolean(nextSyncToken),
-    });
     return {
         changedResources,
         hadPriorSyncToken: Boolean(priorSyncToken),
@@ -1846,17 +1697,6 @@ export const handler = async (event) => {
             const useSyncCache = payload.useSyncCache === true;
             const cacheOnly = payload.cacheOnly === true;
             const selectedYearMonth = normalizeWhitespace(payload.selectedYearMonth);
-            console.log("Google Calendar events request received.", {
-                requestPath,
-                userKey: requestUserKey,
-                calendarId,
-                timeMin,
-                timeMax,
-                timeZone: timeZone || null,
-                useSyncCache,
-                cacheOnly,
-                selectedYearMonth: selectedYearMonth || null,
-            });
             if (!timeMin || !timeMax) {
                 return {
                     statusCode: 400,
@@ -1891,13 +1731,6 @@ export const handler = async (event) => {
                     useSyncCache,
                     cacheOnly,
                     selectedYearMonth: selectedYearMonth || undefined,
-                });
-                console.log("Google Calendar events request succeeded.", {
-                    userKey: requestUserKey,
-                    calendarId,
-                    syncMode: items.syncMode,
-                    itemCount: items.items.length,
-                    changedResourceCount: items.changedResources.length,
                 });
                 return {
                     statusCode: 200,
