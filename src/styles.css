@@ -1729,26 +1729,35 @@ button {
   margin: 0;
 }
 
+.calendar-month-picker-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .calendar-month-load-badge {
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  margin: -0.15rem 0 0;
-  padding: 0.45rem 0.8rem;
+  margin: 0;
+  padding: 0.18rem 0.5rem;
   border-radius: 999px;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .calendar-month-load-badge.neutral {
-  border: 1px solid rgba(172, 141, 76, 0.28);
+  border: 1px solid rgba(172, 141, 76, 0.22);
   background: rgba(172, 141, 76, 0.1);
   color: #8a6c2f;
 }
 
 .calendar-month-load-badge.success {
-  border: 1px solid rgba(21, 128, 61, 0.2);
+  border: 1px solid rgba(21, 128, 61, 0.16);
   background: rgba(21, 128, 61, 0.1);
   color: #166534;
 }

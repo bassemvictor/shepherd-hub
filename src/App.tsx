@@ -2488,8 +2488,12 @@ export default function App() {
         if (phase === "sync" || phase === "direct") {
           googleCompletedCalendarIds.add(calendar.id);
           if (googleCompletedCalendarIds.size === calendarsToLoad.length) {
+            const syncCompletedLabel = new Date().toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            });
             setCalendarMonthLoadBadge({
-              label: "Updated from Google",
+              label: `Last sync ${syncCompletedLabel}`,
               tone: "success",
             });
           }
@@ -7226,10 +7230,6 @@ export default function App() {
                   <div>
                     <p className="placeholder-page-kicker">Google Calendar</p>
                     <h3 className="calendar-connect-title">Schedule</h3>
-                    <p className="placeholder-page-copy calendar-connect-copy">
-                      Browse a full month of events across all connected calendars and
-                      choose which calendar to use when booking a new event.
-                    </p>
                   </div>
                 </div>
 
@@ -7245,7 +7245,17 @@ export default function App() {
                   <>
                     <div className="calendar-month-toolbar">
                       <label className="member-field">
-                        <span>New event calendar</span>
+                        <span className="calendar-month-picker-label">
+                          <span>New event calendar</span>
+                          {calendarMonthLoadBadge ? (
+                            <span
+                              className={`calendar-month-load-badge ${calendarMonthLoadBadge.tone}`}
+                              role="status"
+                            >
+                              {calendarMonthLoadBadge.label}
+                            </span>
+                          ) : null}
+                        </span>
                         <select
                           value={selectedGoogleCalendarId}
                           onChange={(event) => setSelectedGoogleCalendarId(event.target.value)}
@@ -7307,19 +7317,6 @@ export default function App() {
                         </button>
                       </div>
                     </div>
-
-                    <p className="placeholder-page-copy calendar-connect-copy">
-                      Month view is showing events from all connected calendars.
-                    </p>
-
-                    {calendarMonthLoadBadge ? (
-                      <p
-                        className={`calendar-month-load-badge ${calendarMonthLoadBadge.tone}`}
-                        role="status"
-                      >
-                        {calendarMonthLoadBadge.label}
-                      </p>
-                    ) : null}
 
                     {calendarMonthDebugInfo ? (
                       <div className="calendar-month-debug-panel">
