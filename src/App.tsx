@@ -534,7 +534,6 @@ type GoogleCalendarEventsPayload = {
   calendarId?: string;
   useSyncCache?: boolean;
   cacheOnly?: boolean;
-  forceSync?: boolean;
   congregationItems?: CongregationDirectoryResponse["items"];
   selectedYearMonth?: string;
 };
@@ -998,6 +997,28 @@ const assignGoogleCalendarPalette = (
     };
   });
 
+const areGoogleCalendarListsEqual = (
+  left: GoogleCalendarListResponse["items"],
+  right: GoogleCalendarListResponse["items"],
+) =>
+  left.length === right.length &&
+  left.every((leftItem, index) => {
+    const rightItem = right[index];
+
+    return (
+      rightItem !== undefined &&
+      leftItem.id === rightItem.id &&
+      leftItem.name === rightItem.name &&
+      leftItem.primary === rightItem.primary &&
+      leftItem.accessRole === rightItem.accessRole &&
+      leftItem.timeZone === rightItem.timeZone &&
+      leftItem.hidden === rightItem.hidden &&
+      leftItem.selected === rightItem.selected &&
+      leftItem.calendarColor === rightItem.calendarColor &&
+      leftItem.calendarColorEmoji === rightItem.calendarColorEmoji
+    );
+  });
+
 const hexToRgba = (hexColor: string, alpha: number) => {
   const normalized = hexColor.replace("#", "");
   const safeHex =
@@ -1332,6 +1353,8 @@ export default function App() {
   const memberPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const isApplyingPopStateRef = useRef(false);
   const calendarMonthEventsRequestRef = useRef(0);
+  const googleCalendarsRequestPromiseRef =
+    useRef<Promise<GoogleCalendarListResponse["items"]> | null>(null);
   const memberLongPressTimerRef = useRef<number | null>(null);
   const suppressMemberClickRef = useRef(false);
   const initialGoogleCalendarCallbackState = getInitialCalendarCallbackState();
@@ -2020,25 +2043,44 @@ export default function App() {
 
   const loadGoogleCalendars = async () => {
     if (!congregationApiName) {
-      return;
+      return [] as GoogleCalendarListResponse["items"];
     }
 
-    try {
-      const response = await authorizedGet<GoogleCalendarListResponse>(
-        "/calendar/google/calendars",
-      );
-      setGoogleCalendars(assignGoogleCalendarPalette(response.items));
-      setSelectedGoogleCalendarId((current) => {
-        if (response.items.some((item) => item.id === current)) {
-          return current;
-        }
-
-        return response.items.find((item) => item.primary)?.id ?? response.items[0]?.id ?? "primary";
-      });
-    } catch (error) {
-      setGoogleCalendars([]);
-      setCalendarAvailabilityStatus(await getErrorMessage(error, "Unable to load Google calendars."));
+    if (googleCalendarsRequestPromiseRef.current) {
+      return googleCalendarsRequestPromiseRef.current;
     }
+
+    const requestPromise = (async () => {
+      try {
+        const response = await authorizedGet<GoogleCalendarListResponse>(
+          "/calendar/google/calendars",
+        );
+        const calendars = assignGoogleCalendarPalette(response.items);
+        setGoogleCalendars((current) =>
+          areGoogleCalendarListsEqual(current, calendars) ? current : calendars,
+        );
+        setSelectedGoogleCalendarId((current) => {
+          if (response.items.some((item) => item.id === current)) {
+            return current;
+          }
+
+          return (
+            response.items.find((item) => item.primary)?.id ?? response.items[0]?.id ?? "primary"
+          );
+        });
+        return calendars;
+      } catch (error) {
+        setCalendarAvailabilityStatus(
+          await getErrorMessage(error, "Unable to load Google calendars."),
+        );
+        return googleCalendars;
+      } finally {
+        googleCalendarsRequestPromiseRef.current = null;
+      }
+    })();
+
+    googleCalendarsRequestPromiseRef.current = requestPromise;
+    return requestPromise;
   };
 
   const loadCongregationDirectory = async () => {
@@ -2061,13 +2103,11 @@ export default function App() {
     timeMax,
     useSyncCache = true,
     cacheOnly = false,
-    forceSync = false,
   }: {
     timeMin: string;
     timeMax: string;
     useSyncCache?: boolean;
     cacheOnly?: boolean;
-    forceSync?: boolean;
   }) => {
     const calendarsToLoad =
       googleCalendars.length > 0
@@ -2096,7 +2136,6 @@ export default function App() {
           timeZone,
           useSyncCache,
           cacheOnly,
-          forceSync,
           selectedYearMonth: timeMin.slice(0, 7),
         });
         const payload = (await response.body.json()) as GoogleCalendarEventsResponse;
@@ -2201,7 +2240,6 @@ export default function App() {
         const syncResponse = await authorizedPost("/calendar/google/reporting", {
           year,
           calendarIds,
-          forceSync: true,
         });
         const syncPayload = (await syncResponse.body.json()) as GoogleCalendarReportingResponse;
         setCalendarReportingRows(syncPayload.rows);
@@ -2329,9 +2367,11 @@ export default function App() {
         stage2PreFilterItemCount: null,
         stage2FilteredOutItems: [],
       });
+      const loadedCalendars =
+        googleCalendars.length > 0 ? googleCalendars : await loadGoogleCalendars();
       const calendarsToLoad =
-        googleCalendars.length > 0
-          ? googleCalendars
+        loadedCalendars.length > 0
+          ? loadedCalendars
           : [
               ...assignGoogleCalendarPalette([
                 {
@@ -2366,7 +2406,7 @@ export default function App() {
         }
       >();
       let receivedCalendarResponseCount = 0;
-      let hasAppliedGoogleUpdate = false;
+      const googleCompletedCalendarIds = new Set<string>();
 
       calendarsToLoad.forEach((calendar) => {
         const previousItemsForCalendar = (previouslyVisibleMonthEvents?.items ?? []).filter(
@@ -2443,13 +2483,16 @@ export default function App() {
           calendar,
           payload,
         });
+        const mergedPayload = buildMergedPayload();
 
         if (phase === "sync" || phase === "direct") {
-          hasAppliedGoogleUpdate = true;
-          setCalendarMonthLoadBadge({
-            label: "Updated from Google",
-            tone: "success",
-          });
+          googleCompletedCalendarIds.add(calendar.id);
+          if (googleCompletedCalendarIds.size === calendarsToLoad.length) {
+            setCalendarMonthLoadBadge({
+              label: "Updated from Google",
+              tone: "success",
+            });
+          }
           setCalendarMonthDebugInfo((current) =>
             current && current.selectedYearMonth === selectedYearMonth
               ? {
@@ -2466,7 +2509,7 @@ export default function App() {
                 }
               : current,
           );
-        } else if (!hasAppliedGoogleUpdate) {
+        } else if (googleCompletedCalendarIds.size === 0) {
           setCalendarMonthLoadBadge({
             label: "Loaded from cache",
             tone: "neutral",
@@ -2480,8 +2523,6 @@ export default function App() {
               : current,
           );
         }
-
-        const mergedPayload = buildMergedPayload();
         setCalendarMonthEvents(mergedPayload);
         console.log("Google Calendar month events partial response received", {
           label: requestLabel,
@@ -2515,7 +2556,6 @@ export default function App() {
             const syncResponse = await authorizedPost("/calendar/google/events", {
               ...basePayload,
               calendarId: calendar.id,
-              forceSync: true,
             });
             const syncPayload = (await syncResponse.body.json()) as GoogleCalendarEventsResponse;
             applyCalendarPayload({

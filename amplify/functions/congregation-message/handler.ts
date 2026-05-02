@@ -114,7 +114,6 @@ type GoogleCalendarEventsPayload = {
   calendarId?: string;
   useSyncCache?: boolean;
   cacheOnly?: boolean;
-  forceSync?: boolean;
   selectedYearMonth?: string;
 };
 
@@ -122,7 +121,6 @@ type GoogleCalendarReportingPayload = {
   year?: number;
   calendarIds?: string[];
   cacheOnly?: boolean;
-  forceSync?: boolean;
 };
 
 type GoogleCalendarCongregationMetadataItem = {
@@ -1156,7 +1154,6 @@ const loadGoogleCalendarEventsForCalendar = async ({
   timeZone,
   useSyncCache,
   cacheOnly,
-  forceSync,
   selectedYearMonth,
 }: {
   tableName: string;
@@ -1168,7 +1165,6 @@ const loadGoogleCalendarEventsForCalendar = async ({
   timeZone?: string;
   useSyncCache: boolean;
   cacheOnly: boolean;
-  forceSync: boolean;
   selectedYearMonth?: string;
 }): Promise<GoogleCalendarLoadedEventsResult> => {
   console.log("loadGoogleCalendarEventsForCalendar started.", {
@@ -1180,7 +1176,6 @@ const loadGoogleCalendarEventsForCalendar = async ({
     timeZone: timeZone ?? null,
     useSyncCache,
     cacheOnly,
-    forceSync,
     selectedYearMonth: selectedYearMonth ?? null,
   });
   let existingConnection: StoredGoogleCalendarConnectionData | null | undefined;
@@ -1754,33 +1749,21 @@ const syncGoogleCalendarEventCache = async ({
   });
   const syncState = await getGoogleCalendarSyncState(tableName, userKey, calendarId);
   const priorSyncToken = syncState?.syncToken;
-  let cachedState:
-    | {
-        rows: TableRow[];
-        items: StoredGoogleCalendarSyncedEventData[];
-      }
-    | null = priorSyncToken
-    ? null
-    : {
-        rows: [] as TableRow[],
-        items: [] as StoredGoogleCalendarSyncedEventData[],
-      };
-  let cachedEventsById = new Map<string, StoredGoogleCalendarSyncedEventData>(
-    (cachedState?.items ?? []).map((item) => [item.id, item] as const),
+  const cachedState = await loadAllGoogleCalendarCachedEvents(tableName, userKey, calendarId);
+  console.log("Google Calendar cached baseline loaded for sync.", {
+    calendarId,
+    userKey,
+    hadPriorSyncToken: Boolean(priorSyncToken),
+    cachedRowCount: cachedState.rows.length,
+    cachedEventCount: cachedState.items.length,
+  });
+  const cachedEventsById = new Map<string, StoredGoogleCalendarSyncedEventData>(
+    cachedState.items.map((item) => [item.id, item] as const),
   );
   let pageToken = "";
   let nextSyncToken = "";
   const changedResources: GoogleCalendarSyncChangedResource[] = [];
   let pageCount = 0;
-
-  const ensureCachedEventsLoaded = async () => {
-    if (cachedState) {
-      return;
-    }
-
-    cachedState = await loadAllGoogleCalendarCachedEvents(tableName, userKey, calendarId);
-    cachedEventsById = new Map(cachedState.items.map((item) => [item.id, item] as const));
-  };
 
   try {
     do {
@@ -1811,7 +1794,6 @@ const syncGoogleCalendarEventCache = async ({
         }
 
         if (rawItem.status === "cancelled") {
-          await ensureCachedEventsLoaded();
           changedResources.push({
             id: String(rawItem.id),
             status: rawItem.status ?? "cancelled",
@@ -1837,7 +1819,6 @@ const syncGoogleCalendarEventCache = async ({
           ...normalizedEvent,
           changeType: "upsert",
         });
-        await ensureCachedEventsLoaded();
         cachedEventsById.set(normalizedEvent.id, normalizedEvent);
       }
 
@@ -1884,7 +1865,7 @@ const syncGoogleCalendarEventCache = async ({
       tableName,
       userKey,
       calendarId,
-      rows: cachedState?.rows ?? [],
+      rows: cachedState.rows,
       events: Array.from(cachedEventsById.values()),
     });
   } else {
@@ -1903,8 +1884,6 @@ const syncGoogleCalendarEventCache = async ({
     hadPriorSyncToken: Boolean(priorSyncToken),
     savedNextSyncToken: Boolean(nextSyncToken),
   });
-
-  await ensureCachedEventsLoaded();
 
   return {
     changedResources,
@@ -3017,7 +2996,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       const calendarId = normalizeWhitespace(payload.calendarId) || "primary";
       const useSyncCache = payload.useSyncCache === true;
       const cacheOnly = payload.cacheOnly === true;
-      const forceSync = payload.forceSync === true;
       const selectedYearMonth = normalizeWhitespace(payload.selectedYearMonth);
 
       console.log("Google Calendar events request received.", {
@@ -3029,7 +3007,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         timeZone: timeZone || null,
         useSyncCache,
         cacheOnly,
-        forceSync,
         selectedYearMonth: selectedYearMonth || null,
       });
 
@@ -3070,7 +3047,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           timeZone,
           useSyncCache,
           cacheOnly,
-          forceSync,
           selectedYearMonth: selectedYearMonth || undefined,
         });
 
@@ -3141,7 +3117,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           ? payload.year
           : new Date(time).getUTCFullYear();
       const cacheOnly = payload.cacheOnly === true;
-      const forceSync = payload.forceSync === true;
       const calendarIds =
         Array.isArray(payload.calendarIds) && payload.calendarIds.length > 0
           ? Array.from(
@@ -3161,7 +3136,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         year,
         calendarIds,
         cacheOnly,
-        forceSync,
       });
 
       try {
@@ -3179,7 +3153,6 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
                 timeZone: "UTC",
                 useSyncCache: true,
                 cacheOnly,
-                forceSync,
                 selectedYearMonth: undefined,
               }).then((result) => ({
                 calendarId,

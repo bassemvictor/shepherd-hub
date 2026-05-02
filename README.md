@@ -220,7 +220,7 @@ sequenceDiagram
     API-->>UI: Cached month events for this calendar
     Note over UI: UI renders cached events immediately
 
-    UI->>API: POST /calendar/google/events<br/>calendarId, timeMin, timeMax,<br/>useSyncCache=true, forceSync=true
+    UI->>API: POST /calendar/google/events<br/>calendarId, timeMin, timeMax,<br/>useSyncCache=true
     API->>Lambda: Invoke route
     Lambda->>Dynamo: Get SYNC_STATE for calendar
     Dynamo-->>Lambda: syncToken
