@@ -536,6 +536,8 @@ type GoogleCalendarEventsPayload = {
   cacheOnly?: boolean;
   congregationItems?: CongregationDirectoryResponse["items"];
   selectedYearMonth?: string;
+  selectedPeriodMonths?: string[];
+  viewMode?: "day" | "week" | "month";
 };
 
 type GoogleCalendarCreateEventResponse = {
@@ -607,6 +609,7 @@ type CalendarEventFormState = {
 };
 
 type SelectedCalendarMonthEventState = GoogleCalendarEventItem | null;
+type CalendarScheduleViewMode = "day" | "week" | "month";
 
 const getErrorMessage = async (error: unknown, fallback: string) => {
   if (error && typeof error === "object") {
@@ -1248,6 +1251,137 @@ const buildCalendarDays = (monthDate: Date) => {
   });
 };
 
+const buildCalendarScheduleVisibleDays = (
+  viewDate: Date,
+  viewMode: CalendarScheduleViewMode,
+) => {
+  if (viewMode === "day") {
+    return [
+      new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 0, 0, 0, 0),
+    ];
+  }
+
+  if (viewMode === "week") {
+    const weekStart = startOfWeek(viewDate);
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(weekStart);
+      day.setDate(weekStart.getDate() + index);
+      return day;
+    });
+  }
+
+  return buildCalendarDays(viewDate);
+};
+
+const getCalendarScheduleRange = (
+  viewDate: Date,
+  viewMode: CalendarScheduleViewMode,
+) => {
+  if (viewMode === "day") {
+    const start = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate(), 0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { start, end };
+  }
+
+  if (viewMode === "week") {
+    const start = startOfWeek(viewDate);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    return { start, end };
+  }
+
+  const start = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1, 0, 0, 0, 0);
+  const end = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1, 0, 0, 0, 0);
+  return { start, end };
+};
+
+const getCalendarScheduleVisibleMonths = (
+  start: Date,
+  end: Date,
+) => {
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1, 0, 0, 0, 0);
+  const monthKeys = new Set<string>();
+
+  while (cursor.getTime() < end.getTime()) {
+    monthKeys.add(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return Array.from(monthKeys.values());
+};
+
+const shiftCalendarScheduleViewDate = (
+  current: Date,
+  viewMode: CalendarScheduleViewMode,
+  direction: -1 | 1,
+) => {
+  const nextDate = new Date(current);
+
+  if (viewMode === "day") {
+    nextDate.setDate(nextDate.getDate() + direction);
+    return nextDate;
+  }
+
+  if (viewMode === "week") {
+    nextDate.setDate(nextDate.getDate() + direction * 7);
+    return nextDate;
+  }
+
+  return new Date(current.getFullYear(), current.getMonth() + direction, 1);
+};
+
+const formatCalendarScheduleRangeLabel = (
+  viewDate: Date,
+  viewMode: CalendarScheduleViewMode,
+) => {
+  if (viewMode === "day") {
+    return viewDate.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+
+  if (viewMode === "week") {
+    const start = startOfWeek(viewDate);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+
+    const startMonth = start.toLocaleDateString(undefined, { month: "short" });
+    const startDay = start.toLocaleDateString(undefined, { day: "numeric" });
+    const endMonth = end.toLocaleDateString(undefined, { month: "short" });
+    const endDay = end.toLocaleDateString(undefined, { day: "numeric" });
+    const endYear = end.toLocaleDateString(undefined, { year: "numeric" });
+
+    return startMonth === endMonth
+      ? `${startMonth} ${startDay} - ${endDay}, ${endYear}`
+      : `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${endYear}`;
+  }
+
+  return viewDate.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+};
+
+const formatCalendarScheduleDayLabel = (
+  value: Date,
+  viewMode: CalendarScheduleViewMode,
+  isCompactMobileViewport: boolean,
+) => {
+  if (viewMode === "month") {
+    return isCompactMobileViewport ? formatCompactCalendarDayLabel(value) : value.getDate();
+  }
+
+  return value.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+};
+
 const isActiveParkingPlacementStatus = (value?: string) =>
   value === "assigned" || value === "available" || value === "active";
 
@@ -1392,6 +1526,8 @@ export default function App() {
   const [calendarMonthViewDate, setCalendarMonthViewDate] = useState(() =>
     startOfMonth(new Date()),
   );
+  const [calendarScheduleViewMode, setCalendarScheduleViewMode] =
+    useState<CalendarScheduleViewMode>("month");
   const [calendarMonthExpandedDate, setCalendarMonthExpandedDate] = useState<string | null>(null);
   const [calendarMonthSelectedDate, setCalendarMonthSelectedDate] = useState<string | null>(
     null,
@@ -1727,11 +1863,14 @@ export default function App() {
         busy: calendarAvailability.busy,
       })
     : [];
-  const calendarMonthDays = buildCalendarDays(calendarMonthViewDate);
-  const calendarMonthLabel = calendarMonthViewDate.toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
+  const calendarScheduleVisibleDays = buildCalendarScheduleVisibleDays(
+    calendarMonthViewDate,
+    calendarScheduleViewMode,
+  );
+  const calendarMonthLabel = formatCalendarScheduleRangeLabel(
+    calendarMonthViewDate,
+    calendarScheduleViewMode,
+  );
   const calendarMonthSelectedDateLabel = calendarMonthSelectedDate
     ? new Date(`${calendarMonthSelectedDate}T00:00`).toLocaleDateString(undefined, {
         weekday: "long",
@@ -2122,7 +2261,10 @@ export default function App() {
           timeZone,
           useSyncCache,
           cacheOnly,
-          selectedYearMonth: timeMin.slice(0, 7),
+          selectedPeriodMonths: getCalendarScheduleVisibleMonths(
+            new Date(timeMin),
+            new Date(timeMax),
+          ),
         });
         const payload = (await response.body.json()) as GoogleCalendarEventsResponse;
         return {
@@ -2318,30 +2460,20 @@ export default function App() {
     setIsCalendarMonthLoading(true);
     setCalendarEventFormStatus(null);
     const previouslyVisibleMonthEvents = calendarMonthEvents;
-
-    const monthStart = new Date(
-      calendarMonthViewDate.getFullYear(),
-      calendarMonthViewDate.getMonth(),
-      1,
-      0,
-      0,
-      0,
-      0,
-    );
-    const nextMonthStart = new Date(
-      calendarMonthViewDate.getFullYear(),
-      calendarMonthViewDate.getMonth() + 1,
-      1,
-      0,
-      0,
-      0,
-      0,
+    const visibleRange = getCalendarScheduleRange(
+      calendarMonthViewDate,
+      calendarScheduleViewMode,
     );
 
     try {
-      const selectedYearMonth = `${calendarMonthViewDate.getFullYear()}-${String(
-        calendarMonthViewDate.getMonth() + 1,
-      ).padStart(2, "0")}`;
+      const selectedPeriodMonths = getCalendarScheduleVisibleMonths(
+        visibleRange.start,
+        visibleRange.end,
+      );
+      const selectedYearMonth =
+        calendarScheduleViewMode === "month" && selectedPeriodMonths.length === 1
+          ? selectedPeriodMonths[0]
+          : undefined;
       const loadedCalendars =
         googleCalendars.length > 0 ? googleCalendars : await loadGoogleCalendars();
       const calendarsToLoad =
@@ -2361,11 +2493,13 @@ export default function App() {
               ]),
             ];
       const basePayload = {
-        timeMin: monthStart.toISOString(),
-        timeMax: nextMonthStart.toISOString(),
+        timeMin: visibleRange.start.toISOString(),
+        timeMax: visibleRange.end.toISOString(),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         useSyncCache,
         selectedYearMonth,
+        selectedPeriodMonths,
+        viewMode: calendarScheduleViewMode,
       } satisfies Omit<GoogleCalendarEventsPayload, "calendarId">;
       const loadedCalendarResponseMap = new Map<
         string,
@@ -3438,6 +3572,7 @@ export default function App() {
     authStatus,
     googleCalendarConnection?.connected,
     googleCalendars,
+    calendarScheduleViewMode,
     calendarMonthViewDate,
   ]);
 
@@ -7153,7 +7288,7 @@ export default function App() {
                     <p className="placeholder-page-copy">
                       Connect Google Calendar first from{" "}
                       <code>Calendar -&gt; Connect Calendar</code> before using month
-                      view booking.
+                      schedule booking.
                     </p>
                   </div>
                 ) : (
@@ -7190,17 +7325,41 @@ export default function App() {
                         </select>
                       </label>
 
+                      <div
+                        className="calendar-schedule-view-switcher"
+                        role="tablist"
+                        aria-label="Schedule view"
+                      >
+                        {([
+                          ["day", "Day"],
+                          ["week", "Week"],
+                          ["month", "Month"],
+                        ] as const).map(([viewMode, label]) => (
+                          <button
+                            key={viewMode}
+                            type="button"
+                            className={`calendar-schedule-view-button${
+                              calendarScheduleViewMode === viewMode ? " active" : ""
+                            }`}
+                            onClick={() => setCalendarScheduleViewMode(viewMode)}
+                            role="tab"
+                            aria-selected={calendarScheduleViewMode === viewMode}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
                       <div className="visitation-calendar-month-nav">
                         <button
                           type="button"
                           className="member-cancel-button visitation-calendar-nav-button"
                           onClick={() =>
                             setCalendarMonthViewDate(
-                              (current) =>
-                                new Date(current.getFullYear(), current.getMonth() - 1, 1),
+                              (current) => shiftCalendarScheduleViewDate(current, calendarScheduleViewMode, -1),
                             )
                           }
-                          aria-label="Previous month"
+                          aria-label={`Previous ${calendarScheduleViewMode}`}
                         >
                           ←
                         </button>
@@ -7210,11 +7369,10 @@ export default function App() {
                           className="member-cancel-button visitation-calendar-nav-button"
                           onClick={() =>
                             setCalendarMonthViewDate(
-                              (current) =>
-                                new Date(current.getFullYear(), current.getMonth() + 1, 1),
+                              (current) => shiftCalendarScheduleViewDate(current, calendarScheduleViewMode, 1),
                             )
                           }
-                          aria-label="Next month"
+                          aria-label={`Next ${calendarScheduleViewMode}`}
                         >
                           →
                         </button>
@@ -7239,21 +7397,28 @@ export default function App() {
                       </p>
                     ) : null}
 
-                    <div className="visitation-calendar-weekdays" aria-hidden="true">
-                      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((dayLabel) => (
-                        <p key={dayLabel}>{dayLabel}</p>
-                      ))}
-                    </div>
+                    {calendarScheduleViewMode === "month" ? (
+                      <div className="visitation-calendar-weekdays" aria-hidden="true">
+                        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((dayLabel) => (
+                          <p key={dayLabel}>{dayLabel}</p>
+                        ))}
+                      </div>
+                    ) : null}
 
-                    <div className="visitation-calendar-grid calendar-month-grid">
-                      {calendarMonthDays.map((day) => {
+                    <div
+                      className={`visitation-calendar-grid calendar-month-grid calendar-month-grid-${calendarScheduleViewMode}`}
+                    >
+                      {calendarScheduleVisibleDays.map((day) => {
                         const dayEvents = (calendarMonthEvents?.items ?? []).filter((eventItem) =>
                           isSameDay(
                             parseCalendarEventDateValue(eventItem.start, eventItem.isAllDay),
                             day,
                           ),
                         );
+                        const visibleEventLimit =
+                          calendarScheduleViewMode === "month" ? 3 : Number.MAX_SAFE_INTEGER;
                         const isOutsideMonth =
+                          calendarScheduleViewMode === "month" &&
                           day.getMonth() !== calendarMonthViewDate.getMonth();
                         const isToday = isSameDay(day, new Date());
                         const dayValue = formatDateInputValue(day);
@@ -7264,7 +7429,7 @@ export default function App() {
                             key={day.toISOString()}
                             className={`visitation-calendar-day calendar-month-day${
                               isOutsideMonth ? " outside-month" : ""
-                            }${isToday ? " today" : ""}${isSelected ? " selected" : ""}`}
+                            }${isToday ? " today" : ""}${isSelected ? " selected" : ""} calendar-month-day-${calendarScheduleViewMode}`}
                             role="button"
                             tabIndex={0}
                             onClick={() => {
@@ -7279,9 +7444,11 @@ export default function App() {
                           >
                             <div className="visitation-calendar-day-header">
                               <p className="visitation-calendar-day-number">
-                                {isCompactMobileViewport
-                                  ? formatCompactCalendarDayLabel(day)
-                                  : day.getDate()}
+                                {formatCalendarScheduleDayLabel(
+                                  day,
+                                  calendarScheduleViewMode,
+                                  isCompactMobileViewport,
+                                )}
                               </p>
                               {dayEvents.length > 0 ? (
                                 <p className="visitation-calendar-day-count">
@@ -7293,7 +7460,7 @@ export default function App() {
                             <div className="visitation-calendar-events">
                               {dayEvents.length > 0 ? (
                                 <>
-                                  {dayEvents.slice(0, 3).map((eventItem) => (
+                                  {dayEvents.slice(0, visibleEventLimit).map((eventItem) => (
                                     <button
                                       type="button"
                                       className="visitation-calendar-event calendar-month-event-chip"
@@ -7351,7 +7518,7 @@ export default function App() {
                                       </span>
                                     </button>
                                   ))}
-                                  {dayEvents.length > 3 ? (
+                                  {dayEvents.length > visibleEventLimit ? (
                                     <button
                                       type="button"
                                       className="calendar-month-more-events"
@@ -7360,7 +7527,7 @@ export default function App() {
                                         openCalendarDayEventsModal(dayValue);
                                       }}
                                     >
-                                      +{dayEvents.length - 3} more
+                                      +{dayEvents.length - visibleEventLimit} more
                                     </button>
                                   ) : null}
                                 </>

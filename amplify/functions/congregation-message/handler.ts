@@ -115,6 +115,8 @@ type GoogleCalendarEventsPayload = {
   useSyncCache?: boolean;
   cacheOnly?: boolean;
   selectedYearMonth?: string;
+  selectedPeriodMonths?: string[];
+  viewMode?: "day" | "week" | "month";
 };
 
 type GoogleCalendarReportingPayload = {
@@ -1155,6 +1157,8 @@ const loadGoogleCalendarEventsForCalendar = async ({
   useSyncCache,
   cacheOnly,
   selectedYearMonth,
+  selectedPeriodMonths,
+  viewMode,
 }: {
   tableName: string;
   time: string;
@@ -1166,6 +1170,8 @@ const loadGoogleCalendarEventsForCalendar = async ({
   useSyncCache: boolean;
   cacheOnly: boolean;
   selectedYearMonth?: string;
+  selectedPeriodMonths?: string[];
+  viewMode?: "day" | "week" | "month";
 }): Promise<GoogleCalendarLoadedEventsResult> => {
   let existingConnection: StoredGoogleCalendarConnectionData | null | undefined;
 
@@ -1204,6 +1210,8 @@ const loadGoogleCalendarEventsForCalendar = async ({
           timeMin,
           timeMax,
           selectedYearMonth: selectedYearMonth || undefined,
+          selectedPeriodMonths,
+          viewMode,
         });
 
         return {
@@ -1253,6 +1261,8 @@ const loadGoogleCalendarEventsForCalendar = async ({
         timeMin,
         timeMax,
         selectedYearMonth,
+        selectedPeriodMonths,
+        viewMode,
       });
 
       return {
@@ -1742,29 +1752,70 @@ const syncGoogleCalendarEventCache = async ({
   };
 };
 
-const filterGoogleCalendarEventsForRange = ({
-  items,
+const buildMonthKeysForRange = ({
   timeMin,
   timeMax,
   selectedYearMonth,
+  selectedPeriodMonths,
 }: {
-  items: StoredGoogleCalendarSyncedEventData[];
   timeMin: string;
   timeMax: string;
   selectedYearMonth?: string;
+  selectedPeriodMonths?: string[];
 }) => {
-  const windowStart = Date.parse(timeMin);
-  const windowEnd = Date.parse(timeMax);
+  const normalizedExplicitMonths = (selectedPeriodMonths ?? [])
+    .map((value) => normalizeWhitespace(value))
+    .filter((value): value is string => Boolean(value));
+
+  if (normalizedExplicitMonths.length > 0) {
+    return Array.from(new Set(normalizedExplicitMonths));
+  }
+
+  if (selectedYearMonth) {
+    return [selectedYearMonth];
+  }
+
   const monthStart = new Date(timeMin);
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
   const monthKeys = new Set<string>();
   const cursor = new Date(monthStart);
+  const windowEnd = Date.parse(timeMax);
 
   while (cursor.getTime() < windowEnd) {
     monthKeys.add(cursor.toISOString().slice(0, 7));
     cursor.setUTCMonth(cursor.getUTCMonth() + 1);
   }
+
+  return Array.from(monthKeys.values());
+};
+
+const filterGoogleCalendarEventsForRange = ({
+  items,
+  timeMin,
+  timeMax,
+  selectedYearMonth,
+  selectedPeriodMonths,
+  viewMode,
+}: {
+  items: StoredGoogleCalendarSyncedEventData[];
+  timeMin: string;
+  timeMax: string;
+  selectedYearMonth?: string;
+  selectedPeriodMonths?: string[];
+  viewMode?: "day" | "week" | "month";
+}) => {
+  const windowStart = Date.parse(timeMin);
+  const windowEnd = Date.parse(timeMax);
+  const monthKeys = new Set(
+    buildMonthKeysForRange({
+      timeMin,
+      timeMax,
+      selectedYearMonth,
+      selectedPeriodMonths,
+    }),
+  );
+  const shouldUseMonthOnlyMatch = viewMode === "month" && monthKeys.size === 1;
 
   const candidateItems = items.filter((item) => {
     const start = Date.parse(item.start);
@@ -1777,14 +1828,14 @@ const filterGoogleCalendarEventsForRange = ({
     const relevantMonthKeys = new Set<string>([item.start.slice(0, 7)]);
     relevantMonthKeys.add(new Date(Math.max(start, end - 1)).toISOString().slice(0, 7));
 
-    if (selectedYearMonth && monthKeys.size === 1) {
-      return relevantMonthKeys.has(selectedYearMonth);
+    if (shouldUseMonthOnlyMatch) {
+      return Array.from(relevantMonthKeys).some((monthKey) => monthKeys.has(monthKey));
     }
 
     return Array.from(relevantMonthKeys).some((monthKey) => monthKeys.has(monthKey));
   });
 
-  if (selectedYearMonth && monthKeys.size === 1) {
+  if (shouldUseMonthOnlyMatch) {
     return candidateItems.slice().sort((left, right) => left.start.localeCompare(right.start));
   }
 
@@ -1836,6 +1887,8 @@ const getCachedGoogleCalendarEventsForRange = async ({
   timeMin,
   timeMax,
   selectedYearMonth,
+  selectedPeriodMonths,
+  viewMode,
 }: {
   tableName: string;
   userKey: string;
@@ -1843,19 +1896,20 @@ const getCachedGoogleCalendarEventsForRange = async ({
   timeMin: string;
   timeMax: string;
   selectedYearMonth?: string;
+  selectedPeriodMonths?: string[];
+  viewMode?: "day" | "week" | "month";
 }) => {
   const windowStart = Date.parse(timeMin);
   const windowEnd = Date.parse(timeMax);
-  const monthStart = new Date(timeMin);
-  monthStart.setUTCDate(1);
-  monthStart.setUTCHours(0, 0, 0, 0);
-  const monthKeys = new Set<string>();
-  const cursor = new Date(monthStart);
-
-  while (cursor.getTime() < windowEnd) {
-    monthKeys.add(cursor.toISOString().slice(0, 7));
-    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-  }
+  const monthKeys = new Set(
+    buildMonthKeysForRange({
+      timeMin,
+      timeMax,
+      selectedYearMonth,
+      selectedPeriodMonths,
+    }),
+  );
+  const singleMonthKey = monthKeys.size === 1 ? Array.from(monthKeys)[0] : null;
 
   console.log("Loading cached Google Calendar events for range.", {
     tableName,
@@ -1872,14 +1926,14 @@ const getCachedGoogleCalendarEventsForRange = async ({
     new QueryCommand({
       TableName: tableName,
       KeyConditionExpression:
-        selectedYearMonth && monthKeys.size === 1
+        singleMonthKey
           ? "pk = :pk AND begins_with(sk, :skPrefix)"
           : "pk = :pk",
       ExpressionAttributeValues: {
         ":pk": getGoogleEventSyncPartitionKey(userKey, calendarId),
-        ...(selectedYearMonth && monthKeys.size === 1
+        ...(singleMonthKey
           ? {
-              ":skPrefix": `${googleEventSyncMonthSkPrefix}#${selectedYearMonth}#`,
+              ":skPrefix": `${googleEventSyncMonthSkPrefix}#${singleMonthKey}#`,
             }
           : {}),
       },
@@ -1909,6 +1963,8 @@ const getCachedGoogleCalendarEventsForRange = async ({
     timeMin,
     timeMax,
     selectedYearMonth,
+    selectedPeriodMonths,
+    viewMode,
   });
 
   console.log("Loaded cached Google Calendar events for range.", {
@@ -2845,6 +2901,15 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       const useSyncCache = payload.useSyncCache === true;
       const cacheOnly = payload.cacheOnly === true;
       const selectedYearMonth = normalizeWhitespace(payload.selectedYearMonth);
+      const selectedPeriodMonths = Array.isArray(payload.selectedPeriodMonths)
+        ? payload.selectedPeriodMonths
+            .map((value) => normalizeWhitespace(value))
+            .filter((value): value is string => Boolean(value))
+        : [];
+      const viewMode =
+        payload.viewMode === "day" || payload.viewMode === "week" || payload.viewMode === "month"
+          ? payload.viewMode
+          : undefined;
 
       if (!timeMin || !timeMax) {
         return {
@@ -2884,6 +2949,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           useSyncCache,
           cacheOnly,
           selectedYearMonth: selectedYearMonth || undefined,
+          selectedPeriodMonths,
+          viewMode,
         });
 
         return {
