@@ -474,16 +474,6 @@ type GoogleCalendarEventsResponse = {
   timeMin: string;
   timeMax: string;
   syncMode?: "full" | "incremental" | "direct" | "cached";
-  debug?: {
-    preFilterItemCount: number;
-    returnedItemCount: number;
-    filteredOutItems: Array<{
-      id: string;
-      title: string;
-      start: string;
-      end: string;
-    }>;
-  };
   changedResources?: Array<
     | ({
         id: string;
@@ -557,9 +547,24 @@ type GoogleCalendarDeleteEventResponse = {
 };
 
 type CalendarDashboardSummary = {
-  weekEventCount: number;
-  monthEventCount: number;
+  day: {
+    total: number;
+    upcoming: number;
+  };
+  week: {
+    total: number;
+    upcoming: number;
+  };
+  month: {
+    total: number;
+    upcoming: number;
+  };
   upcomingEvents: GoogleCalendarEventItem[];
+};
+
+type LoadedGoogleCalendarEventsAcrossCalendarsResult = {
+  items: GoogleCalendarEventItem[];
+  responseTimes: string[];
 };
 
 type GoogleCalendarReportingResponse = {
@@ -801,6 +806,23 @@ const formatEventDateTimeLabel = (start: string, end: string, isAllDay: boolean)
   }
 
   return `${formatTimeLabel(start)} to ${formatTimeLabel(end)}`;
+};
+
+const formatLastSyncLabel = (value?: string | null) => {
+  if (!value) {
+    return "Loaded from cache";
+  }
+
+  const parsed = new Date(value);
+
+  if (!Number.isNaN(parsed.getTime())) {
+    return `Last sync ${parsed.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    })}`;
+  }
+
+  return "Loaded from cache";
 };
 
 const formatTimeInputValue = (value: string) => {
@@ -1487,6 +1509,7 @@ export default function App() {
   const memberPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const isApplyingPopStateRef = useRef(false);
   const calendarMonthEventsRequestRef = useRef(0);
+  const calendarDashboardRequestRef = useRef(0);
   const googleCalendarsRequestPromiseRef =
     useRef<Promise<GoogleCalendarListResponse["items"]> | null>(null);
   const memberLongPressTimerRef = useRef<number | null>(null);
@@ -1556,6 +1579,9 @@ export default function App() {
     useState<CalendarDashboardSummary | null>(null);
   const [calendarDashboardStatus, setCalendarDashboardStatus] = useState<string | null>(null);
   const [isCalendarDashboardLoading, setIsCalendarDashboardLoading] = useState(false);
+  const [calendarDashboardLastSyncAt, setCalendarDashboardLastSyncAt] = useState<string | null>(
+    null,
+  );
   const [calendarReportingRows, setCalendarReportingRows] = useState<
     GoogleCalendarReportingResponse["rows"]
   >([]);
@@ -2228,28 +2254,31 @@ export default function App() {
     timeMax,
     useSyncCache = true,
     cacheOnly = false,
+    calendarsOverride,
   }: {
     timeMin: string;
     timeMax: string;
     useSyncCache?: boolean;
     cacheOnly?: boolean;
-  }) => {
+    calendarsOverride?: GoogleCalendarListResponse["items"];
+  }): Promise<LoadedGoogleCalendarEventsAcrossCalendarsResult> => {
+    const loadedCalendars =
+      calendarsOverride ??
+      (googleCalendars.length > 0 ? googleCalendars : await loadGoogleCalendars());
     const calendarsToLoad =
-      googleCalendars.length > 0
-        ? googleCalendars
-        : [
-            ...assignGoogleCalendarPalette([
-              {
-                id: "primary",
-                name: "Primary Calendar",
-                primary: true,
-                accessRole: "",
-                timeZone: "",
-                hidden: false,
-                selected: false,
-              },
-            ]),
-          ];
+      loadedCalendars.length > 0
+        ? loadedCalendars
+        : assignGoogleCalendarPalette([
+            {
+              id: "primary",
+              name: "Primary Calendar",
+              primary: true,
+              accessRole: "",
+              timeZone: "",
+              hidden: false,
+              selected: false,
+            },
+          ]);
 
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const responses = await Promise.all(
@@ -2274,8 +2303,9 @@ export default function App() {
       }),
     );
 
-    return responses
-      .flatMap(({ calendar, payload }) =>
+    return {
+      items: responses
+        .flatMap(({ calendar, payload }) =>
         payload.items.map((item) => ({
           ...item,
           calendarId: calendar.id,
@@ -2284,10 +2314,16 @@ export default function App() {
           calendarColorEmoji: calendar.calendarColorEmoji,
         })),
       )
-      .sort((left, right) => left.start.localeCompare(right.start));
+        .sort((left, right) => left.start.localeCompare(right.start)),
+      responseTimes: responses.map(({ payload }) => payload.time).filter(Boolean),
+    };
   };
 
-  const loadCalendarDashboardSummary = async () => {
+  const loadCalendarDashboardSummary = async ({
+    cacheOnly = false,
+  }: {
+    cacheOnly?: boolean;
+  } = {}) => {
     if (!congregationApiName) {
       setCalendarDashboardStatus("Backend API is not configured yet.");
       return;
@@ -2295,9 +2331,17 @@ export default function App() {
 
     setIsCalendarDashboardLoading(true);
     setCalendarDashboardStatus(null);
+    const requestId = calendarDashboardRequestRef.current + 1;
+    calendarDashboardRequestRef.current = requestId;
+    const useSyncCache = cacheOnly;
 
     try {
       const now = new Date();
+      const loadedCalendars =
+        !cacheOnly || googleCalendars.length === 0 ? await loadGoogleCalendars() : googleCalendars;
+      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
       const weekStart = startOfWeek(now);
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 7);
@@ -2306,33 +2350,86 @@ export default function App() {
       const upcomingEnd = new Date(now);
       upcomingEnd.setDate(upcomingEnd.getDate() + 60);
 
-      const [weekEvents, monthEvents, upcomingEvents] = await Promise.all([
+      const [dayEvents, weekEvents, monthEvents, upcomingEvents] = await Promise.all([
+        loadGoogleCalendarEventsAcrossCalendars({
+          timeMin: dayStart.toISOString(),
+          timeMax: dayEnd.toISOString(),
+          useSyncCache,
+          cacheOnly,
+          calendarsOverride: loadedCalendars,
+        }),
         loadGoogleCalendarEventsAcrossCalendars({
           timeMin: weekStart.toISOString(),
           timeMax: weekEnd.toISOString(),
+          useSyncCache,
+          cacheOnly,
+          calendarsOverride: loadedCalendars,
         }),
         loadGoogleCalendarEventsAcrossCalendars({
           timeMin: monthStart.toISOString(),
           timeMax: monthEnd.toISOString(),
+          useSyncCache,
+          cacheOnly,
+          calendarsOverride: loadedCalendars,
         }),
         loadGoogleCalendarEventsAcrossCalendars({
           timeMin: now.toISOString(),
           timeMax: upcomingEnd.toISOString(),
+          useSyncCache,
+          cacheOnly,
+          calendarsOverride: loadedCalendars,
         }),
       ]);
 
+      const countUpcomingEvents = (items: GoogleCalendarEventItem[]) =>
+        items.filter((item) => {
+          const itemEnd = Date.parse(item.end);
+          return Number.isFinite(itemEnd) && itemEnd >= now.getTime();
+        }).length;
+
+      if (calendarDashboardRequestRef.current !== requestId) {
+        return;
+      }
+
       setCalendarDashboardSummary({
-        weekEventCount: weekEvents.length,
-        monthEventCount: monthEvents.length,
-        upcomingEvents: upcomingEvents.slice(0, 8),
+        day: {
+          total: dayEvents.items.length,
+          upcoming: countUpcomingEvents(dayEvents.items),
+        },
+        week: {
+          total: weekEvents.items.length,
+          upcoming: countUpcomingEvents(weekEvents.items),
+        },
+        month: {
+          total: monthEvents.items.length,
+          upcoming: countUpcomingEvents(monthEvents.items),
+        },
+        upcomingEvents: upcomingEvents.items.slice(0, 15),
       });
+
+      if (!cacheOnly) {
+        const sortedResponseTimes = [
+          ...dayEvents.responseTimes,
+          ...weekEvents.responseTimes,
+          ...monthEvents.responseTimes,
+          ...upcomingEvents.responseTimes,
+        ].sort();
+        const lastResponseTime =
+          sortedResponseTimes[sortedResponseTimes.length - 1] ?? new Date().toISOString();
+        setCalendarDashboardLastSyncAt(lastResponseTime);
+      }
     } catch (error) {
+      if (calendarDashboardRequestRef.current !== requestId) {
+        return;
+      }
       setCalendarDashboardSummary(null);
       setCalendarDashboardStatus(
         await getErrorMessage(error, "Unable to load Calendar dashboard."),
       );
     } finally {
-      setIsCalendarDashboardLoading(false);
+      if (calendarDashboardRequestRef.current === requestId) {
+        setIsCalendarDashboardLoading(false);
+      }
     }
   };
 
@@ -3534,8 +3631,8 @@ export default function App() {
       return;
     }
 
-    void loadCalendarDashboardSummary();
-  }, [activePage, authStatus, googleCalendarConnection?.connected, googleCalendars]);
+    void loadCalendarDashboardSummary({ cacheOnly: true });
+  }, [activePage, authStatus, googleCalendarConnection?.connected]);
 
   useEffect(() => {
     if (
@@ -6842,21 +6939,23 @@ export default function App() {
                   <div>
                     <p className="placeholder-page-kicker">Google Calendar</p>
                     <h3 className="calendar-connect-title">Dashboard</h3>
-                    <p className="placeholder-page-copy calendar-connect-copy">
-                      A quick view of your upcoming schedule across connected calendars.
-                    </p>
                   </div>
 
-                  <button
-                    type="button"
-                    className="member-submit-button"
-                    onClick={() => {
-                      void loadCalendarDashboardSummary();
-                    }}
-                    disabled={isCalendarDashboardLoading}
-                  >
-                    {isCalendarDashboardLoading ? "Refreshing..." : "Refresh Dashboard"}
-                  </button>
+                  <div className="calendar-dashboard-actions">
+                    <p className="calendar-month-load-badge neutral calendar-dashboard-sync-badge">
+                      {formatLastSyncLabel(calendarDashboardLastSyncAt)}
+                    </p>
+                    <button
+                      type="button"
+                      className="member-submit-button"
+                      onClick={() => {
+                        void loadCalendarDashboardSummary();
+                      }}
+                      disabled={isCalendarDashboardLoading}
+                    >
+                      {isCalendarDashboardLoading ? "Refreshing..." : "Refresh Dashboard"}
+                    </button>
+                  </div>
                 </div>
 
                 {!googleCalendarConnection?.connected ? (
@@ -6877,21 +6976,57 @@ export default function App() {
 
                     <div className="calendar-dashboard-grid">
                       <article className="calendar-dashboard-metric">
-                        <p className="calendar-dashboard-metric-label">
-                          Meetings this week
-                        </p>
-                        <p className="calendar-dashboard-metric-value">
-                          {calendarDashboardSummary?.weekEventCount ?? 0}
-                        </p>
+                        <p className="calendar-dashboard-metric-label">Meetings today</p>
+                        <div className="calendar-dashboard-metric-values">
+                          <div>
+                            <p className="calendar-dashboard-metric-caption">Total</p>
+                            <p className="calendar-dashboard-metric-value">
+                              {calendarDashboardSummary?.day.total ?? 0}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="calendar-dashboard-metric-caption">Upcoming</p>
+                            <p className="calendar-dashboard-metric-value">
+                              {calendarDashboardSummary?.day.upcoming ?? 0}
+                            </p>
+                          </div>
+                        </div>
                       </article>
 
                       <article className="calendar-dashboard-metric">
-                        <p className="calendar-dashboard-metric-label">
-                          Meetings this month
-                        </p>
-                        <p className="calendar-dashboard-metric-value">
-                          {calendarDashboardSummary?.monthEventCount ?? 0}
-                        </p>
+                        <p className="calendar-dashboard-metric-label">Meetings this week</p>
+                        <div className="calendar-dashboard-metric-values">
+                          <div>
+                            <p className="calendar-dashboard-metric-caption">Total</p>
+                            <p className="calendar-dashboard-metric-value">
+                              {calendarDashboardSummary?.week.total ?? 0}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="calendar-dashboard-metric-caption">Upcoming</p>
+                            <p className="calendar-dashboard-metric-value">
+                              {calendarDashboardSummary?.week.upcoming ?? 0}
+                            </p>
+                          </div>
+                        </div>
+                      </article>
+
+                      <article className="calendar-dashboard-metric">
+                        <p className="calendar-dashboard-metric-label">Meetings this month</p>
+                        <div className="calendar-dashboard-metric-values">
+                          <div>
+                            <p className="calendar-dashboard-metric-caption">Total</p>
+                            <p className="calendar-dashboard-metric-value">
+                              {calendarDashboardSummary?.month.total ?? 0}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="calendar-dashboard-metric-caption">Upcoming</p>
+                            <p className="calendar-dashboard-metric-value">
+                              {calendarDashboardSummary?.month.upcoming ?? 0}
+                            </p>
+                          </div>
+                        </div>
                       </article>
                     </div>
 
@@ -6908,33 +7043,50 @@ export default function App() {
                               key={`${eventItem.calendarId || "calendar"}-${eventItem.id}-${eventItem.start}`}
                               className="calendar-dashboard-event"
                             >
-                              <div className="calendar-dashboard-event-top">
-                                <p className="calendar-dashboard-event-day">
+                              <div className="calendar-dashboard-event-date">
+                                <p className="calendar-dashboard-event-month">
                                   {parseCalendarEventDateValue(
                                     eventItem.start,
                                     eventItem.isAllDay,
                                   ).toLocaleDateString(undefined, {
-                                    weekday: "short",
                                     month: "short",
+                                  })}
+                                </p>
+                                <p className="calendar-dashboard-event-day-number">
+                                  {parseCalendarEventDateValue(
+                                    eventItem.start,
+                                    eventItem.isAllDay,
+                                  ).toLocaleDateString(undefined, {
                                     day: "numeric",
                                   })}
                                 </p>
-                                <p className="calendar-dashboard-event-time">
-                                  {eventItem.isAllDay
-                                    ? "All day"
-                                    : formatEventDateTimeLabel(
-                                        eventItem.start,
-                                        eventItem.end,
-                                        false,
-                                      )}
-                                </p>
                               </div>
-                              <p className="calendar-dashboard-event-title">
-                                {eventItem.title || "Untitled event"}
-                              </p>
-                              <p className="calendar-dashboard-event-calendar">
-                                {eventItem.calendarName || "Primary Calendar"}
-                              </p>
+                              <div className="calendar-dashboard-event-details">
+                                <div className="calendar-dashboard-event-meta">
+                                  <p className="calendar-dashboard-event-time">
+                                    {eventItem.isAllDay
+                                      ? "All day"
+                                      : formatEventDateTimeLabel(
+                                          eventItem.start,
+                                          eventItem.end,
+                                          false,
+                                        )}
+                                  </p>
+                                  <p className="calendar-dashboard-event-calendar">
+                                    {eventItem.calendarName || "Primary Calendar"}
+                                  </p>
+                                </div>
+                                <p className="calendar-dashboard-event-title">
+                                  {eventItem.title || "Untitled event"}
+                                </p>
+                                {eventItem.congregationItems?.length ? (
+                                  <p className="calendar-dashboard-event-congregation">
+                                    {eventItem.congregationItems
+                                      .map((item) => formatCongregationDirectoryItemLabel(item))
+                                      .join(", ")}
+                                  </p>
+                                ) : null}
+                              </div>
                             </article>
                           ))}
                         </div>
@@ -7350,44 +7502,56 @@ export default function App() {
                         ))}
                       </div>
 
-                      <div className="visitation-calendar-month-nav">
-                        <button
-                          type="button"
-                          className="member-cancel-button visitation-calendar-nav-button"
-                          onClick={() =>
-                            setCalendarMonthViewDate(
-                              (current) => shiftCalendarScheduleViewDate(current, calendarScheduleViewMode, -1),
-                            )
-                          }
-                          aria-label={`Previous ${calendarScheduleViewMode}`}
-                        >
-                          ←
-                        </button>
+                      <div className="calendar-schedule-period-bar">
                         <p className="visitation-calendar-month-label">{calendarMonthLabel}</p>
-                        <button
-                          type="button"
-                          className="member-cancel-button visitation-calendar-nav-button"
-                          onClick={() =>
-                            setCalendarMonthViewDate(
-                              (current) => shiftCalendarScheduleViewDate(current, calendarScheduleViewMode, 1),
-                            )
-                          }
-                          aria-label={`Next ${calendarScheduleViewMode}`}
-                        >
-                          →
-                        </button>
-                        <button
-                          type="button"
-                          className="member-cancel-button visitation-calendar-nav-button"
-                          onClick={() => {
-                            void loadGoogleCalendarMonthEvents();
-                          }}
-                          aria-label="Refresh schedule"
-                          title="Refresh schedule"
-                          disabled={isCalendarMonthLoading}
-                        >
-                          ↻
-                        </button>
+                        <div className="visitation-calendar-month-nav">
+                          <button
+                            type="button"
+                            className="member-cancel-button visitation-calendar-nav-button"
+                            onClick={() =>
+                              setCalendarMonthViewDate(
+                                (current) =>
+                                  shiftCalendarScheduleViewDate(
+                                    current,
+                                    calendarScheduleViewMode,
+                                    -1,
+                                  ),
+                              )
+                            }
+                            aria-label={`Previous ${calendarScheduleViewMode}`}
+                          >
+                            ←
+                          </button>
+                          <button
+                            type="button"
+                            className="member-cancel-button visitation-calendar-nav-button"
+                            onClick={() =>
+                              setCalendarMonthViewDate(
+                                (current) =>
+                                  shiftCalendarScheduleViewDate(
+                                    current,
+                                    calendarScheduleViewMode,
+                                    1,
+                                  ),
+                              )
+                            }
+                            aria-label={`Next ${calendarScheduleViewMode}`}
+                          >
+                            →
+                          </button>
+                          <button
+                            type="button"
+                            className="member-cancel-button visitation-calendar-nav-button"
+                            onClick={() => {
+                              void loadGoogleCalendarMonthEvents();
+                            }}
+                            aria-label="Refresh schedule"
+                            title="Refresh schedule"
+                            disabled={isCalendarMonthLoading}
+                          >
+                            ↻
+                          </button>
+                        </div>
                       </div>
                     </div>
 

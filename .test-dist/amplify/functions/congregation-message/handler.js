@@ -524,10 +524,6 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                     items: cachedItems,
                     changedResources: [],
                     syncMode: "cached",
-                    debug: buildGoogleCalendarEventsRangeDebug({
-                        allItems: cachedItems,
-                        returnedItems: cachedItems,
-                    }),
                 };
             }
             const connection = await requireExistingConnection();
@@ -545,19 +541,6 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                 calendarId,
                 accessToken,
             });
-            const monthCandidateItems = syncResult.events.filter((item) => {
-                if (!selectedYearMonth) {
-                    return true;
-                }
-                const start = Date.parse(item.start);
-                const end = Date.parse(item.end);
-                if (!Number.isFinite(start) || !Number.isFinite(end)) {
-                    return false;
-                }
-                const relevantMonthKeys = new Set([item.start.slice(0, 7)]);
-                relevantMonthKeys.add(new Date(Math.max(start, end - 1)).toISOString().slice(0, 7));
-                return relevantMonthKeys.has(selectedYearMonth);
-            });
             const returnedItems = filterGoogleCalendarEventsForRange({
                 items: syncResult.events,
                 timeMin,
@@ -570,11 +553,6 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                 items: returnedItems,
                 changedResources: syncResult.changedResources,
                 syncMode: syncResult.hadPriorSyncToken ? "incremental" : "full",
-                debug: buildGoogleCalendarEventsRangeDebug({
-                    allItems: syncResult.events,
-                    candidateItems: monthCandidateItems,
-                    returnedItems,
-                }),
             };
         }
         catch (error) {
@@ -609,7 +587,6 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
                 items: directFallbackItems,
                 changedResources: [],
                 syncMode: "direct",
-                debug: undefined,
             };
         }
     }
@@ -632,10 +609,6 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
         items: directItems,
         changedResources: [],
         syncMode: "direct",
-        debug: buildGoogleCalendarEventsRangeDebug({
-            allItems: directItems,
-            returnedItems: directItems,
-        }),
     };
 };
 const listGoogleCalendarEventsSyncPage = async ({ accessToken, calendarId, syncToken, pageToken, }) => {
@@ -986,23 +959,6 @@ const filterGoogleCalendarEventsForRange = ({ items, timeMin, timeMax, selectedY
             start < windowEnd);
     })
         .sort((left, right) => left.start.localeCompare(right.start));
-};
-const buildGoogleCalendarEventsRangeDebug = ({ allItems, candidateItems, returnedItems, }) => {
-    const debugSourceItems = candidateItems ?? allItems;
-    const returnedIds = new Set(returnedItems.map((item) => item.id));
-    return {
-        preFilterItemCount: debugSourceItems.length,
-        returnedItemCount: returnedItems.length,
-        filteredOutItems: debugSourceItems
-            .filter((item) => !returnedIds.has(item.id))
-            .map((item) => ({
-            id: item.id,
-            title: item.title,
-            start: item.start,
-            end: item.end,
-        }))
-            .slice(0, 25),
-    };
 };
 const getCachedGoogleCalendarEventsForRange = async ({ tableName, userKey, calendarId, timeMin, timeMax, selectedYearMonth, selectedPeriodMonths, viewMode, }) => {
     const windowStart = Date.parse(timeMin);
@@ -1778,7 +1734,6 @@ export const handler = async (event) => {
                         items: items.items,
                         changedResources: items.changedResources,
                         syncMode: items.syncMode,
-                        debug: items.debug,
                     }),
                 };
             }
