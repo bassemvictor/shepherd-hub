@@ -173,6 +173,13 @@ const googleCalendarCongregationMetadataKey = "shepherdHubCongregation";
 const googleOauthStateTtlMs = 10 * 60 * 1000;
 const googleAccessTokenExpiryBufferMs = 60 * 1000;
 const googleCalendarMonthCacheTargetBytes = 350 * 1024;
+const getGoogleCalendarSyncWindow = (time) => {
+    const currentYear = new Date(time).getUTCFullYear();
+    return {
+        timeMin: new Date(Date.UTC(currentYear - 1, 0, 1, 0, 0, 0, 0)).toISOString(),
+        timeMax: new Date(Date.UTC(currentYear + 3, 0, 1, 0, 0, 0, 0)).toISOString(),
+    };
+};
 const getRequestGroups = (event) => {
     const claims = event.requestContext
         .authorizer?.jwt?.claims ?? {};
@@ -611,8 +618,10 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
         syncMode: "direct",
     };
 };
-const listGoogleCalendarEventsSyncPage = async ({ accessToken, calendarId, syncToken, pageToken, }) => {
+const listGoogleCalendarEventsSyncPage = async ({ accessToken, calendarId, timeMin, timeMax, syncToken, pageToken, }) => {
     const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
+    url.searchParams.set("timeMin", timeMin);
+    url.searchParams.set("timeMax", timeMax);
     url.searchParams.set("singleEvents", "true");
     url.searchParams.set("showDeleted", "true");
     url.searchParams.set("maxResults", "2500");
@@ -624,6 +633,8 @@ const listGoogleCalendarEventsSyncPage = async ({ accessToken, calendarId, syncT
     }
     console.log("Requesting Google Calendar sync page.", {
         calendarId,
+        timeMin,
+        timeMax,
         hasSyncToken: Boolean(syncToken),
         hasPageToken: Boolean(pageToken),
         query: url.toString(),
@@ -800,8 +811,30 @@ const rewriteGoogleCalendarMonthCache = async ({ tableName, userKey, calendarId,
         },
     }))));
 };
+const isGoogleCalendarEventInSyncWindow = (item, syncWindow) => {
+    const start = Date.parse(item.start);
+    const end = Date.parse(item.end);
+    const windowStart = Date.parse(syncWindow.timeMin);
+    const windowEnd = Date.parse(syncWindow.timeMax);
+    return Number.isFinite(start) && Number.isFinite(end) && end > windowStart && start < windowEnd;
+};
 const syncGoogleCalendarEventCache = async ({ tableName, time, userKey, calendarId, accessToken, }) => {
-    const syncState = await getGoogleCalendarSyncState(tableName, userKey, calendarId);
+    const syncWindow = getGoogleCalendarSyncWindow(time);
+    let syncState = await getGoogleCalendarSyncState(tableName, userKey, calendarId);
+    if (syncState &&
+        (syncState.timeMin !== syncWindow.timeMin || syncState.timeMax !== syncWindow.timeMax)) {
+        console.log("Google Calendar sync window changed; clearing cached events before re-sync.", {
+            tableName,
+            userKey,
+            calendarId,
+            previousTimeMin: syncState.timeMin ?? null,
+            previousTimeMax: syncState.timeMax ?? null,
+            nextTimeMin: syncWindow.timeMin,
+            nextTimeMax: syncWindow.timeMax,
+        });
+        await clearGoogleCalendarCachedEvents(tableName, userKey, calendarId);
+        syncState = null;
+    }
     const priorSyncToken = syncState?.syncToken;
     const cachedState = await loadAllGoogleCalendarCachedEvents(tableName, userKey, calendarId);
     const cachedEventsById = new Map(cachedState.items.map((item) => [item.id, item]));
@@ -815,6 +848,8 @@ const syncGoogleCalendarEventCache = async ({ tableName, time, userKey, calendar
             const page = await listGoogleCalendarEventsSyncPage({
                 accessToken,
                 calendarId,
+                timeMin: syncWindow.timeMin,
+                timeMax: syncWindow.timeMax,
                 syncToken: priorSyncToken,
                 pageToken: pageToken || undefined,
             });
@@ -884,21 +919,24 @@ const syncGoogleCalendarEventCache = async ({ tableName, time, userKey, calendar
     if (nextSyncToken) {
         await saveGoogleCalendarSyncState(tableName, userKey, calendarId, {
             syncToken: nextSyncToken,
+            timeMin: syncWindow.timeMin,
+            timeMax: syncWindow.timeMax,
         });
     }
+    const boundedEvents = Array.from(cachedEventsById.values()).filter((item) => isGoogleCalendarEventInSyncWindow(item, syncWindow));
     if (changedResources.length > 0) {
         await rewriteGoogleCalendarMonthCache({
             tableName,
             userKey,
             calendarId,
             rows: cachedState.rows,
-            events: Array.from(cachedEventsById.values()),
+            events: boundedEvents,
         });
     }
     return {
         changedResources,
         hadPriorSyncToken: Boolean(priorSyncToken),
-        events: Array.from(cachedEventsById.values()).sort((left, right) => left.start.localeCompare(right.start)),
+        events: boundedEvents.sort((left, right) => left.start.localeCompare(right.start)),
     };
 };
 const buildMonthKeysForRange = ({ timeMin, timeMax, selectedYearMonth, selectedPeriodMonths, }) => {

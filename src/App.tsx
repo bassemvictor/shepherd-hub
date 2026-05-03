@@ -1353,6 +1353,20 @@ const shiftCalendarScheduleViewDate = (
   return new Date(current.getFullYear(), current.getMonth() + direction, 1);
 };
 
+const getCalendarScheduleAnchorDateForViewMode = (viewMode: CalendarScheduleViewMode) => {
+  const now = new Date();
+
+  if (viewMode === "day") {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  }
+
+  if (viewMode === "week") {
+    return startOfWeek(now);
+  }
+
+  return startOfMonth(now);
+};
+
 const formatCalendarScheduleRangeLabel = (
   viewDate: Date,
   viewMode: CalendarScheduleViewMode,
@@ -7493,7 +7507,14 @@ export default function App() {
                             className={`calendar-schedule-view-button${
                               calendarScheduleViewMode === viewMode ? " active" : ""
                             }`}
-                            onClick={() => setCalendarScheduleViewMode(viewMode)}
+                            onClick={() => {
+                              setCalendarScheduleViewMode(viewMode);
+                              if (viewMode === "day" || viewMode === "week") {
+                                setCalendarMonthViewDate(
+                                  getCalendarScheduleAnchorDateForViewMode(viewMode),
+                                );
+                              }
+                            }}
                             role="tab"
                             aria-selected={calendarScheduleViewMode === viewMode}
                           >

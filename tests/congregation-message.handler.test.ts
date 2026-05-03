@@ -16,6 +16,15 @@ type MockCommand = {
 
 const parseBody = (body: string | undefined) => JSON.parse(body ?? "{}") as Record<string, unknown>;
 
+const getExpectedSyncWindow = () => {
+  const currentYear = new Date().getUTCFullYear();
+
+  return {
+    timeMin: new Date(Date.UTC(currentYear - 1, 0, 1, 0, 0, 0, 0)).toISOString(),
+    timeMax: new Date(Date.UTC(currentYear + 3, 0, 1, 0, 0, 0, 0)).toISOString(),
+  };
+};
+
 const encryptTestSecret = (value: string) => {
   const key = Buffer.from(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY ?? "", "base64");
   const iv = randomBytes(12);
@@ -603,6 +612,7 @@ test("loads Google calendar events", async () => {
 
 test("loads Google calendar events from month-based sync cache", async () => {
   const originalFetch = globalThis.fetch;
+  const syncWindow = getExpectedSyncWindow();
   const connectionData = {
     email: "user@example.com",
     refreshTokenEncrypted: encryptTestSecret("refresh-token"),
@@ -660,8 +670,11 @@ test("loads Google calendar events from month-based sync cache", async () => {
     throw new Error(`Unexpected command ${command.constructor.name}`);
   });
 
-  globalThis.fetch = async () =>
-    ({
+  let requestedSyncUrl = "";
+  globalThis.fetch = async (input) => {
+    requestedSyncUrl = String(input);
+
+    return ({
       ok: true,
       json: async () => ({
         items: [
@@ -680,6 +693,7 @@ test("loads Google calendar events from month-based sync cache", async () => {
         nextSyncToken: "sync-token-1",
       }),
     }) as Response;
+  };
 
   setHandlerClientsForTesting({ dynamoClient: dynamo.client });
 
@@ -722,12 +736,20 @@ test("loads Google calendar events from month-based sync cache", async () => {
   ]);
 
   const storedItems = Array.from(store.values());
-  assert.ok(
-    storedItems.some((item) => item.sk === "SYNC_STATE"),
-  );
+  const syncStateItem = storedItems.find((item) => item.sk === "SYNC_STATE");
+  assert.ok(syncStateItem);
+  assert.deepEqual(JSON.parse(String(syncStateItem.data)), {
+    syncToken: "sync-token-1",
+    timeMin: syncWindow.timeMin,
+    timeMax: syncWindow.timeMax,
+  });
   assert.ok(
     storedItems.some((item) => String(item.sk).startsWith("MONTH#2026-05#")),
   );
+
+  const syncRequest = new URL(requestedSyncUrl);
+  assert.equal(syncRequest.searchParams.get("timeMin"), syncWindow.timeMin);
+  assert.equal(syncRequest.searchParams.get("timeMax"), syncWindow.timeMax);
 });
 
 test("loads Google calendar reporting rows from cached event metadata", async () => {
@@ -905,6 +927,7 @@ test("loads Google calendar reporting rows from cached event metadata", async ()
 
 test("keeps cached Google calendar events visible when incremental sync returns no changes", async () => {
   const originalFetch = globalThis.fetch;
+  const syncWindow = getExpectedSyncWindow();
   const connectionData = {
     email: "user@example.com",
     refreshTokenEncrypted: encryptTestSecret("refresh-token"),
@@ -927,6 +950,8 @@ test("keeps cached Google calendar events visible when incremental sync returns 
     sk: "SYNC_STATE",
     data: JSON.stringify({
       syncToken: "sync-token-existing",
+      timeMin: syncWindow.timeMin,
+      timeMax: syncWindow.timeMax,
     }),
   });
   store.set(keyFor(syncPk, "MONTH#2026-05#001"), {
@@ -1045,6 +1070,174 @@ test("keeps cached Google calendar events visible when incremental sync returns 
       congregationItems: [],
     },
   ]);
+});
+
+test("resets legacy Google calendar sync cache when the rolling sync window changes", async () => {
+  const originalFetch = globalThis.fetch;
+  const syncWindow = getExpectedSyncWindow();
+  const currentYear = new Date().getUTCFullYear();
+  const connectionData = {
+    email: "user@example.com",
+    refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+    accessTokenEncrypted: encryptTestSecret("access-token"),
+    accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+    connectedAt: "2026-04-26T12:00:00.000Z",
+    updatedAt: "2026-04-26T12:05:00.000Z",
+    refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+    tokenScope: "https://www.googleapis.com/auth/calendar",
+    tokenType: "Bearer",
+    lastError: null,
+  };
+  const store = new Map<string, Record<string, unknown>>();
+  const keyFor = (pk: string, sk: string) => `${pk}||${sk}`;
+  const syncPk =
+    "CALENDAR_EVENT_SYNC#00000000-0000-4000-8000-000000000001#primary";
+  const staleMonth = `${currentYear + 5}-01`;
+
+  store.set(keyFor(syncPk, "SYNC_STATE"), {
+    pk: syncPk,
+    sk: "SYNC_STATE",
+    data: JSON.stringify({
+      syncToken: "legacy-sync-token",
+    }),
+  });
+  store.set(keyFor(syncPk, `MONTH#${staleMonth}#001`), {
+    pk: syncPk,
+    sk: `MONTH#${staleMonth}#001`,
+    data: JSON.stringify({
+      month: staleMonth,
+      items: [
+        {
+          id: "event-stale",
+          title: "Stale Cached Event",
+          status: "confirmed",
+          htmlLink: "",
+          location: "",
+          description: "",
+          eventType: "default",
+          visibility: "default",
+          start: `${staleMonth}-05T15:00:00.000Z`,
+          end: `${staleMonth}-05T16:00:00.000Z`,
+          isAllDay: false,
+          organizer: "Admin",
+          congregationItems: [],
+        },
+      ],
+    }),
+  });
+
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      const key = command.input?.Key as { pk: string; sk: string };
+
+      if (key.pk === "CALENDAR_INTEGRATION") {
+        return {
+          Item: {
+            pk: key.pk,
+            sk: key.sk,
+            data: JSON.stringify(connectionData),
+          },
+        };
+      }
+
+      return {
+        Item: store.get(keyFor(key.pk, key.sk)),
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      const item = command.input?.Item as Record<string, unknown>;
+      store.set(keyFor(String(item.pk), String(item.sk)), item);
+      return {};
+    }
+
+    if (command.constructor.name === "DeleteCommand") {
+      const key = command.input?.Key as { pk: string; sk: string };
+      store.delete(keyFor(key.pk, key.sk));
+      return {};
+    }
+
+    if (command.constructor.name === "QueryCommand") {
+      const values = command.input?.ExpressionAttributeValues as Record<string, string>;
+      const pk = values?.[":pk"];
+
+      return {
+        Items: Array.from(store.values()).filter((item) => item.pk === pk),
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  globalThis.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            id: "event-current",
+            summary: "Current Window Event",
+            start: { dateTime: `${currentYear}-05-03T15:00:00.000Z` },
+            end: { dateTime: `${currentYear}-05-03T16:00:00.000Z` },
+            organizer: { displayName: "Admin" },
+            eventType: "default",
+            visibility: "default",
+            status: "confirmed",
+          },
+        ],
+        nextSyncToken: "sync-token-reset",
+      }),
+    }) as Response;
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/events",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        timeMin: `${currentYear}-05-01T00:00:00.000Z`,
+        timeMax: `${currentYear}-06-01T00:00:00.000Z`,
+        timeZone: "America/Toronto",
+        calendarId: "primary",
+        useSyncCache: true,
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  globalThis.fetch = originalFetch;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.syncMode, "full");
+  assert.deepEqual(body.items, [
+    {
+      id: "event-current",
+      title: "Current Window Event",
+      status: "confirmed",
+      htmlLink: "",
+      location: "",
+      description: "",
+      eventType: "default",
+      visibility: "default",
+      start: `${currentYear}-05-03T15:00:00.000Z`,
+      end: `${currentYear}-05-03T16:00:00.000Z`,
+      isAllDay: false,
+      organizer: "Admin",
+      congregationItems: [],
+    },
+  ]);
+
+  const storedItems = Array.from(store.values());
+  assert.ok(!storedItems.some((item) => item.sk === `MONTH#${staleMonth}#001`));
+  const syncStateItem = storedItems.find((item) => item.sk === "SYNC_STATE");
+  assert.ok(syncStateItem);
+  assert.deepEqual(JSON.parse(String(syncStateItem.data)), {
+    syncToken: "sync-token-reset",
+    timeMin: syncWindow.timeMin,
+    timeMax: syncWindow.timeMax,
+  });
 });
 
 test("falls back to direct Google calendar events when sync cache loading fails", async () => {

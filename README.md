@@ -157,7 +157,9 @@ The sync-state `data` attribute looks like:
 
 ```json
 {
-  "syncToken": "CPDAlvWDx70CEPDAlvWDx70CGAU="
+  "syncToken": "CPDAlvWDx70CEPDAlvWDx70CGAU=",
+  "timeMin": "2025-01-01T00:00:00.000Z",
+  "timeMax": "2029-01-01T00:00:00.000Z"
 }
 ```
 
@@ -187,9 +189,10 @@ Each month cache row stores one month chunk of normalized Google event data in t
 Sync cache notes:
 
 - the partition groups cached events by signed-in user and selected Google calendar
-- `SYNC_STATE` stores the Google incremental sync token used for future updates
+- `SYNC_STATE` stores the Google incremental sync token and the rolling sync window used for future updates
 - `MONTH#...` rows cache event collections by month instead of one DynamoDB row per event
 - if a month would grow too large for one item, it is split into multiple month chunks such as `MONTH#2026-05#001` and `MONTH#2026-05#002`
+- the rolling sync window is `currentYear - 1` through `currentYear + 2`, so older legacy caches are cleared and rebuilt when that window changes
 - if Google invalidates the sync token, the cache can be cleared and rebuilt
 
 ## Calendar Schedule Sequence
