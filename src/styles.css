@@ -55,6 +55,34 @@
   --danger-text: #fecaca;
 }
 
+[data-theme="modern"] {
+  color-scheme: light;
+  --page-text: #2c3531;
+  --page-bg:
+    radial-gradient(circle at top right, rgba(17, 100, 102, 0.16), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(255, 203, 154, 0.3), transparent 34%),
+    linear-gradient(180deg, #d1e8e2 0%, #f4efe6 100%);
+  --panel-bg: linear-gradient(180deg, rgba(44, 53, 49, 0.97) 0%, rgba(33, 40, 37, 0.98) 100%);
+  --panel-text: #fff4e6;
+  --panel-muted: rgba(255, 244, 230, 0.72);
+  --nav-bg: rgba(209, 232, 226, 0.08);
+  --nav-border: rgba(209, 232, 226, 0.16);
+  --nav-hover-bg: rgba(17, 100, 102, 0.2);
+  --nav-hover-border: rgba(17, 100, 102, 0.32);
+  --surface-bg: rgba(255, 244, 230, 0.82);
+  --surface-border: rgba(217, 176, 140, 0.28);
+  --surface-shadow: 0 28px 72px rgba(44, 53, 49, 0.14);
+  --content-text: rgba(44, 53, 49, 0.82);
+  --heading-text: #2c3531;
+  --dark-card-bg: rgba(240, 230, 214, 0.96);
+  --dark-card-text: #2c3531;
+  --muted-light: rgba(89, 105, 99, 0.78);
+  --soft-card-bg: rgba(209, 232, 226, 0.55);
+  --danger-bg: rgba(217, 176, 140, 0.22);
+  --danger-border: rgba(217, 176, 140, 0.4);
+  --danger-text: #7a4e32;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -846,7 +874,7 @@ button {
 .theme-toggle-group {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.35rem;
   padding: 0.3rem;
   border-radius: 999px;
@@ -881,6 +909,41 @@ button {
   border-color: transparent;
   color: #111827;
   font-weight: 700;
+}
+
+[data-theme="modern"] .auth-copy {
+  color: #ffc88f;
+}
+
+[data-theme="modern"] .theme-toggle-group {
+  background: rgba(209, 232, 226, 0.08);
+  border-color: rgba(209, 232, 226, 0.14);
+}
+
+[data-theme="modern"] .theme-toggle-option.active {
+  background: linear-gradient(135deg, #116466, #2c3531);
+  color: #fff4e6;
+  box-shadow: inset 0 0 0 1px rgba(255, 244, 230, 0.1);
+}
+
+[data-theme="modern"] .nav-item.active {
+  background: linear-gradient(135deg, #ffcb9a, #d9b08c);
+  color: #2c3531;
+}
+
+[data-theme="modern"] .parking-tab.active {
+  border-bottom-color: #116466;
+  color: #2c3531;
+}
+
+[data-theme="modern"] .hero-inline-link,
+[data-theme="modern"] .parking-print-link,
+[data-theme="modern"] .parking-placement-link,
+[data-theme="modern"] .parking-history-link,
+[data-theme="modern"] .member-back-button,
+[data-theme="modern"] .member-detail-beta-back,
+[data-theme="modern"] .member-detail-beta-legacy-link {
+  color: #116466;
 }
 
 .content-panel {

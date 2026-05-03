@@ -601,6 +601,160 @@ test("loads Google calendar events from month-based sync cache", async () => {
     assert.equal(syncRequest.searchParams.get("timeMin"), syncWindow.timeMin);
     assert.equal(syncRequest.searchParams.get("timeMax"), syncWindow.timeMax);
 });
+test("stores cross-month Google calendar events in each overlapping month and dedupes reads", async () => {
+    const originalFetch = globalThis.fetch;
+    const connectionData = {
+        email: "user@example.com",
+        refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+        accessTokenEncrypted: encryptTestSecret("access-token"),
+        accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+        connectedAt: "2026-04-26T12:00:00.000Z",
+        updatedAt: "2026-04-26T12:05:00.000Z",
+        refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+        tokenScope: "https://www.googleapis.com/auth/calendar",
+        tokenType: "Bearer",
+        lastError: null,
+    };
+    const store = new Map();
+    const keyFor = (pk, sk) => `${pk}||${sk}`;
+    const dynamo = createMockClient((command) => {
+        if (command.constructor.name === "GetCommand") {
+            const key = command.input?.Key;
+            if (key.pk === "CALENDAR_INTEGRATION") {
+                return {
+                    Item: {
+                        pk: key.pk,
+                        sk: key.sk,
+                        data: JSON.stringify(connectionData),
+                    },
+                };
+            }
+            return {
+                Item: store.get(keyFor(key.pk, key.sk)),
+            };
+        }
+        if (command.constructor.name === "PutCommand") {
+            const item = command.input?.Item;
+            store.set(keyFor(String(item.pk), String(item.sk)), item);
+            return {};
+        }
+        if (command.constructor.name === "DeleteCommand") {
+            const key = command.input?.Key;
+            store.delete(keyFor(key.pk, key.sk));
+            return {};
+        }
+        if (command.constructor.name === "QueryCommand") {
+            const values = command.input?.ExpressionAttributeValues;
+            const pk = values?.[":pk"];
+            const skPrefix = values?.[":skPrefix"];
+            const items = Array.from(store.values()).filter((item) => item.pk === pk);
+            return {
+                Items: skPrefix
+                    ? items.filter((item) => String(item.sk).startsWith(skPrefix))
+                    : items,
+            };
+        }
+        throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+    globalThis.fetch = async () => ({
+        ok: true,
+        json: async () => ({
+            items: [
+                {
+                    id: "event-cross-month",
+                    summary: "Cross Month Event",
+                    start: { dateTime: "2026-05-31T23:00:00.000Z" },
+                    end: { dateTime: "2026-06-01T01:00:00.000Z" },
+                    organizer: { displayName: "Admin" },
+                    location: "Main Hall",
+                    eventType: "default",
+                    visibility: "default",
+                    status: "confirmed",
+                },
+            ],
+            nextSyncToken: "sync-token-cross-month",
+        }),
+    });
+    setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+    const syncResponse = await invokeHandler(createEvent({
+        path: "/calendar/google/events",
+        method: "POST",
+        groups: ["admin"],
+        body: {
+            timeMin: "2026-05-01T00:00:00.000Z",
+            timeMax: "2026-06-30T00:00:00.000Z",
+            timeZone: "America/Toronto",
+            calendarId: "primary",
+            useSyncCache: true,
+        },
+    }));
+    const syncBody = parseBody(syncResponse.body);
+    assert.equal(syncResponse.statusCode, 200);
+    assert.equal(syncBody.syncMode, "full");
+    const storedItems = Array.from(store.values());
+    const mayRow = storedItems.find((item) => String(item.sk).startsWith("MONTH#2026-05#"));
+    const juneRow = storedItems.find((item) => String(item.sk).startsWith("MONTH#2026-06#"));
+    assert.ok(mayRow);
+    assert.ok(juneRow);
+    globalThis.fetch = async () => {
+        throw new Error("Fetch should not be called for cache-only month reads.");
+    };
+    const juneResponse = await invokeHandler(createEvent({
+        path: "/calendar/google/events",
+        method: "POST",
+        groups: ["admin"],
+        body: {
+            timeMin: "2026-06-01T00:00:00.000Z",
+            timeMax: "2026-07-01T00:00:00.000Z",
+            timeZone: "America/Toronto",
+            calendarId: "primary",
+            useSyncCache: true,
+            cacheOnly: true,
+            selectedYearMonth: "2026-06",
+            viewMode: "month",
+        },
+    }));
+    const juneBody = parseBody(juneResponse.body);
+    const rangeResponse = await invokeHandler(createEvent({
+        path: "/calendar/google/events",
+        method: "POST",
+        groups: ["admin"],
+        body: {
+            timeMin: "2026-05-30T00:00:00.000Z",
+            timeMax: "2026-06-02T00:00:00.000Z",
+            timeZone: "America/Toronto",
+            calendarId: "primary",
+            useSyncCache: true,
+            cacheOnly: true,
+            selectedPeriodMonths: ["2026-05", "2026-06"],
+            viewMode: "week",
+        },
+    }));
+    const rangeBody = parseBody(rangeResponse.body);
+    globalThis.fetch = originalFetch;
+    assert.equal(juneResponse.statusCode, 200);
+    assert.equal(juneBody.syncMode, "cached");
+    assert.deepEqual(juneBody.items, [
+        {
+            id: "event-cross-month",
+            title: "Cross Month Event",
+            status: "confirmed",
+            htmlLink: "",
+            location: "Main Hall",
+            description: "",
+            eventType: "default",
+            visibility: "default",
+            start: "2026-05-31T23:00:00.000Z",
+            end: "2026-06-01T01:00:00.000Z",
+            isAllDay: false,
+            organizer: "Admin",
+            congregationItems: [],
+        },
+    ]);
+    assert.equal(rangeResponse.statusCode, 200);
+    assert.equal(rangeBody.syncMode, "cached");
+    assert.equal(Array.isArray(rangeBody.items) ? rangeBody.items.length : 0, 1);
+});
 test("loads Google calendar reporting rows from cached event metadata", async () => {
     const originalFetch = globalThis.fetch;
     const connectionData = {
@@ -1124,6 +1278,130 @@ test("falls back to direct Google calendar events when sync cache loading fails"
             congregationItems: [],
         },
     ]);
+});
+test("stores direct Google calendar fallback events in DynamoDB cache", async () => {
+    const originalFetch = globalThis.fetch;
+    const connectionData = {
+        email: "user@example.com",
+        refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+        accessTokenEncrypted: encryptTestSecret("access-token"),
+        accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+        connectedAt: "2026-04-26T12:00:00.000Z",
+        updatedAt: "2026-04-26T12:05:00.000Z",
+        refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+        tokenScope: "https://www.googleapis.com/auth/calendar",
+        tokenType: "Bearer",
+        lastError: null,
+    };
+    const store = new Map();
+    const keyFor = (pk, sk) => `${pk}||${sk}`;
+    const syncPk = "CALENDAR_EVENT_SYNC#00000000-0000-4000-8000-000000000001#primary";
+    const dynamo = createMockClient((command) => {
+        if (command.constructor.name === "GetCommand") {
+            const key = command.input?.Key;
+            if (key.pk === "CALENDAR_INTEGRATION") {
+                return {
+                    Item: {
+                        pk: key.pk,
+                        sk: key.sk,
+                        data: JSON.stringify(connectionData),
+                    },
+                };
+            }
+            return {
+                Item: store.get(keyFor(key.pk, key.sk)),
+            };
+        }
+        if (command.constructor.name === "PutCommand") {
+            const item = command.input?.Item;
+            store.set(keyFor(String(item.pk), String(item.sk)), item);
+            return {};
+        }
+        if (command.constructor.name === "DeleteCommand") {
+            const key = command.input?.Key;
+            store.delete(keyFor(key.pk, key.sk));
+            return {};
+        }
+        if (command.constructor.name === "QueryCommand") {
+            const values = command.input?.ExpressionAttributeValues;
+            const pk = values?.[":pk"];
+            return {
+                Items: Array.from(store.values()).filter((item) => item.pk === pk),
+            };
+        }
+        throw new Error(`Unexpected command ${command.constructor.name}`);
+    });
+    globalThis.fetch = async (input) => {
+        const url = String(input);
+        if (url.includes("showDeleted=true")) {
+            return {
+                ok: false,
+                status: 500,
+                json: async () => ({
+                    error: {
+                        message: "Sync path failed.",
+                    },
+                }),
+            };
+        }
+        if (url.includes("/calendar/v3/calendars/") && url.includes("/events")) {
+            return {
+                ok: true,
+                json: async () => ({
+                    items: [
+                        {
+                            id: "event-direct-cache",
+                            summary: "Direct Cached Event",
+                            start: { dateTime: "2026-05-07T15:00:00.000Z" },
+                            end: { dateTime: "2026-05-07T16:00:00.000Z" },
+                            organizer: { displayName: "Admin" },
+                            location: "Office",
+                            eventType: "default",
+                            visibility: "default",
+                            status: "confirmed",
+                        },
+                    ],
+                }),
+            };
+        }
+        throw new Error(`Unexpected fetch call for ${url}`);
+    };
+    setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+    const response = await invokeHandler(createEvent({
+        path: "/calendar/google/events",
+        method: "POST",
+        groups: ["admin"],
+        body: {
+            timeMin: "2026-05-01T00:00:00.000Z",
+            timeMax: "2026-06-01T00:00:00.000Z",
+            timeZone: "America/Toronto",
+            calendarId: "primary",
+            useSyncCache: true,
+        },
+    }));
+    const body = parseBody(response.body);
+    globalThis.fetch = originalFetch;
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.syncMode, "direct");
+    assert.deepEqual(body.items, [
+        {
+            id: "event-direct-cache",
+            title: "Direct Cached Event",
+            status: "confirmed",
+            htmlLink: "",
+            location: "Office",
+            description: "",
+            eventType: "default",
+            visibility: "default",
+            start: "2026-05-07T15:00:00.000Z",
+            end: "2026-05-07T16:00:00.000Z",
+            isAllDay: false,
+            organizer: "Admin",
+            congregationItems: [],
+        },
+    ]);
+    const storedItems = Array.from(store.values());
+    assert.ok(storedItems.some((item) => item.pk === syncPk && String(item.sk).startsWith("MONTH#2026-05#")));
 });
 test("creates a Google calendar event", async () => {
     const originalFetch = globalThis.fetch;

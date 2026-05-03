@@ -1529,7 +1529,7 @@ export default function App() {
   const memberLongPressTimerRef = useRef<number | null>(null);
   const suppressMemberClickRef = useRef(false);
   const initialGoogleCalendarCallbackState = getInitialCalendarCallbackState();
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark" | "modern">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
   const [challengeResponse, setChallengeResponse] = useState("");
   const [authStatus, setAuthStatus] = useState<"checking" | "signed-in" | "signed-out">(
@@ -3480,7 +3480,7 @@ export default function App() {
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("shepherd-hub-theme");
 
-    if (savedTheme === "light" || savedTheme === "dark") {
+    if (savedTheme === "light" || savedTheme === "dark" || savedTheme === "modern") {
       setTheme(savedTheme);
     }
   }, []);
@@ -5492,6 +5492,14 @@ export default function App() {
                   onClick={() => setTheme("dark")}
                 >
                   Dark
+                </button>
+                <button
+                  type="button"
+                  className={`theme-toggle-option${theme === "modern" ? " active" : ""}`}
+                  aria-pressed={theme === "modern"}
+                  onClick={() => setTheme("modern")}
+                >
+                  Modern
                 </button>
               </div>
               <button
