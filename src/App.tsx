@@ -1564,7 +1564,7 @@ export default function App() {
     startOfMonth(new Date()),
   );
   const [calendarScheduleViewMode, setCalendarScheduleViewMode] =
-    useState<CalendarScheduleViewMode>("month");
+    useState<CalendarScheduleViewMode>("week");
   const [calendarMonthExpandedDate, setCalendarMonthExpandedDate] = useState<string | null>(null);
   const [calendarMonthSelectedDate, setCalendarMonthSelectedDate] = useState<string | null>(
     null,
