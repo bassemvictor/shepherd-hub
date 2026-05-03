@@ -1561,7 +1561,7 @@ export default function App() {
   const [calendarScheduleLookupEndTime, setCalendarScheduleLookupEndTime] =
     useState("17:00");
   const [calendarMonthViewDate, setCalendarMonthViewDate] = useState(() =>
-    startOfMonth(new Date()),
+    getCalendarScheduleAnchorDateForViewMode("week"),
   );
   const [calendarScheduleViewMode, setCalendarScheduleViewMode] =
     useState<CalendarScheduleViewMode>("week");
@@ -7509,11 +7509,9 @@ export default function App() {
                             }`}
                             onClick={() => {
                               setCalendarScheduleViewMode(viewMode);
-                              if (viewMode === "day" || viewMode === "week") {
-                                setCalendarMonthViewDate(
-                                  getCalendarScheduleAnchorDateForViewMode(viewMode),
-                                );
-                              }
+                              setCalendarMonthViewDate(
+                                getCalendarScheduleAnchorDateForViewMode(viewMode),
+                              );
                             }}
                             role="tab"
                             aria-selected={calendarScheduleViewMode === viewMode}
