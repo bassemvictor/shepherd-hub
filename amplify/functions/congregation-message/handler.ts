@@ -1007,8 +1007,42 @@ const normalizeGoogleCalendarEvent = (item: {
   };
 };
 
-const getGoogleCalendarEventMonthKey = (event: Pick<StoredGoogleCalendarSyncedEventData, "start">) =>
-  event.start.slice(0, 7);
+const getGoogleCalendarEventMonthKeys = (
+  event: Pick<StoredGoogleCalendarSyncedEventData, "start" | "end">,
+) => {
+  const startTime = Date.parse(event.start);
+  const endTime = Date.parse(event.end);
+
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+    return [event.start.slice(0, 7)];
+  }
+
+  const monthKeys = new Set<string>();
+  const monthCursor = new Date(startTime);
+  monthCursor.setUTCDate(1);
+  monthCursor.setUTCHours(0, 0, 0, 0);
+  const lastRelevantTime = Math.max(startTime, endTime - 1);
+  const lastRelevantMonth = new Date(lastRelevantTime);
+  lastRelevantMonth.setUTCDate(1);
+  lastRelevantMonth.setUTCHours(0, 0, 0, 0);
+
+  while (monthCursor.getTime() <= lastRelevantMonth.getTime()) {
+    monthKeys.add(monthCursor.toISOString().slice(0, 7));
+    monthCursor.setUTCMonth(monthCursor.getUTCMonth() + 1);
+  }
+
+  return Array.from(monthKeys.values());
+};
+
+const dedupeGoogleCalendarEvents = (items: StoredGoogleCalendarSyncedEventData[]) => {
+  const uniqueItems = new Map<string, StoredGoogleCalendarSyncedEventData>();
+
+  for (const item of items) {
+    uniqueItems.set(`${item.id}#${item.start}#${item.end}`, item);
+  }
+
+  return Array.from(uniqueItems.values());
+};
 
 const isGoogleCalendarMonthCacheSortKey = (sortKey: string) =>
   sortKey.startsWith(`${googleEventSyncMonthSkPrefix}#`);
@@ -1042,10 +1076,11 @@ const buildGoogleCalendarMonthCacheChunks = (
   const eventsByMonth = new Map<string, StoredGoogleCalendarSyncedEventData[]>();
 
   for (const event of events) {
-    const monthKey = getGoogleCalendarEventMonthKey(event);
-    const existingMonthEvents = eventsByMonth.get(monthKey) ?? [];
-    existingMonthEvents.push(event);
-    eventsByMonth.set(monthKey, existingMonthEvents);
+    for (const monthKey of getGoogleCalendarEventMonthKeys(event)) {
+      const existingMonthEvents = eventsByMonth.get(monthKey) ?? [];
+      existingMonthEvents.push(event);
+      eventsByMonth.set(monthKey, existingMonthEvents);
+    }
   }
 
   const monthChunks: StoredGoogleCalendarMonthCacheData[] = [];
@@ -1280,6 +1315,26 @@ const loadGoogleCalendarEventsForCalendar = async ({
         timeMax,
         timeZone,
       });
+      try {
+        await storeDirectGoogleCalendarEventsInCache({
+          tableName,
+          time,
+          userKey,
+          calendarId,
+          timeMin,
+          timeMax,
+          events: directFallbackItems,
+        });
+      } catch (cacheStoreError) {
+        const typedCacheStoreError = cacheStoreError as Error;
+        console.error("Failed to store direct Google Calendar fallback events in cache.", {
+          calendarId,
+          userKey,
+          timeMin,
+          timeMax,
+          errorMessage: typedCacheStoreError.message,
+        });
+      }
       return {
         items: directFallbackItems,
         changedResources: [],
@@ -1492,18 +1547,24 @@ const loadAllGoogleCalendarCachedEvents = async (
     })
     .filter((item): item is StoredGoogleCalendarMonthCacheData => item !== null)
     .flatMap((item) => item.items)
+    .reduce<StoredGoogleCalendarSyncedEventData[]>(
+      (accumulator, item) => accumulator.concat(item),
+      [],
+    );
+
+  const dedupedItems = dedupeGoogleCalendarEvents(items)
     .sort((left, right) => left.start.localeCompare(right.start));
 
   console.log("Loaded all cached Google Calendar month entries.", {
     userKey,
     calendarId,
     rawItemCount: (response.Items ?? []).length,
-    eventCount: items.length,
+    eventCount: dedupedItems.length,
   });
 
   return {
     rows: (response.Items ?? []) as TableRow[],
-    items,
+    items: dedupedItems,
   };
 };
 
@@ -1613,6 +1674,54 @@ const isGoogleCalendarEventInSyncWindow = (
   const windowEnd = Date.parse(syncWindow.timeMax);
 
   return Number.isFinite(start) && Number.isFinite(end) && end > windowStart && start < windowEnd;
+};
+
+const doesGoogleCalendarEventOverlapRange = (
+  item: Pick<StoredGoogleCalendarSyncedEventData, "start" | "end">,
+  range: { timeMin: string; timeMax: string },
+) => {
+  const start = Date.parse(item.start);
+  const end = Date.parse(item.end);
+  const windowStart = Date.parse(range.timeMin);
+  const windowEnd = Date.parse(range.timeMax);
+
+  return Number.isFinite(start) && Number.isFinite(end) && end > windowStart && start < windowEnd;
+};
+
+const storeDirectGoogleCalendarEventsInCache = async ({
+  tableName,
+  time,
+  userKey,
+  calendarId,
+  timeMin,
+  timeMax,
+  events,
+}: {
+  tableName: string;
+  time: string;
+  userKey: string;
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
+  events: StoredGoogleCalendarSyncedEventData[];
+}) => {
+  const syncWindow = getGoogleCalendarSyncWindow(time);
+  const cachedState = await loadAllGoogleCalendarCachedEvents(tableName, userKey, calendarId);
+  const preservedCachedItems = cachedState.items.filter(
+    (item) => !doesGoogleCalendarEventOverlapRange(item, { timeMin, timeMax }),
+  );
+  const mergedItems = dedupeGoogleCalendarEvents([
+    ...preservedCachedItems,
+    ...events,
+  ]).filter((item) => isGoogleCalendarEventInSyncWindow(item, syncWindow));
+
+  await rewriteGoogleCalendarMonthCache({
+    tableName,
+    userKey,
+    calendarId,
+    rows: cachedState.rows,
+    events: mergedItems,
+  });
 };
 
 const syncGoogleCalendarEventCache = async ({
@@ -1930,26 +2039,30 @@ const getCachedGoogleCalendarEventsForRange = async ({
     }),
   );
 
+  const cachedItems = dedupeGoogleCalendarEvents(
+    ((response.Items ?? []) as TableRow[])
+      .map((item) => {
+        const parsed = parseGoogleCalendarMonthCacheRow(item);
+
+        if (!parsed && isGoogleCalendarMonthCacheSortKey(item.sk)) {
+          console.error("Failed to parse cached Google Calendar month row while loading range.", {
+            userKey,
+            calendarId,
+            sortKey: item.sk,
+          });
+        }
+
+        return parsed;
+      })
+      .filter(
+        (item): item is StoredGoogleCalendarMonthCacheData =>
+          item !== null && monthKeys.has(item.month),
+      )
+      .flatMap((item) => item.items),
+  );
+
   const items = filterGoogleCalendarEventsForRange({
-    items: ((response.Items ?? []) as TableRow[])
-    .map((item) => {
-      const parsed = parseGoogleCalendarMonthCacheRow(item);
-
-      if (!parsed && isGoogleCalendarMonthCacheSortKey(item.sk)) {
-        console.error("Failed to parse cached Google Calendar month row while loading range.", {
-          userKey,
-          calendarId,
-          sortKey: item.sk,
-        });
-      }
-
-      return parsed;
-    })
-    .filter(
-      (item): item is StoredGoogleCalendarMonthCacheData =>
-        item !== null && monthKeys.has(item.month),
-    )
-    .flatMap((item) => item.items),
+    items: cachedItems,
     timeMin,
     timeMax,
     selectedYearMonth,
