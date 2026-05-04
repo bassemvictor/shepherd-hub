@@ -60,7 +60,7 @@
   --page-text: #2c3531;
   --page-bg:
     radial-gradient(circle at top right, rgba(17, 100, 102, 0.16), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(255, 203, 154, 0.3), transparent 34%),
+    radial-gradient(circle at bottom left, rgba(17, 100, 102, 0.18), transparent 34%),
     linear-gradient(180deg, #d1e8e2 0%, #f4efe6 100%);
   --panel-bg: linear-gradient(180deg, rgba(44, 53, 49, 0.97) 0%, rgba(33, 40, 37, 0.98) 100%);
   --panel-text: #fff4e6;
@@ -912,7 +912,7 @@ button {
 }
 
 [data-theme="modern"] .auth-copy {
-  color: #ffc88f;
+  color: #116466;
 }
 
 [data-theme="modern"] .theme-toggle-group {
@@ -927,8 +927,17 @@ button {
 }
 
 [data-theme="modern"] .nav-item.active {
-  background: linear-gradient(135deg, #ffcb9a, #d9b08c);
-  color: #2c3531;
+  background: linear-gradient(135deg, #116466, #0f5759);
+  color: #fff4e6;
+}
+
+[data-theme="modern"] .auth-submit-button,
+[data-theme="modern"] .hero-action-button,
+[data-theme="modern"] .member-submit-button,
+[data-theme="modern"] .member-photo-picker-button,
+[data-theme="modern"] .contacts-import-picker-button {
+  background: linear-gradient(135deg, #116466, #0f5759);
+  color: #fff4e6;
 }
 
 [data-theme="modern"] .parking-tab.active {
