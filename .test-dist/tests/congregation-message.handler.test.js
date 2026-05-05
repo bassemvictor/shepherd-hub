@@ -1001,13 +1001,17 @@ test("keeps cached Google calendar events visible when incremental sync returns 
         }
         throw new Error(`Unexpected command ${command.constructor.name}`);
     });
-    globalThis.fetch = async () => ({
-        ok: true,
-        json: async () => ({
-            items: [],
-            nextSyncToken: "sync-token-next",
-        }),
-    });
+    let requestedIncrementalSyncUrl = "";
+    globalThis.fetch = async (input) => {
+        requestedIncrementalSyncUrl = String(input);
+        return ({
+            ok: true,
+            json: async () => ({
+                items: [],
+                nextSyncToken: "sync-token-next",
+            }),
+        });
+    };
     setHandlerClientsForTesting({ dynamoClient: dynamo.client });
     const response = await invokeHandler(createEvent({
         path: "/calendar/google/events",
@@ -1042,6 +1046,10 @@ test("keeps cached Google calendar events visible when incremental sync returns 
             congregationItems: [],
         },
     ]);
+    const incrementalSyncRequest = new URL(requestedIncrementalSyncUrl);
+    assert.equal(incrementalSyncRequest.searchParams.get("syncToken"), "sync-token-existing");
+    assert.equal(incrementalSyncRequest.searchParams.get("timeMin"), null);
+    assert.equal(incrementalSyncRequest.searchParams.get("timeMax"), null);
 });
 test("resets legacy Google calendar sync cache when the rolling sync window changes", async () => {
     const originalFetch = globalThis.fetch;

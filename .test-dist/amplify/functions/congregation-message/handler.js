@@ -668,8 +668,10 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
 };
 const listGoogleCalendarEventsSyncPage = async ({ accessToken, calendarId, timeMin, timeMax, syncToken, pageToken, }) => {
     const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
-    url.searchParams.set("timeMin", timeMin);
-    url.searchParams.set("timeMax", timeMax);
+    if (!syncToken) {
+        url.searchParams.set("timeMin", timeMin);
+        url.searchParams.set("timeMax", timeMax);
+    }
     url.searchParams.set("singleEvents", "true");
     url.searchParams.set("showDeleted", "true");
     url.searchParams.set("maxResults", "2500");
