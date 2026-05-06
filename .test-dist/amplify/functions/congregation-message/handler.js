@@ -666,6 +666,83 @@ const loadGoogleCalendarEventsForCalendar = async ({ tableName, time, userKey, c
         syncMode: "direct",
     };
 };
+const loadGoogleCalendarEventsAcrossCalendars = async ({ tableName, time, userKey, timeMin, timeMax, timeZone, useSyncCache, cacheOnly, selectedYearMonth, selectedPeriodMonths, viewMode, }) => {
+    const existingConnection = await getStoredGoogleConnection(tableName, userKey);
+    if (!existingConnection) {
+        console.warn("Google Calendar connection is required but missing for all-calendar load.", {
+            userKey,
+        });
+        throw Object.assign(new Error("Google Calendar is not connected."), {
+            statusCode: 404,
+        });
+    }
+    const currentConnection = await refreshGoogleAccessTokenIfNeeded({
+        tableName,
+        time,
+        email: userKey,
+        connection: existingConnection,
+    });
+    const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+    const loadedCalendars = await listGoogleCalendars(accessToken);
+    const calendars = loadedCalendars.length > 0
+        ? loadedCalendars
+        : [
+            {
+                id: "primary",
+                name: "Primary Calendar",
+                primary: true,
+                accessRole: "",
+                timeZone: "",
+                hidden: false,
+                selected: false,
+            },
+        ];
+    const calendarResults = await Promise.all(calendars.map((calendar) => loadGoogleCalendarEventsForCalendar({
+        tableName,
+        time,
+        userKey,
+        calendarId: calendar.id,
+        timeMin,
+        timeMax,
+        timeZone,
+        useSyncCache,
+        cacheOnly,
+        selectedYearMonth,
+        selectedPeriodMonths,
+        viewMode,
+    }).then((result) => ({
+        calendar,
+        ...result,
+    }))));
+    const uniqueItems = new Map();
+    for (const { calendar, items: resultItems } of calendarResults) {
+        for (const item of resultItems) {
+            uniqueItems.set(`${calendar.id}#${item.id}#${item.start}#${item.end}`, {
+                ...item,
+                calendarId: calendar.id,
+                calendarName: calendar.name,
+            });
+        }
+    }
+    const items = Array.from(uniqueItems.values()).sort((left, right) => left.start.localeCompare(right.start));
+    const syncModes = calendarResults.map((result) => ({
+        calendarId: result.calendar.id,
+        syncMode: result.syncMode,
+    }));
+    const syncMode = calendarResults.some((result) => result.syncMode === "full")
+        ? "full"
+        : calendarResults.some((result) => result.syncMode === "incremental")
+            ? "incremental"
+            : calendarResults.some((result) => result.syncMode === "direct")
+                ? "direct"
+                : "cached";
+    return {
+        calendars,
+        items,
+        syncMode,
+        syncModes,
+    };
+};
 const listGoogleCalendarEventsSyncPage = async ({ accessToken, calendarId, timeMin, timeMax, syncToken, pageToken, }) => {
     const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
     if (!syncToken) {
@@ -1859,6 +1936,105 @@ export const handler = async (event) => {
                     timeMin,
                     timeMax,
                     useSyncCache,
+                    statusCode: typedError.statusCode ?? null,
+                    errorMessage: typedError.message,
+                });
+                return {
+                    statusCode: typedError.statusCode ?? 500,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: error instanceof Error ? error.message : "Unable to load Google Calendar events.",
+                        time,
+                    }),
+                };
+            }
+        }
+        if (requestPath.endsWith("/calendar/google/events/all")) {
+            if (!requestUserKey) {
+                return {
+                    statusCode: 400,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: "A signed-in user identifier is required to load calendar events.",
+                        time,
+                    }),
+                };
+            }
+            const payload = JSON.parse(event.body ?? "{}");
+            const timeMin = normalizeWhitespace(payload.timeMin);
+            const timeMax = normalizeWhitespace(payload.timeMax);
+            const timeZone = normalizeWhitespace(payload.timeZone);
+            const useSyncCache = payload.useSyncCache !== false;
+            const cacheOnly = payload.cacheOnly === true;
+            const selectedYearMonth = normalizeWhitespace(payload.selectedYearMonth);
+            const selectedPeriodMonths = Array.isArray(payload.selectedPeriodMonths)
+                ? payload.selectedPeriodMonths
+                    .map((value) => normalizeWhitespace(value))
+                    .filter((value) => Boolean(value))
+                : [];
+            const viewMode = payload.viewMode === "day" || payload.viewMode === "week" || payload.viewMode === "month"
+                ? payload.viewMode
+                : undefined;
+            if (!timeMin || !timeMax) {
+                return {
+                    statusCode: 400,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: "timeMin and timeMax are required.",
+                        time,
+                    }),
+                };
+            }
+            if (Number.isNaN(Date.parse(timeMin)) ||
+                Number.isNaN(Date.parse(timeMax)) ||
+                Date.parse(timeMin) >= Date.parse(timeMax)) {
+                return {
+                    statusCode: 400,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: "timeMin must be earlier than timeMax and both must be valid dates.",
+                        time,
+                    }),
+                };
+            }
+            try {
+                const items = await loadGoogleCalendarEventsAcrossCalendars({
+                    tableName,
+                    time,
+                    userKey: requestUserKey,
+                    timeMin,
+                    timeMax,
+                    timeZone,
+                    useSyncCache,
+                    cacheOnly,
+                    selectedYearMonth: selectedYearMonth || undefined,
+                    selectedPeriodMonths,
+                    viewMode,
+                });
+                return {
+                    statusCode: 200,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: "Google Calendar events loaded.",
+                        time,
+                        calendarId: "all",
+                        calendars: items.calendars,
+                        timeMin,
+                        timeMax,
+                        items: items.items,
+                        syncMode: items.syncMode,
+                        syncModes: items.syncModes,
+                    }),
+                };
+            }
+            catch (error) {
+                const typedError = error;
+                console.error("Google Calendar all-calendars events request failed.", {
+                    userKey: requestUserKey,
+                    timeMin,
+                    timeMax,
+                    useSyncCache,
+                    cacheOnly,
                     statusCode: typedError.statusCode ?? null,
                     errorMessage: typedError.message,
                 });

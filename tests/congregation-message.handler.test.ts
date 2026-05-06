@@ -752,6 +752,174 @@ test("loads Google calendar events from month-based sync cache", async () => {
   assert.equal(syncRequest.searchParams.get("timeMax"), syncWindow.timeMax);
 });
 
+test("loads Google calendar events across all calendars with one API call", async () => {
+  const originalFetch = globalThis.fetch;
+  const connectionData = {
+    email: "user@example.com",
+    refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+    accessTokenEncrypted: encryptTestSecret("access-token"),
+    accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+    connectedAt: "2026-04-26T12:00:00.000Z",
+    updatedAt: "2026-04-26T12:05:00.000Z",
+    refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+    tokenScope: "https://www.googleapis.com/auth/calendar",
+    tokenType: "Bearer",
+    lastError: null,
+  };
+  const store = new Map<string, Record<string, unknown>>();
+  const keyFor = (pk: string, sk: string) => `${pk}||${sk}`;
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      const key = command.input?.Key as { pk: string; sk: string };
+
+      if (key.pk === "CALENDAR_INTEGRATION") {
+        return {
+          Item: {
+            pk: key.pk,
+            sk: key.sk,
+            data: JSON.stringify(connectionData),
+          },
+        };
+      }
+
+      return {
+        Item: store.get(keyFor(key.pk, key.sk)),
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      const item = command.input?.Item as Record<string, unknown>;
+      store.set(keyFor(String(item.pk), String(item.sk)), item);
+      return {};
+    }
+
+    if (command.constructor.name === "DeleteCommand") {
+      const key = command.input?.Key as { pk: string; sk: string };
+      store.delete(keyFor(key.pk, key.sk));
+      return {};
+    }
+
+    if (command.constructor.name === "QueryCommand") {
+      const values = command.input?.ExpressionAttributeValues as Record<string, string>;
+      const pk = values?.[":pk"];
+
+      return {
+        Items: Array.from(store.values()).filter((item) => item.pk === pk),
+      };
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+
+    if (url.includes("/calendar/v3/users/me/calendarList")) {
+      return {
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              id: "primary",
+              summary: "Primary Calendar",
+              primary: true,
+              accessRole: "owner",
+              timeZone: "America/Toronto",
+              hidden: false,
+              selected: true,
+            },
+            {
+              id: "team",
+              summary: "Team Calendar",
+              accessRole: "reader",
+              timeZone: "America/Toronto",
+              hidden: false,
+              selected: true,
+            },
+          ],
+        }),
+      } as Response;
+    }
+
+    if (url.includes("/calendar/v3/calendars/primary/events")) {
+      return {
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              id: "event-primary",
+              summary: "Primary Event",
+              start: { dateTime: "2026-05-03T15:00:00.000Z" },
+              end: { dateTime: "2026-05-03T16:00:00.000Z" },
+              organizer: { displayName: "Admin" },
+              eventType: "default",
+              visibility: "default",
+              status: "confirmed",
+            },
+          ],
+          nextSyncToken: "sync-token-primary",
+        }),
+      } as Response;
+    }
+
+    if (url.includes("/calendar/v3/calendars/team/events")) {
+      return {
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              id: "event-team",
+              summary: "Team Event",
+              start: { dateTime: "2026-05-04T15:00:00.000Z" },
+              end: { dateTime: "2026-05-04T16:00:00.000Z" },
+              organizer: { displayName: "Team Admin" },
+              eventType: "default",
+              visibility: "default",
+              status: "confirmed",
+            },
+          ],
+          nextSyncToken: "sync-token-team",
+        }),
+      } as Response;
+    }
+
+    throw new Error(`Unexpected fetch call for ${url}`);
+  };
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/events/all",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        timeMin: "2026-05-01T00:00:00.000Z",
+        timeMax: "2026-06-01T00:00:00.000Z",
+        timeZone: "America/Toronto",
+        useSyncCache: true,
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+
+  globalThis.fetch = originalFetch;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.calendarId, "all");
+  assert.equal(body.syncMode, "full");
+  assert.equal(Array.isArray(body.calendars) ? body.calendars.length : 0, 2);
+  assert.equal(Array.isArray(body.items) ? body.items.length : 2, 2);
+  assert.ok(
+    Array.isArray(body.items) &&
+      body.items.some((item) => item.calendarId === "primary" && item.calendarName === "Primary Calendar"),
+  );
+  assert.ok(
+    Array.isArray(body.items) &&
+      body.items.some((item) => item.calendarId === "team" && item.calendarName === "Team Calendar"),
+  );
+});
+
 test("stores cross-month Google calendar events in each overlapping month and dedupes reads", async () => {
   const originalFetch = globalThis.fetch;
   const connectionData = {

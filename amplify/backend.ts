@@ -204,6 +204,15 @@ congregationApi.addRoutes({
 });
 
 congregationApi.addRoutes({
+  path: "/calendar/google/events/all",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "GoogleCalendarAllEventsIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
   path: "/calendar/google/reporting",
   methods: [HttpMethod.POST],
   integration: new HttpLambdaIntegration(
