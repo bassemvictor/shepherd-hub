@@ -835,7 +835,7 @@ const formatLastSyncLabel = (value?: string | null) => {
   const parsed = new Date(value);
 
   if (!Number.isNaN(parsed.getTime())) {
-    return `Last sync ${parsed.toLocaleTimeString([], {
+    return `Synced from Google ${parsed.toLocaleTimeString([], {
       hour: "numeric",
       minute: "2-digit",
     })}`;
@@ -845,8 +845,20 @@ const formatLastSyncLabel = (value?: string | null) => {
 };
 
 const formatCalendarCacheBadgeLabel = (value?: string | null) => {
-  const syncLabel = formatLastSyncLabel(value);
-  return syncLabel === "Loaded from cache" ? syncLabel : `Loaded from cache | ${syncLabel}`;
+  if (!value) {
+    return "Loaded from cache";
+  }
+
+  const parsed = new Date(value);
+
+  if (!Number.isNaN(parsed.getTime())) {
+    return `Loaded from cache | Last sync ${parsed.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    })}`;
+  }
+
+  return "Loaded from cache";
 };
 
 const resolveGoogleCalendarSyncBehavior = (
@@ -1677,6 +1689,21 @@ export default function App() {
     null,
   );
   const [isCalendarAvailabilityLoading, setIsCalendarAvailabilityLoading] = useState(false);
+  const persistedGoogleCalendarSyncBehavior = resolveGoogleCalendarSyncBehavior(
+    googleCalendarConnection?.syncBehavior,
+  );
+  const persistedGoogleCalendarSyncIntervalMinutes =
+    resolveGoogleCalendarSyncIntervalMinutes(googleCalendarConnection?.syncIntervalMinutes);
+  const currentGoogleCalendarSyncBehavior = resolveGoogleCalendarSyncBehavior(
+    googleCalendarSyncBehavior,
+  );
+  const currentGoogleCalendarSyncIntervalMinutes = resolveGoogleCalendarSyncIntervalMinutes(
+    Number.parseInt(googleCalendarSyncIntervalMinutesInput, 10),
+  );
+  const hasGoogleCalendarSyncSettingsChanges =
+    currentGoogleCalendarSyncBehavior !== persistedGoogleCalendarSyncBehavior ||
+    (currentGoogleCalendarSyncBehavior === "interval" &&
+      currentGoogleCalendarSyncIntervalMinutes !== persistedGoogleCalendarSyncIntervalMinutes);
   const [preferredMemberDetailsPage, setPreferredMemberDetailsPage] = useState<
     "member-details" | "member-details-beta"
   >("member-details-beta");
@@ -5573,7 +5600,7 @@ export default function App() {
               >
                 Sign Out
               </button>
-              <p className="side-panel-version">Version v0.1</p>
+              <p className="side-panel-version">Version v0.2</p>
             </div>
           </div>
         </nav>
@@ -7285,28 +7312,41 @@ export default function App() {
                     only when the cached sync is older than your selected interval.
                   </p>
 
-                  <div
-                    className="parking-tabs calendar-sync-mode-toggle"
-                    role="tablist"
-                    aria-label="Google Calendar schedule sync mode"
-                  >
+                  <div className="calendar-sync-toggle-row">
+                    <div className="calendar-sync-toggle-copy">
+                      <span className="calendar-sync-toggle-title">
+                        {googleCalendarSyncBehavior === "interval"
+                          ? "Sync by interval"
+                          : "Always sync"}
+                      </span>
+                      <span className="calendar-sync-toggle-subtitle">
+                        {googleCalendarSyncBehavior === "interval"
+                          ? "Refresh only when the cached sync gets older than your chosen interval."
+                          : "Refresh from Google whenever the Schedule page loads or the view changes."}
+                      </span>
+                    </div>
+
                     <button
                       type="button"
-                      role="tab"
-                      aria-selected={googleCalendarSyncBehavior === "always"}
-                      className={`parking-tab${googleCalendarSyncBehavior === "always" ? " active" : ""}`}
-                      onClick={() => setGoogleCalendarSyncBehavior("always")}
+                      role="switch"
+                      aria-checked={googleCalendarSyncBehavior === "interval"}
+                      aria-label="Toggle Google Calendar schedule sync mode"
+                      className={`calendar-sync-toggle${
+                        googleCalendarSyncBehavior === "interval" ? " active" : ""
+                      }`}
+                      onClick={() =>
+                        setGoogleCalendarSyncBehavior((current) =>
+                          current === "interval" ? "always" : "interval",
+                        )
+                      }
                     >
-                      Always sync
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={googleCalendarSyncBehavior === "interval"}
-                      className={`parking-tab${googleCalendarSyncBehavior === "interval" ? " active" : ""}`}
-                      onClick={() => setGoogleCalendarSyncBehavior("interval")}
-                    >
-                      Sync by interval
+                      <span className="calendar-sync-toggle-option calendar-sync-toggle-option-left">
+                        Always
+                      </span>
+                      <span className="calendar-sync-toggle-option calendar-sync-toggle-option-right">
+                        Interval
+                      </span>
+                      <span className="calendar-sync-toggle-knob" aria-hidden="true" />
                     </button>
                   </div>
 
@@ -7332,13 +7372,21 @@ export default function App() {
                   <div className="calendar-sync-settings-actions">
                     <button
                       type="button"
-                      className="member-submit-button"
+                      className="member-submit-button calendar-sync-settings-button"
                       onClick={() => {
                         void handleGoogleCalendarSyncSettingsSave();
                       }}
-                      disabled={isGoogleCalendarSyncSettingsSaving || isGoogleCalendarLoading}
+                      disabled={
+                        isGoogleCalendarSyncSettingsSaving ||
+                        isGoogleCalendarLoading ||
+                        !hasGoogleCalendarSyncSettingsChanges
+                      }
                     >
-                      {isGoogleCalendarSyncSettingsSaving ? "Saving..." : "Save Sync Settings"}
+                      {isGoogleCalendarSyncSettingsSaving
+                        ? "Saving..."
+                        : hasGoogleCalendarSyncSettingsChanges
+                          ? "Save Sync Settings"
+                          : "Saved"}
                     </button>
                   </div>
                 </section>

@@ -1760,8 +1760,94 @@ button {
   background: var(--nav-bg);
 }
 
-.calendar-sync-mode-toggle {
-  width: fit-content;
+.calendar-sync-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.calendar-sync-toggle-copy {
+  display: grid;
+  gap: 0.2rem;
+  flex: 1 1 280px;
+}
+
+.calendar-sync-toggle-title {
+  color: var(--heading-text);
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+
+.calendar-sync-toggle-subtitle {
+  color: var(--muted-light);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.calendar-sync-toggle {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  width: 184px;
+  padding: 0.25rem;
+  border: 1px solid var(--nav-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nav-bg) 78%, white 22%);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.calendar-sync-toggle:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.calendar-sync-toggle:focus-visible {
+  outline: 3px solid rgba(34, 197, 94, 0.22);
+  outline-offset: 3px;
+}
+
+.calendar-sync-toggle-option {
+  position: relative;
+  z-index: 1;
+  padding: 0.55rem 0.7rem;
+  color: var(--muted-light);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+  transition: color 160ms ease;
+}
+
+.calendar-sync-toggle:not(.active) .calendar-sync-toggle-option-left,
+.calendar-sync-toggle.active .calendar-sync-toggle-option-right {
+  color: #0f172a;
+}
+
+.calendar-sync-toggle-knob {
+  position: absolute;
+  top: 0.25rem;
+  left: 0.25rem;
+  width: calc(50% - 0.25rem);
+  height: calc(100% - 0.5rem);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #34d399, #22c55e);
+  box-shadow:
+    0 6px 16px rgba(34, 197, 94, 0.2),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  transition: transform 180ms ease;
+}
+
+.calendar-sync-toggle.active .calendar-sync-toggle-knob {
+  transform: translateX(100%);
 }
 
 .calendar-sync-interval-field {
@@ -1785,12 +1871,32 @@ button {
   justify-content: flex-start;
 }
 
+.calendar-sync-settings-button:disabled {
+  cursor: default;
+}
+
 [data-theme="dark"] .calendar-connect-status.success {
   color: #86efac;
 }
 
 [data-theme="dark"] .calendar-connect-status.error {
   color: #fca5a5;
+}
+
+[data-theme="dark"] .calendar-sync-toggle {
+  background: color-mix(in srgb, var(--nav-bg) 90%, white 10%);
+}
+
+[data-theme="dark"] .calendar-sync-toggle:not(.active) .calendar-sync-toggle-option-left,
+[data-theme="dark"] .calendar-sync-toggle.active .calendar-sync-toggle-option-right {
+  color: #f8fafc;
+}
+
+[data-theme="modern"] .calendar-sync-toggle-knob {
+  background: linear-gradient(135deg, #116466, #2c8b8d);
+  box-shadow:
+    0 6px 16px rgba(17, 100, 102, 0.24),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 
 .calendar-schedule-layout {
