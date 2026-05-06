@@ -99,6 +99,11 @@ congregationApi.addRoutes({
     integration: new HttpLambdaIntegration("GoogleCalendarConnectionIntegration", backend.congregationMessage.resources.lambda),
 });
 congregationApi.addRoutes({
+    path: "/calendar/google/connection/sync-settings",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("GoogleCalendarConnectionSyncSettingsIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
     path: "/calendar/google/freebusy",
     methods: [HttpMethod.POST],
     integration: new HttpLambdaIntegration("GoogleCalendarFreeBusyIntegration", backend.congregationMessage.resources.lambda),
@@ -112,6 +117,11 @@ congregationApi.addRoutes({
     path: "/calendar/google/events",
     methods: [HttpMethod.POST],
     integration: new HttpLambdaIntegration("GoogleCalendarEventsIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/calendar/google/events/all",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("GoogleCalendarAllEventsIntegration", backend.congregationMessage.resources.lambda),
 });
 congregationApi.addRoutes({
     path: "/calendar/google/reporting",

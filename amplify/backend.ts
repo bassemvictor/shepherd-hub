@@ -177,6 +177,15 @@ congregationApi.addRoutes({
 });
 
 congregationApi.addRoutes({
+  path: "/calendar/google/connection/sync-settings",
+  methods: [HttpMethod.POST],
+  integration: new HttpLambdaIntegration(
+    "GoogleCalendarConnectionSyncSettingsIntegration",
+    backend.congregationMessage.resources.lambda,
+  ),
+});
+
+congregationApi.addRoutes({
   path: "/calendar/google/freebusy",
   methods: [HttpMethod.POST],
   integration: new HttpLambdaIntegration(

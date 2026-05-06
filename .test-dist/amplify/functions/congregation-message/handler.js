@@ -165,14 +165,17 @@ const responseHeaders = {
 };
 const googleCalendarScope = "https://www.googleapis.com/auth/calendar";
 const googleConnectionPk = "CALENDAR_INTEGRATION";
+const googleCalendarSyncSettingsPk = "CALENDAR_SYNC_SETTINGS";
 const googleOauthStatePk = "CALENDAR_OAUTH_STATE";
 const googleEventSyncPkPrefix = "CALENDAR_EVENT_SYNC";
 const googleEventSyncStateSk = "SYNC_STATE";
+const googleCalendarSyncSettingsSk = "SYNC_SETTINGS";
 const googleEventSyncMonthSkPrefix = "MONTH";
 const googleCalendarCongregationMetadataKey = "shepherdHubCongregation";
 const googleOauthStateTtlMs = 10 * 60 * 1000;
 const googleAccessTokenExpiryBufferMs = 60 * 1000;
 const googleCalendarMonthCacheTargetBytes = 350 * 1024;
+const defaultGoogleCalendarSyncIntervalMinutes = 5;
 const getGoogleCalendarSyncWindow = (time) => {
     const currentYear = new Date(time).getUTCFullYear();
     return {
@@ -237,9 +240,23 @@ const getGoogleClientSecret = () => normalizeWhitespace(process.env.GOOGLE_CLIEN
 const getGoogleCalendarCallbackUrl = () => normalizeWhitespace(process.env.GOOGLE_CALENDAR_CALLBACK_URL);
 const getGoogleTokenEncryptionKey = () => normalizeWhitespace(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY);
 const getGoogleConnectionSortKey = (email) => `GOOGLE#${email}`;
+const getGoogleCalendarSyncSettingsSortKey = (userKey) => `GOOGLE#${userKey}`;
 const getGoogleOauthStateSortKey = (state) => `GOOGLE#${state}`;
 const getGoogleEventSyncPartitionKey = (userKey, calendarId) => `${googleEventSyncPkPrefix}#${userKey}#${calendarId}`;
 const getGoogleEventSyncMonthSortKey = (month, chunkIndex) => `${googleEventSyncMonthSkPrefix}#${month}#${String(chunkIndex).padStart(3, "0")}`;
+const normalizeGoogleCalendarSyncIntervalMinutes = (value) => typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 24 * 60
+    ? value
+    : defaultGoogleCalendarSyncIntervalMinutes;
+const resolveGoogleCalendarSyncSettings = (settings) => ({
+    syncBehavior: settings?.syncBehavior === "interval" ? "interval" : "always",
+    syncIntervalMinutes: normalizeGoogleCalendarSyncIntervalMinutes(settings?.syncIntervalMinutes),
+    cacheLastSyncAt: typeof settings?.cacheLastSyncAt === "string" && !Number.isNaN(Date.parse(settings.cacheLastSyncAt))
+        ? settings.cacheLastSyncAt
+        : null,
+});
 const getRequiredGoogleConfig = () => {
     const clientId = getGoogleClientId();
     const clientSecret = getGoogleClientSecret();
@@ -1454,6 +1471,54 @@ const saveStoredGoogleConnection = async (tableName, email, connection) => {
         },
     }));
 };
+const getStoredGoogleCalendarSyncSettings = async (tableName, userKey) => {
+    const response = await dynamoClient.send(new GetCommand({
+        TableName: tableName,
+        Key: {
+            pk: googleCalendarSyncSettingsPk,
+            sk: getGoogleCalendarSyncSettingsSortKey(userKey),
+        },
+    }));
+    if (!response.Item?.data) {
+        return null;
+    }
+    try {
+        return JSON.parse(String(response.Item.data));
+    }
+    catch {
+        console.error("Stored Google Calendar sync settings JSON parsing failed.", {
+            userKey,
+        });
+        return null;
+    }
+};
+const saveStoredGoogleCalendarSyncSettings = async (tableName, userKey, settings) => {
+    await dynamoClient.send(new PutCommand({
+        TableName: tableName,
+        Item: {
+            pk: googleCalendarSyncSettingsPk,
+            sk: getGoogleCalendarSyncSettingsSortKey(userKey),
+            data: JSON.stringify(settings),
+        },
+    }));
+};
+const upsertStoredGoogleCalendarSyncSettings = async ({ tableName, userKey, time, patch, }) => {
+    const existingSettings = resolveGoogleCalendarSyncSettings(await getStoredGoogleCalendarSyncSettings(tableName, userKey));
+    const nextSettings = {
+        syncBehavior: patch.syncBehavior === "interval" || patch.syncBehavior === "always"
+            ? patch.syncBehavior
+            : existingSettings.syncBehavior,
+        syncIntervalMinutes: typeof patch.syncIntervalMinutes === "number"
+            ? normalizeGoogleCalendarSyncIntervalMinutes(patch.syncIntervalMinutes)
+            : existingSettings.syncIntervalMinutes,
+        cacheLastSyncAt: patch.cacheLastSyncAt !== undefined
+            ? patch.cacheLastSyncAt
+            : existingSettings.cacheLastSyncAt,
+        updatedAt: time,
+    };
+    await saveStoredGoogleCalendarSyncSettings(tableName, userKey, nextSettings);
+    return nextSettings;
+};
 const refreshGoogleAccessTokenIfNeeded = async ({ tableName, time, email, connection, }) => {
     const expiresAtMs = Date.parse(connection.accessTokenExpiresAt ?? "");
     const isExpiredOrMissing = !connection.accessTokenEncrypted ||
@@ -1745,6 +1810,54 @@ export const handler = async (event) => {
                 };
             }
         }
+        if (requestPath.endsWith("/calendar/google/connection/sync-settings")) {
+            if (!requestUserKey) {
+                return {
+                    statusCode: 400,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: "A signed-in user identifier is required to update Google Calendar sync settings.",
+                        time,
+                    }),
+                };
+            }
+            const payload = JSON.parse(event.body ?? "{}");
+            const syncBehavior = payload.syncBehavior === "interval" || payload.syncBehavior === "always"
+                ? payload.syncBehavior
+                : null;
+            const syncIntervalMinutes = normalizeGoogleCalendarSyncIntervalMinutes(typeof payload.syncIntervalMinutes === "number" ? payload.syncIntervalMinutes : undefined);
+            if (!syncBehavior) {
+                return {
+                    statusCode: 400,
+                    headers: responseHeaders,
+                    body: JSON.stringify({
+                        message: "syncBehavior must be either always or interval.",
+                        time,
+                    }),
+                };
+            }
+            const nextSettings = await upsertStoredGoogleCalendarSyncSettings({
+                tableName,
+                userKey: requestUserKey,
+                time,
+                patch: {
+                    syncBehavior,
+                    syncIntervalMinutes,
+                },
+            });
+            const resolvedSettings = resolveGoogleCalendarSyncSettings(nextSettings);
+            return {
+                statusCode: 200,
+                headers: responseHeaders,
+                body: JSON.stringify({
+                    message: "Google Calendar sync settings updated.",
+                    time,
+                    syncBehavior: resolvedSettings.syncBehavior,
+                    syncIntervalMinutes: resolvedSettings.syncIntervalMinutes,
+                    cacheLastSyncAt: resolvedSettings.cacheLastSyncAt,
+                }),
+            };
+        }
         if (requestPath.endsWith("/calendar/google/freebusy")) {
             if (!requestUserKey) {
                 return {
@@ -2011,6 +2124,17 @@ export const handler = async (event) => {
                     selectedPeriodMonths,
                     viewMode,
                 });
+                let syncSettings = resolveGoogleCalendarSyncSettings(await getStoredGoogleCalendarSyncSettings(tableName, requestUserKey));
+                if (useSyncCache && !cacheOnly && items.syncMode !== "cached") {
+                    syncSettings = resolveGoogleCalendarSyncSettings(await upsertStoredGoogleCalendarSyncSettings({
+                        tableName,
+                        userKey: requestUserKey,
+                        time,
+                        patch: {
+                            cacheLastSyncAt: time,
+                        },
+                    }));
+                }
                 return {
                     statusCode: 200,
                     headers: responseHeaders,
@@ -2024,6 +2148,7 @@ export const handler = async (event) => {
                         items: items.items,
                         syncMode: items.syncMode,
                         syncModes: items.syncModes,
+                        cacheLastSyncAt: syncSettings.cacheLastSyncAt,
                     }),
                 };
             }
@@ -3491,6 +3616,7 @@ export const handler = async (event) => {
                 }),
             };
         }
+        const syncSettings = resolveGoogleCalendarSyncSettings(await getStoredGoogleCalendarSyncSettings(tableName, requestUserKey));
         const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
         if (!existingConnection) {
             return {
@@ -3507,6 +3633,9 @@ export const handler = async (event) => {
                     lastRefreshAt: null,
                     tokenScope: null,
                     lastError: null,
+                    syncBehavior: syncSettings.syncBehavior,
+                    syncIntervalMinutes: syncSettings.syncIntervalMinutes,
+                    cacheLastSyncAt: syncSettings.cacheLastSyncAt,
                 }),
             };
         }
@@ -3541,6 +3670,9 @@ export const handler = async (event) => {
                 lastRefreshAt: currentConnection.lastRefreshAt ?? null,
                 tokenScope: currentConnection.tokenScope ?? null,
                 lastError: currentConnection.lastError ?? null,
+                syncBehavior: syncSettings.syncBehavior,
+                syncIntervalMinutes: syncSettings.syncIntervalMinutes,
+                cacheLastSyncAt: syncSettings.cacheLastSyncAt,
             }),
         };
     }

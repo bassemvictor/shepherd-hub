@@ -422,6 +422,17 @@ type GoogleCalendarConnectionResponse = {
   lastRefreshAt: string | null;
   tokenScope: string | null;
   lastError: string | null;
+  syncBehavior: "always" | "interval";
+  syncIntervalMinutes: number;
+  cacheLastSyncAt: string | null;
+};
+
+type GoogleCalendarSyncSettingsResponse = {
+  message: string;
+  time: string;
+  syncBehavior: "always" | "interval";
+  syncIntervalMinutes: number;
+  cacheLastSyncAt: string | null;
 };
 
 type GoogleCalendarConnectStartResponse = {
@@ -474,6 +485,7 @@ type GoogleCalendarEventsResponse = {
   calendars?: GoogleCalendarListResponse["items"];
   timeMin: string;
   timeMax: string;
+  cacheLastSyncAt?: string | null;
   syncMode?: "full" | "incremental" | "direct" | "cached";
   syncModes?: Array<{
     calendarId: string;
@@ -699,6 +711,8 @@ const parseMemberData = (value: string): StoredMemberData | null => {
 };
 
 const memberDetailsViewCookieName = "shepherd_hub_member_details_view";
+const googleCalendarCacheLastSyncCookieName = "shepherd_hub_google_calendar_cache_last_sync_at";
+const defaultGoogleCalendarSyncIntervalMinutes = 5;
 const memberContextMenuWidth = 240;
 const memberContextMenuHeight = 248;
 const memberLongPressDelayMs = 550;
@@ -829,6 +843,23 @@ const formatLastSyncLabel = (value?: string | null) => {
 
   return "Loaded from cache";
 };
+
+const formatCalendarCacheBadgeLabel = (value?: string | null) => {
+  const syncLabel = formatLastSyncLabel(value);
+  return syncLabel === "Loaded from cache" ? syncLabel : `Loaded from cache | ${syncLabel}`;
+};
+
+const resolveGoogleCalendarSyncBehavior = (
+  value?: GoogleCalendarConnectionResponse["syncBehavior"] | null,
+) => (value === "interval" ? "interval" : "always");
+
+const resolveGoogleCalendarSyncIntervalMinutes = (value?: number | null) =>
+  typeof value === "number" &&
+  Number.isInteger(value) &&
+  value >= 1 &&
+  value <= 24 * 60
+    ? value
+    : defaultGoogleCalendarSyncIntervalMinutes;
 
 const formatTimeInputValue = (value: string) => {
   const parsedDate = new Date(value);
@@ -1580,6 +1611,13 @@ export default function App() {
   >(initialGoogleCalendarCallbackState?.status ?? "neutral");
   const [isGoogleCalendarLoading, setIsGoogleCalendarLoading] = useState(false);
   const [isGoogleCalendarConnecting, setIsGoogleCalendarConnecting] = useState(false);
+  const [isGoogleCalendarSyncSettingsSaving, setIsGoogleCalendarSyncSettingsSaving] =
+    useState(false);
+  const [googleCalendarSyncBehavior, setGoogleCalendarSyncBehavior] = useState<
+    "always" | "interval"
+  >("always");
+  const [googleCalendarSyncIntervalMinutesInput, setGoogleCalendarSyncIntervalMinutesInput] =
+    useState(String(defaultGoogleCalendarSyncIntervalMinutes));
   const [calendarScheduleLookupDate, setCalendarScheduleLookupDate] = useState(() =>
     formatDateInputValue(new Date()),
   );
@@ -1620,9 +1658,6 @@ export default function App() {
     useState<CalendarDashboardSummary | null>(null);
   const [calendarDashboardStatus, setCalendarDashboardStatus] = useState<string | null>(null);
   const [isCalendarDashboardLoading, setIsCalendarDashboardLoading] = useState(false);
-  const [calendarDashboardLastSyncAt, setCalendarDashboardLastSyncAt] = useState<string | null>(
-    null,
-  );
   const [calendarReportingRows, setCalendarReportingRows] = useState<
     GoogleCalendarReportingResponse["rows"]
   >([]);
@@ -2170,6 +2205,60 @@ export default function App() {
     return restOperation.response;
   };
 
+  const updateGoogleCalendarCacheLastSyncAt = (value?: string | null) => {
+    if (value && !Number.isNaN(Date.parse(value))) {
+      setCookieValue(googleCalendarCacheLastSyncCookieName, value, 60 * 60 * 24 * 365);
+    }
+
+    setGoogleCalendarConnection((current) =>
+      current
+        ? {
+            ...current,
+            cacheLastSyncAt: value && !Number.isNaN(Date.parse(value)) ? value : null,
+          }
+        : current,
+    );
+  };
+
+  const getKnownGoogleCalendarCacheLastSyncAt = () => {
+    const connectionValue = googleCalendarConnection?.cacheLastSyncAt;
+
+    if (connectionValue && !Number.isNaN(Date.parse(connectionValue))) {
+      return connectionValue;
+    }
+
+    const cookieValue = getCookieValue(googleCalendarCacheLastSyncCookieName);
+    return cookieValue && !Number.isNaN(Date.parse(cookieValue)) ? cookieValue : null;
+  };
+
+  const shouldAutoSyncGoogleCalendarSchedule = ({ forceSync = false } = {}) => {
+    if (forceSync) {
+      return true;
+    }
+
+    if (resolveGoogleCalendarSyncBehavior(googleCalendarSyncBehavior) !== "interval") {
+      return true;
+    }
+
+    const lastSyncAt = getKnownGoogleCalendarCacheLastSyncAt();
+
+    if (!lastSyncAt) {
+      return true;
+    }
+
+    const lastSyncAtMs = Date.parse(lastSyncAt);
+
+    if (!Number.isFinite(lastSyncAtMs)) {
+      return true;
+    }
+
+    const intervalMinutes = resolveGoogleCalendarSyncIntervalMinutes(
+      Number.parseInt(googleCalendarSyncIntervalMinutesInput, 10),
+    );
+
+    return Date.now() - lastSyncAtMs >= intervalMinutes * 60 * 1000;
+  };
+
   const loadGoogleCalendarConnection = async () => {
     if (!congregationApiName) {
       setGoogleCalendarStatus("Backend API is not configured yet.");
@@ -2184,6 +2273,17 @@ export default function App() {
         "/calendar/google/connection",
       );
       setGoogleCalendarConnection(response);
+      setGoogleCalendarSyncBehavior(resolveGoogleCalendarSyncBehavior(response.syncBehavior));
+      setGoogleCalendarSyncIntervalMinutesInput(
+        String(resolveGoogleCalendarSyncIntervalMinutes(response.syncIntervalMinutes)),
+      );
+      if (response.cacheLastSyncAt) {
+        setCookieValue(
+          googleCalendarCacheLastSyncCookieName,
+          response.cacheLastSyncAt,
+          60 * 60 * 24 * 365,
+        );
+      }
 
       if (response.lastError) {
         setGoogleCalendarStatus(response.lastError);
@@ -2199,6 +2299,57 @@ export default function App() {
       setGoogleCalendarStatusTone("error");
     } finally {
       setIsGoogleCalendarLoading(false);
+    }
+  };
+
+  const handleGoogleCalendarSyncSettingsSave = async () => {
+    if (!congregationApiName) {
+      setGoogleCalendarStatus("Backend API is not configured yet.");
+      setGoogleCalendarStatusTone("error");
+      return;
+    }
+
+    setIsGoogleCalendarSyncSettingsSaving(true);
+
+    try {
+      const syncIntervalMinutes = resolveGoogleCalendarSyncIntervalMinutes(
+        Number.parseInt(googleCalendarSyncIntervalMinutesInput, 10),
+      );
+      const response = await authorizedPost("/calendar/google/connection/sync-settings", {
+        syncBehavior: resolveGoogleCalendarSyncBehavior(googleCalendarSyncBehavior),
+        syncIntervalMinutes,
+      });
+      const payload = (await response.body.json()) as GoogleCalendarSyncSettingsResponse;
+
+      setGoogleCalendarSyncBehavior(resolveGoogleCalendarSyncBehavior(payload.syncBehavior));
+      setGoogleCalendarSyncIntervalMinutesInput(
+        String(resolveGoogleCalendarSyncIntervalMinutes(payload.syncIntervalMinutes)),
+      );
+      updateGoogleCalendarCacheLastSyncAt(payload.cacheLastSyncAt);
+      setGoogleCalendarConnection((current) =>
+        current
+          ? {
+              ...current,
+              syncBehavior: resolveGoogleCalendarSyncBehavior(payload.syncBehavior),
+              syncIntervalMinutes: resolveGoogleCalendarSyncIntervalMinutes(
+                payload.syncIntervalMinutes,
+              ),
+              cacheLastSyncAt:
+                payload.cacheLastSyncAt && !Number.isNaN(Date.parse(payload.cacheLastSyncAt))
+                  ? payload.cacheLastSyncAt
+                  : null,
+            }
+          : current,
+      );
+      setGoogleCalendarStatus(payload.message);
+      setGoogleCalendarStatusTone("success");
+    } catch (error) {
+      setGoogleCalendarStatus(
+        await getErrorMessage(error, "Unable to update Google Calendar sync settings."),
+      );
+      setGoogleCalendarStatusTone("error");
+    } finally {
+      setIsGoogleCalendarSyncSettingsSaving(false);
     }
   };
 
@@ -2314,6 +2465,9 @@ export default function App() {
       ),
     });
     const payload = (await response.body.json()) as GoogleCalendarEventsResponse;
+    if (payload.cacheLastSyncAt) {
+      updateGoogleCalendarCacheLastSyncAt(payload.cacheLastSyncAt);
+    }
     const loadedCalendars = assignGoogleCalendarPalette(
       payload.calendars && payload.calendars.length > 0
         ? payload.calendars
@@ -2430,12 +2584,6 @@ export default function App() {
         upcomingEvents: upcomingEvents.slice(0, 15),
       });
 
-      if (!cacheOnly) {
-        const sortedResponseTimes = [...dashboardEvents.responseTimes].sort();
-        const lastResponseTime =
-          sortedResponseTimes[sortedResponseTimes.length - 1] ?? new Date().toISOString();
-        setCalendarDashboardLastSyncAt(lastResponseTime);
-      }
     } catch (error) {
       if (calendarDashboardRequestRef.current !== requestId) {
         return;
@@ -2565,7 +2713,8 @@ export default function App() {
 
   const loadGoogleCalendarMonthEvents = async ({
     useSyncCache = true,
-  }: { useSyncCache?: boolean } = {}) => {
+    forceSync = false,
+  }: { useSyncCache?: boolean; forceSync?: boolean } = {}) => {
     if (!congregationApiName) {
       return;
     }
@@ -2647,6 +2796,7 @@ export default function App() {
       };
 
       if (useSyncCache) {
+        const shouldSyncWithGoogle = shouldAutoSyncGoogleCalendarSchedule({ forceSync });
         const cacheResponse = await authorizedPost("/calendar/google/events/all", {
           ...basePayload,
           cacheOnly: true,
@@ -2659,11 +2809,17 @@ export default function App() {
           return;
         }
 
+        const cachedLastSyncAt =
+          cachePayload.cacheLastSyncAt ?? getKnownGoogleCalendarCacheLastSyncAt();
         setCalendarMonthLoadBadge({
-          label: "Loaded from cache",
+          label: formatCalendarCacheBadgeLabel(cachedLastSyncAt),
           tone: "neutral",
         });
         setCalendarMonthEvents(cachePayload);
+
+        if (!shouldSyncWithGoogle) {
+          return;
+        }
 
         const syncResponse = await authorizedPost("/calendar/google/events/all", basePayload);
         const syncPayload = normalizeAggregatedPayload(
@@ -2675,12 +2831,10 @@ export default function App() {
         }
 
         setCalendarMonthEvents(syncPayload);
-        const syncCompletedLabel = new Date().toLocaleTimeString([], {
-          hour: "numeric",
-          minute: "2-digit",
-        });
+        const syncedLastSyncAt = syncPayload.cacheLastSyncAt ?? syncPayload.time;
+        updateGoogleCalendarCacheLastSyncAt(syncedLastSyncAt);
         setCalendarMonthLoadBadge({
-          label: `Last sync ${syncCompletedLabel}`,
+          label: formatLastSyncLabel(syncedLastSyncAt),
           tone: "success",
         });
       } else {
@@ -2694,12 +2848,9 @@ export default function App() {
         }
 
         setCalendarMonthEvents(payload);
-        const syncCompletedLabel = new Date().toLocaleTimeString([], {
-          hour: "numeric",
-          minute: "2-digit",
-        });
+        const syncedLastSyncAt = payload.cacheLastSyncAt ?? payload.time;
         setCalendarMonthLoadBadge({
-          label: `Last sync ${syncCompletedLabel}`,
+          label: formatLastSyncLabel(syncedLastSyncAt),
           tone: "success",
         });
       }
@@ -2852,7 +3003,7 @@ export default function App() {
         | GoogleCalendarCreateEventResponse
         | GoogleCalendarUpdateEventResponse;
       setCalendarEventFormStatus(payload.message);
-      await loadGoogleCalendarMonthEvents({ useSyncCache: false });
+      await loadGoogleCalendarMonthEvents({ forceSync: true });
       if (activePage === "calendar-schedule") {
         await loadGoogleCalendarAvailability();
       }
@@ -2886,7 +3037,7 @@ export default function App() {
       });
       const payload = (await response.body.json()) as GoogleCalendarDeleteEventResponse;
       setCalendarEventFormStatus(payload.message);
-      await loadGoogleCalendarMonthEvents({ useSyncCache: false });
+      await loadGoogleCalendarMonthEvents({ forceSync: true });
       if (activePage === "calendar-schedule") {
         await loadGoogleCalendarAvailability();
       }
@@ -6878,7 +7029,7 @@ export default function App() {
 
                   <div className="calendar-dashboard-actions">
                     <p className="calendar-month-load-badge neutral calendar-dashboard-sync-badge">
-                      {formatLastSyncLabel(calendarDashboardLastSyncAt)}
+                      {formatLastSyncLabel(getKnownGoogleCalendarCacheLastSyncAt())}
                     </p>
                     <button
                       type="button"
@@ -7112,7 +7263,85 @@ export default function App() {
                         : "Not yet"}
                     </strong>
                   </div>
+
+                  <div className="calendar-connect-metric">
+                    <span>Cache last sync</span>
+                    <strong>
+                      {googleCalendarConnection?.cacheLastSyncAt
+                        ? new Date(googleCalendarConnection.cacheLastSyncAt).toLocaleString()
+                        : "Not yet"}
+                    </strong>
+                  </div>
                 </div>
+
+                <section className="calendar-sync-settings-card">
+                  <div className="calendar-schedule-section-header">
+                    <p className="placeholder-page-kicker">Sync Control</p>
+                    <h4 className="calendar-schedule-section-title">Schedule Auto Sync</h4>
+                  </div>
+
+                  <p className="placeholder-page-copy calendar-connect-copy">
+                    Choose whether the Schedule page refreshes from Google every time, or
+                    only when the cached sync is older than your selected interval.
+                  </p>
+
+                  <div
+                    className="parking-tabs calendar-sync-mode-toggle"
+                    role="tablist"
+                    aria-label="Google Calendar schedule sync mode"
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={googleCalendarSyncBehavior === "always"}
+                      className={`parking-tab${googleCalendarSyncBehavior === "always" ? " active" : ""}`}
+                      onClick={() => setGoogleCalendarSyncBehavior("always")}
+                    >
+                      Always sync
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={googleCalendarSyncBehavior === "interval"}
+                      className={`parking-tab${googleCalendarSyncBehavior === "interval" ? " active" : ""}`}
+                      onClick={() => setGoogleCalendarSyncBehavior("interval")}
+                    >
+                      Sync by interval
+                    </button>
+                  </div>
+
+                  {googleCalendarSyncBehavior === "interval" ? (
+                    <label className="member-field calendar-sync-interval-field">
+                      <span>Sync if cache is older than</span>
+                      <div className="calendar-sync-interval-input-row">
+                        <input
+                          type="number"
+                          min="1"
+                          max="1440"
+                          step="1"
+                          value={googleCalendarSyncIntervalMinutesInput}
+                          onChange={(event) =>
+                            setGoogleCalendarSyncIntervalMinutesInput(event.target.value)
+                          }
+                        />
+                        <span className="calendar-sync-interval-unit">minutes</span>
+                      </div>
+                    </label>
+                  ) : null}
+
+                  <div className="calendar-sync-settings-actions">
+                    <button
+                      type="button"
+                      className="member-submit-button"
+                      onClick={() => {
+                        void handleGoogleCalendarSyncSettingsSave();
+                      }}
+                      disabled={isGoogleCalendarSyncSettingsSaving || isGoogleCalendarLoading}
+                    >
+                      {isGoogleCalendarSyncSettingsSaving ? "Saving..." : "Save Sync Settings"}
+                    </button>
+                  </div>
+                </section>
               </section>
             </div>
           ) : null}
@@ -7483,7 +7712,7 @@ export default function App() {
                             type="button"
                             className="member-cancel-button visitation-calendar-nav-button"
                             onClick={() => {
-                              void loadGoogleCalendarMonthEvents();
+                              void loadGoogleCalendarMonthEvents({ forceSync: true });
                             }}
                             aria-label="Refresh schedule"
                             title="Refresh schedule"

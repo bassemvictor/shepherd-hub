@@ -1751,6 +1751,40 @@ button {
   line-height: 1.45;
 }
 
+.calendar-sync-settings-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1.1rem 1.15rem;
+  border-radius: 20px;
+  border: 1px solid var(--nav-border);
+  background: var(--nav-bg);
+}
+
+.calendar-sync-mode-toggle {
+  width: fit-content;
+}
+
+.calendar-sync-interval-field {
+  max-width: 240px;
+}
+
+.calendar-sync-interval-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.calendar-sync-interval-unit {
+  color: var(--muted-light);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.calendar-sync-settings-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 [data-theme="dark"] .calendar-connect-status.success {
   color: #86efac;
 }
@@ -5228,6 +5262,14 @@ button {
 
   .calendar-connect-grid {
     grid-template-columns: 1fr;
+  }
+
+  .calendar-sync-mode-toggle {
+    width: 100%;
+  }
+
+  .calendar-sync-interval-field {
+    max-width: 100%;
   }
 
   .calendar-schedule-header {

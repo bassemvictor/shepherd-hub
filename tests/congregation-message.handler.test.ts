@@ -358,6 +358,64 @@ test("loads an existing Google Calendar connection", async () => {
   assert.equal(body.connected, true);
   assert.equal(body.hasRefreshToken, true);
   assert.equal(body.accessTokenExpiresAt, connectionData.accessTokenExpiresAt);
+  assert.equal(body.syncBehavior, "always");
+  assert.equal(body.syncIntervalMinutes, 5);
+  assert.equal(body.cacheLastSyncAt, null);
+});
+
+test("updates Google Calendar sync settings and exposes them from the connection endpoint", async () => {
+  const store = new Map<string, Record<string, unknown>>();
+  const keyFor = (pk: string, sk: string) => `${pk}||${sk}`;
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      const key = command.input?.Key as { pk: string; sk: string };
+      return {
+        Item: store.get(keyFor(key.pk, key.sk)),
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      const item = command.input?.Item as Record<string, unknown>;
+      store.set(keyFor(String(item.pk), String(item.sk)), item);
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const saveResponse = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/connection/sync-settings",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        syncBehavior: "interval",
+        syncIntervalMinutes: 15,
+      },
+    }),
+  );
+  const saveBody = parseBody(saveResponse.body);
+
+  assert.equal(saveResponse.statusCode, 200);
+  assert.equal(saveBody.syncBehavior, "interval");
+  assert.equal(saveBody.syncIntervalMinutes, 15);
+  assert.equal(saveBody.cacheLastSyncAt, null);
+
+  const connectionResponse = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/connection",
+      groups: ["admin"],
+    }),
+  );
+  const connectionBody = parseBody(connectionResponse.body);
+
+  assert.equal(connectionResponse.statusCode, 200);
+  assert.equal(connectionBody.connected, false);
+  assert.equal(connectionBody.syncBehavior, "interval");
+  assert.equal(connectionBody.syncIntervalMinutes, 15);
+  assert.equal(connectionBody.cacheLastSyncAt, null);
 });
 
 test("loads Google Calendar free/busy availability", async () => {
@@ -918,6 +976,18 @@ test("loads Google calendar events across all calendars with one API call", asyn
     Array.isArray(body.items) &&
       body.items.some((item) => item.calendarId === "team" && item.calendarName === "Team Calendar"),
   );
+  assert.equal(body.cacheLastSyncAt, body.time);
+
+  const storedSyncSettings = store.get(
+    keyFor("CALENDAR_SYNC_SETTINGS", "GOOGLE#00000000-0000-4000-8000-000000000001"),
+  );
+  assert.ok(storedSyncSettings);
+  assert.deepEqual(JSON.parse(String(storedSyncSettings?.data)), {
+    syncBehavior: "always",
+    syncIntervalMinutes: 5,
+    cacheLastSyncAt: body.time,
+    updatedAt: body.time,
+  });
 });
 
 test("stores cross-month Google calendar events in each overlapping month and dedupes reads", async () => {
