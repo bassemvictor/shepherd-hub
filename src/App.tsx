@@ -1842,6 +1842,35 @@ export default function App() {
     "calendar-schedule",
     "calendar-month",
     "calendar-reporting",
+    "congregation",
+    "visitation",
+    "visitation-report",
+    "visitation-calendar",
+    "visitation-calendar-schedule",
+    "announcements",
+    "announcement-week",
+    "user-access",
+    "contacts-import",
+    "parking-registration",
+    "parking-management",
+  ].includes(activePage);
+  const usesFlatHeroCard = [
+    "calendar-dashboard",
+    "calendar-connect",
+    "calendar-schedule",
+    "calendar-month",
+    "calendar-reporting",
+    "congregation",
+    "visitation",
+    "visitation-report",
+    "visitation-calendar",
+    "visitation-calendar-schedule",
+    "announcements",
+    "announcement-week",
+    "user-access",
+    "contacts-import",
+    "parking-registration",
+    "parking-management",
   ].includes(activePage);
   const calendarPickerOptions: GoogleCalendarListResponse["items"] =
     googleCalendars.length > 0
@@ -5073,12 +5102,13 @@ export default function App() {
   }) => (
     <div className="parking-registration-page">
       <form
-        className="member-form-card parking-registration-card"
+        className="member-form-card parking-registration-card calendar-page-surface"
         onSubmit={handleParkingRegistrationSubmit}
       >
         <div className="member-form-header parking-registration-header">
           <div>
-            <p className="member-form-mode">Parking Registration</p>
+            <p className="placeholder-page-kicker">Parking Registration</p>
+            <h3 className="calendar-connect-title">Parking Registration</h3>
             <p className="parking-registration-copy">
               Provide the contact and vehicle details needed for parking coordination.
             </p>
@@ -5692,7 +5722,7 @@ export default function App() {
           </div>
         ) : null}
 
-        <section className={`hero-card${usesInnerPageHeading ? " hero-card-flat" : ""}`}>
+        <section className={`hero-card${usesFlatHeroCard ? " hero-card-flat" : ""}`}>
           {!usesInnerPageHeading ? (
             <div className="hero-header">
               <div>
@@ -5714,6 +5744,7 @@ export default function App() {
                     </button>
                   ) : null}
                 </div>
+                <h2 className="hero-page-title">{currentPage.eyebrow}</h2>
                 {currentPage.description ? (
                   <p className="description">{currentPage.description}</p>
                 ) : null}
@@ -5733,7 +5764,25 @@ export default function App() {
 
           {activePage === "congregation" ? (
             <div className="api-message-card">
-              <p className="api-message-label">Congregation</p>
+              <div className="calendar-schedule-header congregation-card-header">
+                <div>
+                  <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
+                  <h3 className="calendar-connect-title">Congregation</h3>
+                  {currentPage.description ? (
+                    <p className="placeholder-page-copy calendar-connect-copy">
+                      {currentPage.description}
+                    </p>
+                  ) : null}
+                </div>
+
+                <button
+                  type="button"
+                  className="hero-action-button"
+                  onClick={openNewMemberPage}
+                >
+                  Add Member
+                </button>
+              </div>
 
               {!isBackendLoading && !backendError && backendMessage ? (
                 <>
@@ -5878,7 +5927,14 @@ export default function App() {
           ) : null}
 
           {activePage === "visitation" ? (
-            <div className="visitation-board">
+            <div className="visitation-board calendar-page-surface">
+              <div className="calendar-schedule-header page-card-header">
+                <div>
+                  <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
+                  <h3 className="calendar-connect-title">Visitation</h3>
+                </div>
+              </div>
+
               {visitationFocus ? (
                 <div className="visitation-focus-banner">
                   <div>
@@ -6068,7 +6124,14 @@ export default function App() {
           ) : null}
 
           {activePage === "visitation-report" ? (
-            <div className="visitation-report-board">
+            <div className="visitation-report-board calendar-page-surface">
+              <div className="calendar-schedule-header page-card-header">
+                <div>
+                  <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
+                  <h3 className="calendar-connect-title">Visitation Report</h3>
+                </div>
+              </div>
+
               <div className="visitation-report-toolbar">
                 <label className="visitation-report-filter">
                   <span>Priest</span>
@@ -6181,7 +6244,14 @@ export default function App() {
           ) : null}
 
           {activePage === "visitation-calendar" ? (
-            <div className="visitation-calendar-board">
+            <div className="visitation-calendar-board calendar-page-surface">
+              <div className="calendar-schedule-header page-card-header">
+                <div>
+                  <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
+                  <h3 className="calendar-connect-title">Visitation Calendar</h3>
+                </div>
+              </div>
+
               <div className="visitation-calendar-toolbar">
                 <div className="visitation-calendar-month-nav">
                   <button
@@ -6314,14 +6384,15 @@ export default function App() {
           ) : null}
 
           {activePage === "visitation-calendar-schedule" ? (
-            <div className="visitation-calendar-schedule-page">
+            <div className="visitation-calendar-schedule-page calendar-page-layout">
               <form
-                className="member-form-card visitation-calendar-schedule-card"
+                className="member-form-card visitation-calendar-schedule-card calendar-page-surface"
                 onSubmit={handleCalendarScheduleSubmit}
               >
                 <div className="member-form-header visitation-calendar-schedule-header">
                   <div>
-                    <p className="member-form-mode">Schedule Visitation</p>
+                    <p className="placeholder-page-kicker">Visitation Calendar</p>
+                    <h3 className="calendar-connect-title">Schedule Visitation</h3>
                     <p className="visitation-calendar-schedule-copy">
                       {calendarScheduleDateLabel
                         ? `Create a visitation for ${calendarScheduleDateLabel}.`
@@ -6622,12 +6693,16 @@ export default function App() {
           ) : null}
 
           {activePage === "announcement-week" ? (
-            <div className="announcements-editor-page">
-              <form className="announcements-editor-card" onSubmit={handleAnnouncementWeekSubmit}>
+            <div className="announcements-editor-page calendar-page-layout">
+              <form
+                className="announcements-editor-card calendar-page-surface"
+                onSubmit={handleAnnouncementWeekSubmit}
+              >
                 <div className="member-form-header">
-                  <p className="member-form-mode">
+                  <p className="placeholder-page-kicker">Announcements</p>
+                  <h3 className="calendar-connect-title">
                     {announcementWeekForm.sk ? "Edit Week" : "Add Week"}
-                  </p>
+                  </h3>
                 </div>
 
                 <div className="member-form-grid">
@@ -6711,8 +6786,15 @@ export default function App() {
           ) : null}
 
           {activePage === "announcements" ? (
-            <div className="announcements-page">
-              <div className="announcements-list-card">
+            <div className="announcements-page calendar-page-layout">
+              <div className="announcements-list-card calendar-page-surface">
+                <div className="calendar-schedule-header page-card-header">
+                  <div>
+                    <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
+                    <h3 className="calendar-connect-title">Announcements</h3>
+                  </div>
+                </div>
+
                 <div className="announcement-list-toolbar">
                   <p className="api-message-label">Weekly Announcements</p>
                   <div className="announcement-list-toolbar-actions">
@@ -6806,8 +6888,15 @@ export default function App() {
           ) : null}
 
           {activePage === "user-access" ? (
-            <div className="user-access-page">
-              <div className="user-access-card">
+            <div className="user-access-page calendar-page-layout">
+              <div className="user-access-card calendar-page-surface">
+                <div className="calendar-schedule-header page-card-header">
+                  <div>
+                    <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
+                    <h3 className="calendar-connect-title">User Access</h3>
+                  </div>
+                </div>
+
                 <div className="user-access-header">
                   <p className="api-message-label">Assign User Groups</p>
                   <p className="congregation-search-count">
@@ -6874,13 +6963,14 @@ export default function App() {
           ) : null}
 
           {activePage === "contacts-import" ? (
-            <div className="contacts-import-page">
+            <div className="contacts-import-page calendar-page-layout">
               <form
-                className="member-form-card contacts-import-card"
+                className="member-form-card contacts-import-card calendar-page-surface"
                 onSubmit={handleContactsImportSubmit}
               >
                 <div className="member-form-header">
-                  <p className="member-form-mode">Import Members from Contacts</p>
+                  <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
+                  <h3 className="calendar-connect-title">Import Members from Contacts</h3>
                 </div>
 
                 <div className="member-form-grid">
@@ -7014,11 +7104,12 @@ export default function App() {
           {activePage === "parking-management" ? (
             <div className="parking-management-page">
               <form
-                className="member-form-card parking-management-card"
+                className="member-form-card parking-management-card calendar-page-surface"
                 onSubmit={handleParkingManagementSubmit}
               >
                 <div className="member-form-header">
-                  <p className="member-form-mode">Parking Capacity</p>
+                  <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
+                  <h3 className="calendar-connect-title">Parking Capacity</h3>
                   <p className="parking-management-summary">
                     {(parkingManagement?.activeRegistrationCount ?? 0).toLocaleString()} active
                     placement
@@ -7073,10 +7164,11 @@ export default function App() {
                 </div>
               </form>
 
-              <div className="member-form-card parking-list-card">
+              <div className="member-form-card parking-list-card calendar-page-surface">
                 <div className="member-form-header parking-list-header">
                   <div>
-                    <p className="member-form-mode">Parking Registrations</p>
+                    <p className="placeholder-page-kicker">Parking Registrations</p>
+                    <h3 className="calendar-connect-title">Parking Registrations</h3>
                     <p className="parking-list-summary">
                       {parkingTab === "assigned"
                         ? `${assignedParkingRegistrations.length} active registration${assignedParkingRegistrations.length === 1 ? "" : "s"}`

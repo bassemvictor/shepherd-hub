@@ -970,16 +970,27 @@ button {
   border: 1px solid var(--surface-border);
   box-shadow: var(--surface-shadow);
   backdrop-filter: blur(10px);
+  margin-top: 1.5rem;
 }
 
 .hero-card {
-  padding: 2rem;
+  padding: 1.2rem;
 }
 
 .hero-card-flat {
+  margin-top: 0;
   padding: 0;
   border: 0;
   background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.hero-card-boxed-heading {
+  padding: 1.2rem;
+  border-radius: 7px;
+  background: var(--dark-card-bg);
+  border: 1px solid rgba(233, 201, 112, 0.2);
   box-shadow: none;
   backdrop-filter: none;
 }
@@ -996,6 +1007,23 @@ button {
   align-items: baseline;
   gap: 0.75rem;
   flex-wrap: wrap;
+  margin-bottom: 0.2rem;
+}
+
+.content-panel .hero-page-title {
+  margin: 0.35rem 0 0;
+  font-size: 1.4rem;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--dark-card-text);
+  font-weight: 700;
+}
+
+.hero-header .eyebrow {
+  margin: 0;
+  color: var(--muted-light);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
 }
 
 .hero-inline-link {
@@ -1041,9 +1069,10 @@ button {
 
 .api-message-card {
   margin-top: 1.5rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 18px;
+  padding: 1.2rem;
+  border-radius: 7px;
   background: var(--dark-card-bg);
+  border: 1px solid rgba(233, 201, 112, 0.2);
   color: var(--dark-card-text);
 }
 
@@ -1881,6 +1910,15 @@ button {
 }
 
 .placeholder-page-card {
+  margin-top: 1.5rem;
+  padding: 1.2rem;
+  border-radius: 7px;
+  background: var(--dark-card-bg);
+  border: 1px solid rgba(233, 201, 112, 0.2);
+  color: var(--dark-card-text);
+}
+
+.calendar-page-surface {
   margin-top: 1.5rem;
   padding: 1.2rem;
   border-radius: 7px;
@@ -4471,8 +4509,21 @@ button {
   margin-top: 1.5rem;
 }
 
+.calendar-page-layout {
+  margin-top: 0;
+}
+
 .visitation-calendar-schedule-card {
   margin-top: 0;
+}
+
+.calendar-page-surface {
+  margin-top: 1.5rem;
+  padding: 1.2rem;
+  border-radius: 7px;
+  background: var(--dark-card-bg);
+  border: 1px solid rgba(233, 201, 112, 0.2);
+  color: var(--dark-card-text);
 }
 
 .visitation-calendar-schedule-header {
@@ -5128,6 +5179,10 @@ button {
   padding: 0.1rem;
 }
 
+.hero-card-boxed-heading {
+  padding: 0.95rem;
+}
+
 .hero-header {
   gap: 0.75rem;
 }
@@ -5138,6 +5193,7 @@ button {
 
 .api-message-card {
   margin-top: 0.9rem;
+  padding: 0.95rem;
 }
 
 .api-data-list {
@@ -5173,6 +5229,11 @@ button {
   padding: 0.95rem;
 }
 
+.calendar-page-surface {
+  margin-top: 0.85rem;
+  padding: 0.95rem;
+}
+
 .placeholder-page-title {
   margin-top: 0.2rem;
 }
@@ -5193,6 +5254,10 @@ button {
 .visitation-calendar-page,
 .visitation-calendar-schedule-page {
   margin-top: 0.85rem;
+}
+
+.calendar-page-layout {
+  margin-top: 0;
 }
 
 .calendar-connect-card,
@@ -5277,11 +5342,17 @@ button {
   }
 
   .hero-card {
+    margin-top: 0.65rem;
     padding: 1rem;
   }
 
   .placeholder-page-card,
   .member-form-card {
+    padding: 0.85rem;
+  }
+
+  .calendar-page-surface {
+    margin-top: 0.85rem;
     padding: 0.85rem;
   }
 
@@ -5296,6 +5367,10 @@ button {
   .visitation-calendar-page,
   .visitation-calendar-schedule-page {
     margin-top: 0.65rem;
+  }
+
+  .calendar-page-layout {
+    margin-top: 0;
   }
 }
 
@@ -5629,6 +5704,11 @@ button {
     padding: 0.65rem;
   }
 
+  .calendar-page-surface {
+    margin-top: 0;
+    padding: 0.65rem;
+  }
+
   .visitation-calendar-day-header {
     align-items: flex-start;
   }
@@ -5640,10 +5720,15 @@ button {
 
   .hero-card {
     border-radius: 8px;
+    margin-top: 0;
   }
 
   .hero-card {
-    padding: 0.1rem 0.1rem 0.1rem;
+    padding: 0.65rem;
+  }
+
+  .hero-card-boxed-heading {
+    padding: 0.65rem;
   }
 
   .hero-action-button {
@@ -5672,6 +5757,7 @@ button {
 
   .api-message-card {
     margin-top: 0;
+    padding: 0.65rem;
   }
 
   .congregation-search-row {
