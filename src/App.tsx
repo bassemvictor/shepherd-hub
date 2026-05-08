@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ChangeEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
@@ -1114,6 +1115,24 @@ const doesGoogleCalendarEventOverlapRange = (
   return eventStart < rangeEnd && eventEnd > rangeStart;
 };
 
+const formatGoogleCalendarAccessLabel = (
+  calendar: Pick<GoogleCalendarListResponse["items"][number], "primary" | "accessRole">,
+) => {
+  if (calendar.primary) {
+    return "Primary Calendar";
+  }
+
+  if (calendar.accessRole === "owner") {
+    return "Personal Calendar";
+  }
+
+  if (calendar.accessRole === "writer" || calendar.accessRole === "reader") {
+    return "Shared Calendar";
+  }
+
+  return "Connected Calendar";
+};
+
 const hexToRgba = (hexColor: string, alpha: number) => {
   const normalized = hexColor.replace("#", "");
   const safeHex =
@@ -1661,6 +1680,9 @@ export default function App() {
     [],
   );
   const [selectedGoogleCalendarId, setSelectedGoogleCalendarId] = useState("primary");
+  const [openCalendarPicker, setOpenCalendarPicker] = useState<"availability" | "schedule" | null>(
+    null,
+  );
   const [calendarAvailability, setCalendarAvailability] =
     useState<GoogleCalendarFreeBusyResponse | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<GoogleCalendarEventsResponse | null>(null);
@@ -1821,6 +1843,28 @@ export default function App() {
     "calendar-month",
     "calendar-reporting",
   ].includes(activePage);
+  const calendarPickerOptions: GoogleCalendarListResponse["items"] =
+    googleCalendars.length > 0
+      ? googleCalendars
+      : [
+          {
+            id: "primary",
+            name: "bassem@gmail.com",
+            primary: true,
+            accessRole: "owner",
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+            hidden: false,
+            selected: true,
+            calendarColor: "#4aa96c",
+            calendarColorEmoji: "🟢",
+          },
+        ];
+  const selectedCalendarPickerOption =
+    calendarPickerOptions.find((calendar) => calendar.id === selectedGoogleCalendarId) ??
+    calendarPickerOptions[0];
+  const selectedCalendarPickerSecondary = selectedCalendarPickerOption
+    ? formatGoogleCalendarAccessLabel(selectedCalendarPickerOption)
+    : "Primary Calendar";
   const isEditingMember = editingMember !== null;
   const isAdminUser = currentUserGroups.includes("admin");
   const canManageUsers =
@@ -3586,6 +3630,34 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem("shepherd-hub-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!openCalendarPicker) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+
+      if (!(target instanceof Element) || !target.closest(".calendar-picker")) {
+        setOpenCalendarPicker(null);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenCalendarPicker(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [openCalendarPicker]);
 
   useEffect(() => {
     const savedView = getCookieValue(memberDetailsViewCookieName);
@@ -7437,22 +7509,94 @@ export default function App() {
                   <div className="calendar-schedule-controls">
                     <label className="member-field">
                       <span>Calendar</span>
-                      <select
-                        value={selectedGoogleCalendarId}
-                        onChange={(event) => setSelectedGoogleCalendarId(event.target.value)}
-                        disabled={googleCalendars.length === 0}
-                      >
-                        {googleCalendars.length > 0 ? (
-                          googleCalendars.map((calendar) => (
-                            <option key={calendar.id} value={calendar.id}>
-                              {calendar.name}
-                              {calendar.primary ? " (Primary)" : ""}
-                            </option>
-                          ))
-                        ) : (
-                          <option value="primary">Primary Calendar</option>
-                        )}
-                      </select>
+                      <div className="calendar-picker">
+                        <button
+                          type="button"
+                          className={`calendar-picker-trigger${
+                            openCalendarPicker === "availability" ? " open" : ""
+                          }`}
+                          onClick={() =>
+                            setOpenCalendarPicker((current) =>
+                              current === "availability" ? null : "availability",
+                            )
+                          }
+                          aria-haspopup="listbox"
+                          aria-expanded={openCalendarPicker === "availability"}
+                          aria-label="Select calendar"
+                        >
+                          <span
+                            className="calendar-picker-icon"
+                            style={
+                              {
+                                "--calendar-picker-color":
+                                  selectedCalendarPickerOption?.calendarColor ?? "#4aa96c",
+                              } as CSSProperties
+                            }
+                            aria-hidden="true"
+                          >
+                            <span className="calendar-picker-icon-top" />
+                            <span className="calendar-picker-icon-body" />
+                          </span>
+                          <span className="calendar-picker-trigger-copy">
+                            <span className="calendar-picker-trigger-primary">
+                              {selectedCalendarPickerOption?.name ?? "Primary Calendar"}
+                            </span>
+                            <span className="calendar-picker-trigger-secondary">
+                              {selectedCalendarPickerSecondary}
+                            </span>
+                          </span>
+                          <span className="calendar-picker-chevron" aria-hidden="true" />
+                        </button>
+
+                        {openCalendarPicker === "availability" ? (
+                          <div className="calendar-picker-menu" role="listbox">
+                            {calendarPickerOptions.map((calendar) => {
+                              const isSelected = calendar.id === selectedGoogleCalendarId;
+
+                              return (
+                                <button
+                                  key={calendar.id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={isSelected}
+                                  className={`calendar-picker-option${
+                                    isSelected ? " selected" : ""
+                                  }`}
+                                  onClick={() => {
+                                    setSelectedGoogleCalendarId(calendar.id);
+                                    setOpenCalendarPicker(null);
+                                  }}
+                                >
+                                  <span
+                                    className="calendar-picker-icon"
+                                    style={
+                                      {
+                                        "--calendar-picker-color":
+                                          calendar.calendarColor ?? "#4aa96c",
+                                      } as CSSProperties
+                                    }
+                                    aria-hidden="true"
+                                  >
+                                    <span className="calendar-picker-icon-top" />
+                                    <span className="calendar-picker-icon-body" />
+                                  </span>
+                                  <span className="calendar-picker-option-copy">
+                                    <span className="calendar-picker-option-primary">
+                                      {calendar.name}
+                                    </span>
+                                    <span className="calendar-picker-option-secondary">
+                                      {formatGoogleCalendarAccessLabel(calendar)}
+                                    </span>
+                                  </span>
+                                  <span className="calendar-picker-check" aria-hidden="true">
+                                    {isSelected ? "✓" : ""}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
                     </label>
 
                     <label className="member-field">
@@ -7681,23 +7825,94 @@ export default function App() {
                             </span>
                           ) : null}
                         </span>
-                        <select
-                          value={selectedGoogleCalendarId}
-                          onChange={(event) => setSelectedGoogleCalendarId(event.target.value)}
-                          disabled={googleCalendars.length === 0}
-                        >
-                          {googleCalendars.length > 0 ? (
-                            googleCalendars.map((calendar) => (
-                              <option key={calendar.id} value={calendar.id}>
-                                {calendar.calendarColorEmoji ? `${calendar.calendarColorEmoji} ` : ""}
-                                {calendar.name}
-                                {calendar.primary ? " (Primary)" : ""}
-                              </option>
-                            ))
-                          ) : (
-                            <option value="primary">🔵 Primary Calendar</option>
-                          )}
-                        </select>
+                        <div className="calendar-picker">
+                          <button
+                            type="button"
+                            className={`calendar-picker-trigger${
+                              openCalendarPicker === "schedule" ? " open" : ""
+                            }`}
+                            onClick={() =>
+                              setOpenCalendarPicker((current) =>
+                                current === "schedule" ? null : "schedule",
+                              )
+                            }
+                            aria-haspopup="listbox"
+                            aria-expanded={openCalendarPicker === "schedule"}
+                            aria-label="Select new event calendar"
+                          >
+                            <span
+                              className="calendar-picker-icon"
+                              style={
+                                {
+                                  "--calendar-picker-color":
+                                    selectedCalendarPickerOption?.calendarColor ?? "#4aa96c",
+                                } as CSSProperties
+                              }
+                              aria-hidden="true"
+                            >
+                              <span className="calendar-picker-icon-top" />
+                              <span className="calendar-picker-icon-body" />
+                            </span>
+                            <span className="calendar-picker-trigger-copy">
+                              <span className="calendar-picker-trigger-primary">
+                                {selectedCalendarPickerOption?.name ?? "Primary Calendar"}
+                              </span>
+                              <span className="calendar-picker-trigger-secondary">
+                                {selectedCalendarPickerSecondary}
+                              </span>
+                            </span>
+                            <span className="calendar-picker-chevron" aria-hidden="true" />
+                          </button>
+
+                          {openCalendarPicker === "schedule" ? (
+                            <div className="calendar-picker-menu" role="listbox">
+                              {calendarPickerOptions.map((calendar) => {
+                                const isSelected = calendar.id === selectedGoogleCalendarId;
+
+                                return (
+                                  <button
+                                    key={calendar.id}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={isSelected}
+                                    className={`calendar-picker-option${
+                                      isSelected ? " selected" : ""
+                                    }`}
+                                    onClick={() => {
+                                      setSelectedGoogleCalendarId(calendar.id);
+                                      setOpenCalendarPicker(null);
+                                    }}
+                                  >
+                                    <span
+                                      className="calendar-picker-icon"
+                                      style={
+                                        {
+                                          "--calendar-picker-color":
+                                            calendar.calendarColor ?? "#4aa96c",
+                                        } as CSSProperties
+                                      }
+                                      aria-hidden="true"
+                                    >
+                                      <span className="calendar-picker-icon-top" />
+                                      <span className="calendar-picker-icon-body" />
+                                    </span>
+                                    <span className="calendar-picker-option-copy">
+                                      <span className="calendar-picker-option-primary">
+                                        {calendar.name}
+                                      </span>
+                                      <span className="calendar-picker-option-secondary">
+                                        {formatGoogleCalendarAccessLabel(calendar)}
+                                      </span>
+                                    </span>
+                                    <span className="calendar-picker-check" aria-hidden="true">
+                                      {isSelected ? "✓" : ""}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
                       </label>
 
                       <div
