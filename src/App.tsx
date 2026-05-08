@@ -6,6 +6,7 @@ import {
   type ChangeEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type TouchEvent as ReactTouchEvent,
 } from "react";
 import { get, post } from "aws-amplify/api";
@@ -1617,6 +1618,7 @@ export default function App() {
     useRef<Promise<GoogleCalendarListResponse["items"]> | null>(null);
   const memberLongPressTimerRef = useRef<number | null>(null);
   const suppressMemberClickRef = useRef(false);
+  const pendingCalendarPickerDismissRef = useRef<number | null>(null);
   const initialGoogleCalendarCallbackState = getInitialCalendarCallbackState();
   const [theme, setTheme] = useState<"light" | "dark" | "modern">("light");
   const [pendingSignInStep, setPendingSignInStep] = useState<string | null>(null);
@@ -2991,12 +2993,60 @@ export default function App() {
     setCalendarMonthExpandedDate(null);
   };
 
-  const openCalendarDayEventsModal = (dateValue: string) => {
+  const dismissCalendarPickerFromPointer = (timeStamp: number) => {
+    pendingCalendarPickerDismissRef.current = timeStamp;
+    setOpenCalendarPicker(null);
+  };
+
+  const consumeDismissedCalendarPickerTap = (interactionTimeStamp?: number) => {
+    const dismissedAt = pendingCalendarPickerDismissRef.current;
+
+    if (dismissedAt === null) {
+      return false;
+    }
+
+    pendingCalendarPickerDismissRef.current = null;
+
+    if (interactionTimeStamp === undefined) {
+      return false;
+    }
+
+    return (
+      interactionTimeStamp >= dismissedAt &&
+      interactionTimeStamp - dismissedAt < 400
+    );
+  };
+
+  const openCalendarDayEventsModal = (
+    dateValue: string,
+    interactionTimeStamp?: number,
+  ) => {
+    if (consumeDismissedCalendarPickerTap(interactionTimeStamp)) {
+      return;
+    }
+
+    if (openCalendarPicker) {
+      setOpenCalendarPicker(null);
+      return;
+    }
+
     setCalendarMonthExpandedDate(dateValue);
     setCalendarEventFormStatus(null);
   };
 
-  const openCalendarEventCreateModal = (dateValue: string) => {
+  const openCalendarEventCreateModal = (
+    dateValue: string,
+    interactionTimeStamp?: number,
+  ) => {
+    if (consumeDismissedCalendarPickerTap(interactionTimeStamp)) {
+      return;
+    }
+
+    if (openCalendarPicker) {
+      setOpenCalendarPicker(null);
+      return;
+    }
+
     setCalendarMonthExpandedDate(null);
     setSelectedCalendarMonthEvent(null);
     setCalendarMonthSelectedDate(dateValue);
@@ -3011,7 +3061,19 @@ export default function App() {
     setCalendarEventFormStatus(null);
   };
 
-  const openCalendarEventEditModal = (eventItem: GoogleCalendarEventItem) => {
+  const openCalendarEventEditModal = (
+    eventItem: GoogleCalendarEventItem,
+    interactionTimeStamp?: number,
+  ) => {
+    if (consumeDismissedCalendarPickerTap(interactionTimeStamp)) {
+      return;
+    }
+
+    if (openCalendarPicker) {
+      setOpenCalendarPicker(null);
+      return;
+    }
+
     const eventDateValue = formatDateInputValue(
       parseCalendarEventDateValue(eventItem.start, eventItem.isAllDay),
     );
@@ -3665,11 +3727,11 @@ export default function App() {
       return;
     }
 
-    const handlePointerDown = (event: MouseEvent) => {
+    const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
 
       if (!(target instanceof Element) || !target.closest(".calendar-picker")) {
-        setOpenCalendarPicker(null);
+        dismissCalendarPickerFromPointer(event.timeStamp);
       }
     };
 
@@ -3679,14 +3741,22 @@ export default function App() {
       }
     };
 
-    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleEscape);
 
     return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleEscape);
     };
   }, [openCalendarPicker]);
+
+  const handleCalendarPickerBackdropPointerDown = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dismissCalendarPickerFromPointer(event.timeStamp);
+  };
 
   useEffect(() => {
     const savedView = getCookieValue(memberDetailsViewCookieName);
@@ -7599,8 +7669,8 @@ export default function App() {
                   </div>
 
                   <div className="calendar-schedule-controls">
-                    <label className="member-field">
-                      <span>Calendar</span>
+                    <div className="member-field">
+                      <span id="calendar-availability-picker-label">Calendar</span>
                       <div className="calendar-picker">
                         <button
                           type="button"
@@ -7614,7 +7684,7 @@ export default function App() {
                           }
                           aria-haspopup="listbox"
                           aria-expanded={openCalendarPicker === "availability"}
-                          aria-label="Select calendar"
+                          aria-labelledby="calendar-availability-picker-label"
                         >
                           <span
                             className="calendar-picker-icon"
@@ -7641,55 +7711,62 @@ export default function App() {
                         </button>
 
                         {openCalendarPicker === "availability" ? (
-                          <div className="calendar-picker-menu" role="listbox">
-                            {calendarPickerOptions.map((calendar) => {
-                              const isSelected = calendar.id === selectedGoogleCalendarId;
+                          <>
+                            <div
+                              className="calendar-picker-backdrop"
+                              aria-hidden="true"
+                              onPointerDown={handleCalendarPickerBackdropPointerDown}
+                            />
+                            <div className="calendar-picker-menu" role="listbox">
+                              {calendarPickerOptions.map((calendar) => {
+                                const isSelected = calendar.id === selectedGoogleCalendarId;
 
-                              return (
-                                <button
-                                  key={calendar.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={isSelected}
-                                  className={`calendar-picker-option${
-                                    isSelected ? " selected" : ""
-                                  }`}
-                                  onClick={() => {
-                                    setSelectedGoogleCalendarId(calendar.id);
-                                    setOpenCalendarPicker(null);
-                                  }}
-                                >
-                                  <span
-                                    className="calendar-picker-icon"
-                                    style={
-                                      {
-                                        "--calendar-picker-color":
-                                          calendar.calendarColor ?? "#4aa96c",
-                                      } as CSSProperties
-                                    }
-                                    aria-hidden="true"
+                                return (
+                                  <button
+                                    key={calendar.id}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={isSelected}
+                                    className={`calendar-picker-option${
+                                      isSelected ? " selected" : ""
+                                    }`}
+                                    onClick={() => {
+                                      setSelectedGoogleCalendarId(calendar.id);
+                                      setOpenCalendarPicker(null);
+                                    }}
                                   >
-                                    <span className="calendar-picker-icon-top" />
-                                    <span className="calendar-picker-icon-body" />
-                                  </span>
-                                  <span className="calendar-picker-option-copy">
-                                    <span className="calendar-picker-option-primary">
-                                      {calendar.name}
+                                    <span
+                                      className="calendar-picker-icon"
+                                      style={
+                                        {
+                                          "--calendar-picker-color":
+                                            calendar.calendarColor ?? "#4aa96c",
+                                        } as CSSProperties
+                                      }
+                                      aria-hidden="true"
+                                    >
+                                      <span className="calendar-picker-icon-top" />
+                                      <span className="calendar-picker-icon-body" />
                                     </span>
-                                    <span className="calendar-picker-option-secondary">
-                                      {formatGoogleCalendarAccessLabel(calendar)}
+                                    <span className="calendar-picker-option-copy">
+                                      <span className="calendar-picker-option-primary">
+                                        {calendar.name}
+                                      </span>
+                                      <span className="calendar-picker-option-secondary">
+                                        {formatGoogleCalendarAccessLabel(calendar)}
+                                      </span>
                                     </span>
-                                  </span>
-                                  <span className="calendar-picker-check" aria-hidden="true">
-                                    {isSelected ? "✓" : ""}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
+                                    <span className="calendar-picker-check" aria-hidden="true">
+                                      {isSelected ? "✓" : ""}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
                         ) : null}
                       </div>
-                    </label>
+                    </div>
 
                     <label className="member-field">
                       <span>Date</span>
@@ -7904,20 +7981,23 @@ export default function App() {
                   </div>
                 ) : (
                   <>
-                    <div className="calendar-month-toolbar">
-                      <label className="member-field">
-                        <span className="calendar-month-picker-label">
-                          <span>New event calendar</span>
-                          {calendarMonthLoadBadge ? (
-                            <span
-                              className={`calendar-month-load-badge ${calendarMonthLoadBadge.tone}`}
-                              role="status"
-                            >
-                              {calendarMonthLoadBadge.label}
-                            </span>
-                          ) : null}
-                        </span>
-                        <div className="calendar-picker">
+	                    <div className="calendar-month-toolbar">
+		                      <div className="member-field">
+		                        {calendarMonthLoadBadge ? (
+		                          <span
+		                            className={`calendar-month-load-badge ${calendarMonthLoadBadge.tone}`}
+	                            role="status"
+	                          >
+		                            {calendarMonthLoadBadge.label}
+		                          </span>
+		                        ) : null}
+	                        <span
+	                          className="calendar-month-picker-label"
+	                          id="calendar-month-picker-label"
+	                        >
+	                          Destination Calendar for New Event
+	                        </span>
+	                        <div className="calendar-picker">
                           <button
                             type="button"
                             className={`calendar-picker-trigger${
@@ -7927,11 +8007,11 @@ export default function App() {
                               setOpenCalendarPicker((current) =>
                                 current === "schedule" ? null : "schedule",
                               )
-                            }
-                            aria-haspopup="listbox"
-                            aria-expanded={openCalendarPicker === "schedule"}
-                            aria-label="Select new event calendar"
-                          >
+	                            }
+	                            aria-haspopup="listbox"
+	                            aria-expanded={openCalendarPicker === "schedule"}
+	                            aria-labelledby="calendar-month-picker-label"
+	                          >
                             <span
                               className="calendar-picker-icon"
                               style={
@@ -7957,55 +8037,62 @@ export default function App() {
                           </button>
 
                           {openCalendarPicker === "schedule" ? (
-                            <div className="calendar-picker-menu" role="listbox">
-                              {calendarPickerOptions.map((calendar) => {
-                                const isSelected = calendar.id === selectedGoogleCalendarId;
+                            <>
+                              <div
+                                className="calendar-picker-backdrop"
+                                aria-hidden="true"
+                                onPointerDown={handleCalendarPickerBackdropPointerDown}
+                              />
+                              <div className="calendar-picker-menu" role="listbox">
+                                {calendarPickerOptions.map((calendar) => {
+                                  const isSelected = calendar.id === selectedGoogleCalendarId;
 
-                                return (
-                                  <button
-                                    key={calendar.id}
-                                    type="button"
-                                    role="option"
-                                    aria-selected={isSelected}
-                                    className={`calendar-picker-option${
-                                      isSelected ? " selected" : ""
-                                    }`}
-                                    onClick={() => {
-                                      setSelectedGoogleCalendarId(calendar.id);
-                                      setOpenCalendarPicker(null);
-                                    }}
-                                  >
-                                    <span
-                                      className="calendar-picker-icon"
-                                      style={
-                                        {
-                                          "--calendar-picker-color":
-                                            calendar.calendarColor ?? "#4aa96c",
-                                        } as CSSProperties
-                                      }
-                                      aria-hidden="true"
+                                  return (
+                                    <button
+                                      key={calendar.id}
+                                      type="button"
+                                      role="option"
+                                      aria-selected={isSelected}
+                                      className={`calendar-picker-option${
+                                        isSelected ? " selected" : ""
+                                      }`}
+                                      onClick={() => {
+                                        setSelectedGoogleCalendarId(calendar.id);
+                                        setOpenCalendarPicker(null);
+                                      }}
                                     >
-                                      <span className="calendar-picker-icon-top" />
-                                      <span className="calendar-picker-icon-body" />
-                                    </span>
-                                    <span className="calendar-picker-option-copy">
-                                      <span className="calendar-picker-option-primary">
-                                        {calendar.name}
+                                      <span
+                                        className="calendar-picker-icon"
+                                        style={
+                                          {
+                                            "--calendar-picker-color":
+                                              calendar.calendarColor ?? "#4aa96c",
+                                          } as CSSProperties
+                                        }
+                                        aria-hidden="true"
+                                      >
+                                        <span className="calendar-picker-icon-top" />
+                                        <span className="calendar-picker-icon-body" />
                                       </span>
-                                      <span className="calendar-picker-option-secondary">
-                                        {formatGoogleCalendarAccessLabel(calendar)}
+                                      <span className="calendar-picker-option-copy">
+                                        <span className="calendar-picker-option-primary">
+                                          {calendar.name}
+                                        </span>
+                                        <span className="calendar-picker-option-secondary">
+                                          {formatGoogleCalendarAccessLabel(calendar)}
+                                        </span>
                                       </span>
-                                    </span>
-                                    <span className="calendar-picker-check" aria-hidden="true">
-                                      {isSelected ? "✓" : ""}
-                                    </span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : null}
-                        </div>
-                      </label>
+                                      <span className="calendar-picker-check" aria-hidden="true">
+                                        {isSelected ? "✓" : ""}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </>
+	                          ) : null}
+	                        </div>
+	                      </div>
 
                       <div
                         className="calendar-schedule-view-switcher"
@@ -8131,13 +8218,13 @@ export default function App() {
                             }${isToday ? " today" : ""}${isSelected ? " selected" : ""} calendar-month-day-${calendarScheduleViewMode}`}
                             role="button"
                             tabIndex={0}
-                            onClick={() => {
-                              openCalendarEventCreateModal(dayValue);
+                            onClick={(event) => {
+                              openCalendarEventCreateModal(dayValue, event.timeStamp);
                             }}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                openCalendarEventCreateModal(dayValue);
+                                openCalendarEventCreateModal(dayValue, event.timeStamp);
                               }
                             }}
                           >
@@ -8176,7 +8263,7 @@ export default function App() {
                                       }}
                                       onClick={(event) => {
                                         event.stopPropagation();
-                                        openCalendarEventEditModal(eventItem);
+                                        openCalendarEventEditModal(eventItem, event.timeStamp);
                                       }}
                                     >
                                       <span className="calendar-month-event-row">
@@ -8223,7 +8310,7 @@ export default function App() {
                                       className="calendar-month-more-events"
                                       onClick={(event) => {
                                         event.stopPropagation();
-                                        openCalendarDayEventsModal(dayValue);
+                                        openCalendarDayEventsModal(dayValue, event.timeStamp);
                                       }}
                                     >
                                       +{dayEvents.length - visibleEventLimit} more
@@ -9514,8 +9601,8 @@ export default function App() {
                     type="button"
                     key={`${eventItem.calendarId || "calendar"}-${eventItem.id}-${eventItem.start}`}
                     className="calendar-day-events-item"
-                    onClick={() => {
-                      openCalendarEventEditModal(eventItem);
+                    onClick={(event) => {
+                      openCalendarEventEditModal(eventItem, event.timeStamp);
                     }}
                   >
                     <div className="calendar-day-events-item-top">
@@ -9558,8 +9645,11 @@ export default function App() {
               <button
                 type="button"
                 className="member-submit-button"
-                onClick={() => {
-                  openCalendarEventCreateModal(calendarMonthExpandedDate);
+                onClick={(event) => {
+                  openCalendarEventCreateModal(
+                    calendarMonthExpandedDate,
+                    event.timeStamp,
+                  );
                 }}
               >
                 Add Event
