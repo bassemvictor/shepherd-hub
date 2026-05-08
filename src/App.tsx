@@ -1814,6 +1814,13 @@ export default function App() {
     string | null
   >(null);
   const currentPage = pageContent[activePage];
+  const usesInnerPageHeading = [
+    "calendar-dashboard",
+    "calendar-connect",
+    "calendar-schedule",
+    "calendar-month",
+    "calendar-reporting",
+  ].includes(activePage);
   const isEditingMember = editingMember !== null;
   const isAdminUser = currentUserGroups.includes("admin");
   const canManageUsers =
@@ -5613,42 +5620,44 @@ export default function App() {
           </div>
         ) : null}
 
-        <section className="hero-card">
-          <div className="hero-header">
-            <div>
-              <div className="hero-title-row">
-                <p className="eyebrow">{currentPage.eyebrow}</p>
-                {activePage === "member-details" && !isCompactMobileViewport ? (
-                  <button
-                    type="button"
-                    className="hero-inline-link"
-                    onClick={() => {
-                      setMemberDetailsViewPreference("member-details-beta");
-                      navigateToState({
-                        activePage: "member-details-beta",
-                        betaMemberTab: "details",
-                      });
-                    }}
-                  >
-                    Open Beta Mobile View
-                  </button>
+        <section className={`hero-card${usesInnerPageHeading ? " hero-card-flat" : ""}`}>
+          {!usesInnerPageHeading ? (
+            <div className="hero-header">
+              <div>
+                <div className="hero-title-row">
+                  <p className="eyebrow">{currentPage.eyebrow}</p>
+                  {activePage === "member-details" && !isCompactMobileViewport ? (
+                    <button
+                      type="button"
+                      className="hero-inline-link"
+                      onClick={() => {
+                        setMemberDetailsViewPreference("member-details-beta");
+                        navigateToState({
+                          activePage: "member-details-beta",
+                          betaMemberTab: "details",
+                        });
+                      }}
+                    >
+                      Open Beta Mobile View
+                    </button>
+                  ) : null}
+                </div>
+                {currentPage.description ? (
+                  <p className="description">{currentPage.description}</p>
                 ) : null}
               </div>
-              {currentPage.description ? (
-                <p className="description">{currentPage.description}</p>
+
+              {activePage === "congregation" ? (
+                <button
+                  type="button"
+                  className="hero-action-button"
+                  onClick={openNewMemberPage}
+                >
+                  Add Member
+                </button>
               ) : null}
             </div>
-
-            {activePage === "congregation" ? (
-              <button
-                type="button"
-                className="hero-action-button"
-                onClick={openNewMemberPage}
-              >
-                Add Member
-              </button>
-            ) : null}
-          </div>
+          ) : null}
 
           {activePage === "congregation" ? (
             <div className="api-message-card">
@@ -7050,7 +7059,7 @@ export default function App() {
               <section className="placeholder-page-card calendar-dashboard-card">
                 <div className="calendar-schedule-header">
                   <div>
-                    <p className="placeholder-page-kicker">Google Calendar</p>
+                    <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
                     <h3 className="calendar-connect-title">Dashboard</h3>
                   </div>
 
@@ -7060,13 +7069,15 @@ export default function App() {
                     </p>
                     <button
                       type="button"
-                      className="member-submit-button"
+                      className="member-cancel-button visitation-calendar-nav-button calendar-dashboard-refresh-button"
                       onClick={() => {
                         void loadCalendarDashboardSummary();
                       }}
                       disabled={isCalendarDashboardLoading}
+                      aria-label="Refresh dashboard"
+                      title="Refresh dashboard"
                     >
-                      {isCalendarDashboardLoading ? "Refreshing..." : "Refresh Dashboard"}
+                      ↻
                     </button>
                   </div>
                 </div>
@@ -7222,7 +7233,7 @@ export default function App() {
               <section className="placeholder-page-card calendar-connect-card">
                 <div className="calendar-connect-header">
                   <div>
-                    <p className="placeholder-page-kicker">Google Calendar</p>
+                    <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
                     <h3 className="calendar-connect-title">Connection</h3>
                     <p className="placeholder-page-copy calendar-connect-copy">
                       Connect a Google account so Shepherd Hub can keep Calendar access on
@@ -7406,7 +7417,7 @@ export default function App() {
                 >
                   <div className="calendar-schedule-header">
                     <div>
-                      <p className="placeholder-page-kicker">Google Calendar</p>
+                      <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
                       <h3 className="calendar-connect-title">Busy and Free Times</h3>
                       <p className="placeholder-page-copy calendar-connect-copy">
                         Pull live availability from the connected Google Calendar and use
@@ -7642,7 +7653,7 @@ export default function App() {
               <section className="placeholder-page-card calendar-month-card">
                 <div className="calendar-schedule-header">
                   <div>
-                    <p className="placeholder-page-kicker">Google Calendar</p>
+                    <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
                     <h3 className="calendar-connect-title">Schedule</h3>
                   </div>
                 </div>
@@ -7936,7 +7947,7 @@ export default function App() {
               <section className="placeholder-page-card calendar-schedule-card">
                 <div className="calendar-schedule-header">
                   <div>
-                    <p className="placeholder-page-kicker">Calendar Reporting</p>
+                    <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
                     <h3 className="calendar-connect-title">Congregation Event Summary</h3>
                     <p className="placeholder-page-copy calendar-connect-copy">
                       Congregation members sorted by the fewest attached calendar events first for{" "}

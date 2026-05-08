@@ -961,10 +961,11 @@ button {
   align-content: start;
   gap: 1.5rem;
   min-width: 0;
+  position: relative;
 }
 
 .hero-card {
-  border-radius: 24px;
+  border-radius: 8px;
   background: var(--surface-bg);
   border: 1px solid var(--surface-border);
   box-shadow: var(--surface-shadow);
@@ -973,6 +974,14 @@ button {
 
 .hero-card {
   padding: 2rem;
+}
+
+.hero-card-flat {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .hero-header {
@@ -1646,7 +1655,7 @@ button {
 .placeholder-page-card {
   margin-top: 1.5rem;
   padding: 1.2rem;
-  border-radius: 20px;
+  border-radius: 7px;
   background: var(--dark-card-bg);
   border: 1px solid rgba(233, 201, 112, 0.2);
   color: var(--dark-card-text);
@@ -1941,6 +1950,15 @@ button {
 
 .calendar-dashboard-sync-badge {
   flex-shrink: 0;
+}
+
+.calendar-dashboard-refresh-button {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.calendar-dashboard-refresh-button:disabled {
+  opacity: 0.7;
 }
 
 .calendar-schedule-controls {
@@ -4686,14 +4704,16 @@ button {
 }
 
 .page-progress {
-  position: sticky;
+  position: absolute;
   top: 0;
   z-index: 12;
+  left: 0;
+  right: 0;
   height: 0.25rem;
-  margin-bottom: 1rem;
   overflow: hidden;
   border-radius: 999px;
   background: rgba(217, 119, 6, 0.18);
+  pointer-events: none;
 }
 
 .page-progress-bar {
@@ -4846,6 +4866,211 @@ button {
   width: 100%;
 }
 
+/* Compact spacing pass to reduce wasted whitespace across desktop and mobile layouts. */
+.auth-shell {
+  padding: 1rem;
+}
+
+.auth-card {
+  gap: 0.75rem;
+  padding: 1.35rem;
+}
+
+.public-page-card {
+  gap: 0.65rem;
+  padding: 0.95rem;
+}
+
+.side-panel {
+  gap: 1.5rem;
+  padding: 0.9rem 0.85rem;
+}
+
+.nav-list {
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.content-panel {
+  padding: 1.65rem;
+  gap: 0.9rem;
+}
+
+.hero-card {
+  padding: 0.1rem;
+}
+
+.hero-header {
+  gap: 0.75rem;
+}
+
+.description {
+  margin-top: 0.55rem;
+}
+
+.api-message-card {
+  margin-top: 0.9rem;
+}
+
+.api-data-list {
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+}
+
+.congregation-search-row {
+  gap: 0.7rem;
+  margin-top: 0.7rem;
+}
+
+.member-form-card {
+  margin-top: 0.9rem;
+  padding: 0.9rem;
+}
+
+.member-form-header {
+  margin-bottom: 0.7rem;
+}
+
+.member-form-grid {
+  gap: 0.7rem;
+}
+
+.member-form-actions {
+  margin-top: 0.7rem;
+  gap: 0.55rem;
+}
+
+.placeholder-page-card {
+  margin-top: 0.85rem;
+  padding: 0.95rem;
+}
+
+.placeholder-page-title {
+  margin-top: 0.2rem;
+}
+
+.placeholder-page-copy,
+.calendar-connect-copy {
+  margin-top: 0.35rem;
+}
+
+.calendar-connect-layout,
+.calendar-schedule-layout,
+.calendar-month-layout,
+.parking-board,
+.visitation-board,
+.announcements-page,
+.user-access-page,
+.contacts-import-page,
+.visitation-calendar-page,
+.visitation-calendar-schedule-page {
+  margin-top: 0.85rem;
+}
+
+.calendar-connect-card,
+.calendar-dashboard-card,
+.calendar-schedule-card,
+.calendar-month-card,
+.calendar-schedule-form {
+  gap: 0.9rem;
+}
+
+.calendar-connect-header,
+.calendar-schedule-header,
+.calendar-dashboard-actions,
+.calendar-schedule-controls,
+.calendar-connect-grid,
+.calendar-dashboard-grid,
+.calendar-schedule-results,
+.calendar-sync-settings-card,
+.calendar-sync-toggle-row,
+.calendar-schedule-period-bar,
+.calendar-dashboard-upcoming,
+.calendar-dashboard-list {
+  gap: 0.75rem;
+}
+
+.calendar-connect-metric,
+.calendar-sync-settings-card,
+.calendar-schedule-empty,
+.calendar-dashboard-metric,
+.calendar-schedule-summary-card,
+.calendar-schedule-slot,
+.parking-history-item,
+.calendar-day-events-item,
+.announcement-week-card,
+.member-detail-beta-card,
+.member-detail-beta-tab-panel,
+.member-detail-beta-detail-card,
+.member-detail-beta-visit-card,
+.member-detail-beta-activity-card,
+.visitation-card,
+.visitation-report-group,
+.visitation-report-empty,
+.visitation-calendar-day,
+.parking-registration-item,
+.parking-registration-summary,
+.parking-capacity-card,
+.parking-list-card {
+  padding: 0.85rem 0.9rem;
+}
+
+.calendar-dashboard-event {
+  gap: 0.75rem;
+}
+
+.member-photo-preview {
+  margin-top: 0.55rem;
+}
+
+.member-photo-hint,
+.member-photo-status {
+  margin-top: 0.35rem;
+}
+
+.modal-card {
+  padding: 1.1rem;
+}
+
+.modal-form,
+.modal-actions {
+  gap: 0.75rem;
+}
+
+@media (max-width: 900px) {
+  .side-panel {
+    gap: 1rem;
+    padding: 0.45rem 0.45rem;
+  }
+
+  .content-panel {
+    padding: 0 1rem 1rem;
+    gap: 0.75rem;
+  }
+
+  .hero-card {
+    padding: 1rem;
+  }
+
+  .placeholder-page-card,
+  .member-form-card {
+    padding: 0.85rem;
+  }
+
+  .calendar-connect-layout,
+  .calendar-schedule-layout,
+  .calendar-month-layout,
+  .parking-board,
+  .visitation-board,
+  .announcements-page,
+  .user-access-page,
+  .contacts-import-page,
+  .visitation-calendar-page,
+  .visitation-calendar-schedule-page {
+    margin-top: 0.65rem;
+  }
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -4853,16 +5078,16 @@ button {
 
   .side-panel {
     justify-content: flex-start;
-    gap: 2rem;
-    padding: 0.5rem 0.5rem;
+    gap: 1rem;
+    padding: 0.4rem 0.45rem;
   }
 
   .content-panel {
-    padding: 0 1.5rem 1.5rem;
+    padding: 0 1rem 1rem;
   }
 
   .hero-card {
-    padding: 1.5rem;
+    padding: 1rem;
   }
   .member-form-grid {
     grid-template-columns: 1fr;
@@ -5100,7 +5325,7 @@ button {
     position: sticky;
     top: 0;
     z-index: 10;
-    padding: 0.5rem 0.5rem;
+    padding: 0.35rem 0.45rem 0.2rem;
     box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
   }
 
@@ -5160,8 +5385,20 @@ button {
   }
 
   .content-panel {
-    padding: 0.5rem;
-    gap: 1rem;
+    padding: 0.45rem 0.45rem 0.45rem;
+    gap: 0.6rem;
+  }
+
+  .calendar-connect-layout,
+  .calendar-schedule-layout,
+  .calendar-month-layout,
+  .calendar-dashboard-layout {
+    margin-top: 0;
+  }
+
+  .placeholder-page-card {
+    margin-top: 0;
+    padding: 0.65rem;
   }
 
   .visitation-calendar-day-header {
@@ -5174,11 +5411,11 @@ button {
   }
 
   .hero-card {
-    border-radius: 20px;
+    border-radius: 8px;
   }
 
   .hero-card {
-    padding: 0.75rem;
+    padding: 0.1rem 0.1rem 0.1rem;
   }
 
   .hero-action-button {
