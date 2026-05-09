@@ -3206,6 +3206,7 @@ export const handler = async (event) => {
                 }
             }
             const importedMembers = [];
+            const skippedMemberDetails = [];
             const skippedMembers = [];
             for (const contact of parsedContacts) {
                 const emailKey = normalizeEmail(contact.email);
@@ -3218,11 +3219,20 @@ export const handler = async (event) => {
                     contact.email ||
                     contact.phone ||
                     "Imported contact";
-                const alreadyExists = (memberSkKey && memberSkKeys.has(memberSkKey)) ||
-                    (emailKey && emailKeys.has(emailKey)) ||
-                    (contact.dedupeByPhone && phoneKey && phoneKeys.has(phoneKey)) ||
-                    (nameKey && nameKeys.has(nameKey));
-                if (alreadyExists) {
+                const skipReason = memberSkKey && memberSkKeys.has(memberSkKey)
+                    ? "Member ID already exists."
+                    : emailKey && emailKeys.has(emailKey)
+                        ? "Email already exists."
+                        : contact.dedupeByPhone && phoneKey && phoneKeys.has(phoneKey)
+                            ? "Phone number already exists."
+                            : nameKey && nameKeys.has(nameKey)
+                                ? "Exact member name already exists."
+                                : "";
+                if (skipReason) {
+                    skippedMemberDetails.push({
+                        name: contactLabel,
+                        reason: skipReason,
+                    });
                     skippedMembers.push(contactLabel);
                     continue;
                 }
@@ -3277,6 +3287,7 @@ export const handler = async (event) => {
                     importedCount: importedMembers.length,
                     skippedCount: skippedMembers.length,
                     importedMembers,
+                    skippedMemberDetails,
                     skippedMembers,
                 }),
             };

@@ -2758,6 +2758,12 @@ END:VCARD`,
     assert.equal(body.importedCount, 1);
     assert.equal(body.skippedCount, 1);
     assert.deepEqual(body.importedMembers, ["Jane Doe"]);
+    assert.deepEqual(body.skippedMemberDetails, [
+        {
+            name: "John Smith",
+            reason: "Email already exists.",
+        },
+    ]);
     assert.deepEqual(body.skippedMembers, ["John Smith"]);
     assert.deepEqual(dynamo.commands.map((command) => command.constructor.name), ["QueryCommand", "PutCommand"]);
     assert.equal(putInput.Item?.pk, "CONGREGATION");
@@ -2812,6 +2818,12 @@ test("imports Unity Excel members using unity sk values and allows shared phones
     assert.equal(body.importedCount, 2);
     assert.equal(body.skippedCount, 1);
     assert.deepEqual(body.importedMembers, ["Sally Samuel", "Daniel Samuel"]);
+    assert.deepEqual(body.skippedMemberDetails, [
+        {
+            name: "Existing Member",
+            reason: "Email already exists.",
+        },
+    ]);
     assert.deepEqual(body.skippedMembers, ["Existing Member"]);
     assert.deepEqual(dynamo.commands.map((command) => command.constructor.name), ["QueryCommand", "PutCommand", "PutCommand"]);
     assert.equal(putCommands[0]?.input?.Item?.pk, "CONGREGATION");

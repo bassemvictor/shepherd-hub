@@ -353,6 +353,10 @@ type ContactsImportResponse = {
   importedCount: number;
   skippedCount: number;
   importedMembers: string[];
+  skippedMemberDetails: Array<{
+    name: string;
+    reason: string;
+  }>;
   skippedMembers: string[];
 };
 
@@ -3458,6 +3462,7 @@ export default function App() {
         typeof payload.importedCount !== "number" ||
         typeof payload.skippedCount !== "number" ||
         !Array.isArray(payload.importedMembers) ||
+        !Array.isArray(payload.skippedMemberDetails) ||
         !Array.isArray(payload.skippedMembers)
       ) {
         setContactsImportStatus(payload.message ?? "Unable to import contacts.");
@@ -3471,6 +3476,7 @@ export default function App() {
         importedCount: payload.importedCount,
         skippedCount: payload.skippedCount,
         importedMembers: payload.importedMembers,
+        skippedMemberDetails: payload.skippedMemberDetails,
         skippedMembers: payload.skippedMembers,
       };
 
@@ -7190,10 +7196,17 @@ export default function App() {
 
                       <div className="contacts-import-list-block">
                         <p className="contacts-import-list-title">Skipped members</p>
-                        {contactsImportSummary.skippedMembers.length > 0 ? (
+                        {contactsImportSummary.skippedMemberDetails.length > 0 ? (
                           <ul>
-                            {contactsImportSummary.skippedMembers.map((memberName) => (
-                              <li key={`skipped-${memberName}`}>{memberName}</li>
+                            {contactsImportSummary.skippedMemberDetails.map((member) => (
+                              <li key={`skipped-${member.name}-${member.reason}`}>
+                                <span className="contacts-import-skipped-name">
+                                  {member.name}
+                                </span>
+                                <span className="contacts-import-skipped-reason">
+                                  {member.reason}
+                                </span>
+                              </li>
                             ))}
                           </ul>
                         ) : (
@@ -8803,13 +8816,7 @@ export default function App() {
                         type="button"
                         className="member-detail-beta-back"
                         onClick={() => {
-                          if (isCompactMobileViewport) {
-                            setActivePage("congregation");
-                            return;
-                          }
-
-                          setMemberDetailsViewPreference("member-details");
-                          setActivePage("member-details");
+                          setActivePage("congregation");
                         }}
                       >
                         <span aria-hidden="true">←</span>

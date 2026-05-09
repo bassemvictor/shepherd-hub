@@ -3064,8 +3064,27 @@ button {
   color: var(--dark-card-text);
 }
 
+.contacts-import-list-block li {
+  display: grid;
+  gap: 0.14rem;
+}
+
 .contacts-import-list-block li + li {
   margin-top: 0.35rem;
+}
+
+.contacts-import-skipped-name,
+.contacts-import-skipped-reason {
+  display: block;
+}
+
+.contacts-import-skipped-name {
+  font-weight: 700;
+}
+
+.contacts-import-skipped-reason {
+  color: var(--muted-light);
+  font-size: 0.84rem;
 }
 
 .user-access-header {

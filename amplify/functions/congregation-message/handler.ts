@@ -4807,6 +4807,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       }
 
       const importedMembers: string[] = [];
+      const skippedMemberDetails: Array<{ name: string; reason: string }> = [];
       const skippedMembers: string[] = [];
 
       for (const contact of parsedContacts) {
@@ -4825,13 +4826,21 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           contact.email ||
           contact.phone ||
           "Imported contact";
-        const alreadyExists =
-          (memberSkKey && memberSkKeys.has(memberSkKey)) ||
-          (emailKey && emailKeys.has(emailKey)) ||
-          (contact.dedupeByPhone && phoneKey && phoneKeys.has(phoneKey)) ||
-          (nameKey && nameKeys.has(nameKey));
+        const skipReason = memberSkKey && memberSkKeys.has(memberSkKey)
+          ? "Member ID already exists."
+          : emailKey && emailKeys.has(emailKey)
+            ? "Email already exists."
+            : contact.dedupeByPhone && phoneKey && phoneKeys.has(phoneKey)
+              ? "Phone number already exists."
+              : nameKey && nameKeys.has(nameKey)
+                ? "Exact member name already exists."
+                : "";
 
-        if (alreadyExists) {
+        if (skipReason) {
+          skippedMemberDetails.push({
+            name: contactLabel,
+            reason: skipReason,
+          });
           skippedMembers.push(contactLabel);
           continue;
         }
@@ -4900,6 +4909,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           importedCount: importedMembers.length,
           skippedCount: skippedMembers.length,
           importedMembers,
+          skippedMemberDetails,
           skippedMembers,
         }),
       };
