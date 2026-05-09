@@ -745,6 +745,9 @@ const formatCompactMemberKey = (sk: string) => {
   return sk;
 };
 
+const isUnityMemberSk = (sk?: string) =>
+  (sk ?? "").trim().toLowerCase().startsWith("unity#");
+
 const formatDateInputValue = (value: Date) =>
   `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(
     value.getDate(),
@@ -6001,6 +6004,13 @@ export default function App() {
                                   ) : (
                                     <span aria-hidden="true">{memberInitials}</span>
                                   )}
+                                  {isUnityMemberSk(item.sk) ? (
+                                    <img
+                                      src="/verified.png"
+                                      alt="Verified Unity member"
+                                      className="member-unity-badge member-unity-badge-list"
+                                    />
+                                  ) : null}
                                 </div>
 
                                 <div className="api-data-content">
@@ -8866,6 +8876,13 @@ export default function App() {
                           <span aria-hidden="true">{selectedMemberInitials}</span>
                         )}
                       </div>
+                      {isUnityMemberSk(selectedMemberItem.sk) ? (
+                        <img
+                          src="/verified.png"
+                          alt="Verified Unity member"
+                          className="member-unity-badge member-unity-badge-detail"
+                        />
+                      ) : null}
                     </div>
                     <h2 className="member-detail-beta-name">{selectedMemberName}</h2>
                     <p className="member-detail-beta-key">
