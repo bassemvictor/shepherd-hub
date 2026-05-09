@@ -16,12 +16,20 @@ type MockCommand = {
 
 const parseBody = (body: string | undefined) => JSON.parse(body ?? "{}") as Record<string, unknown>;
 
-const getExpectedSyncWindow = () => {
+const getExpectedSyncWindow = ({
+  syncFromYear,
+  syncToYear,
+}: {
+  syncFromYear?: number;
+  syncToYear?: number;
+} = {}) => {
   const currentYear = new Date().getUTCFullYear();
+  const resolvedSyncFromYear = typeof syncFromYear === "number" ? syncFromYear : currentYear - 1;
+  const resolvedSyncToYear = typeof syncToYear === "number" ? syncToYear : currentYear + 2;
 
   return {
-    timeMin: new Date(Date.UTC(currentYear - 1, 0, 1, 0, 0, 0, 0)).toISOString(),
-    timeMax: new Date(Date.UTC(currentYear + 3, 0, 1, 0, 0, 0, 0)).toISOString(),
+    timeMin: new Date(Date.UTC(resolvedSyncFromYear, 0, 1, 0, 0, 0, 0)).toISOString(),
+    timeMax: new Date(Date.UTC(resolvedSyncToYear + 1, 0, 1, 0, 0, 0, 0)).toISOString(),
   };
 };
 
@@ -549,9 +557,133 @@ test("loads an existing Google Calendar connection", async () => {
   assert.equal(body.cacheLastSyncAt, null);
 });
 
+test("deletes an existing Google Calendar connection and cached rows", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "ScanCommand") {
+      return {
+        Items: [
+          {
+            pk: "CALENDAR_EVENT_SYNC#user@example.com#primary",
+            sk: "SYNC_STATE",
+          },
+          {
+            pk: "CALENDAR_EVENT_SYNC#user@example.com#primary",
+            sk: "MONTH#2026-05#000",
+          },
+        ],
+      };
+    }
+
+    if (command.constructor.name === "DeleteCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/connection/delete",
+      method: "POST",
+      groups: ["admin"],
+    }),
+  );
+  const body = parseBody(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Google Calendar connection deleted.");
+  assert.deepEqual(
+    dynamo.commands.map((command) => command.constructor.name),
+    ["DeleteCommand", "DeleteCommand", "ScanCommand", "DeleteCommand", "DeleteCommand"],
+  );
+});
+
+test("clears cached Google Calendar events and sync token without deleting the connection", async () => {
+  const store = new Map<string, Record<string, unknown>>();
+  const keyFor = (pk: string, sk: string) => `${pk}||${sk}`;
+  store.set(
+    keyFor("CALENDAR_SYNC_SETTINGS", "GOOGLE#user@example.com"),
+    {
+      pk: "CALENDAR_SYNC_SETTINGS",
+      sk: "GOOGLE#user@example.com",
+      data: JSON.stringify({
+        syncBehavior: "interval",
+        syncIntervalMinutes: 15,
+        cacheLastSyncAt: "2026-05-09T14:00:00.000Z",
+      }),
+    },
+  );
+
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      const key = command.input?.Key as { pk: string; sk: string };
+      return {
+        Item: store.get(keyFor(key.pk, key.sk)),
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      const item = command.input?.Item as Record<string, unknown>;
+      store.set(keyFor(String(item.pk), String(item.sk)), item);
+      return {};
+    }
+
+    if (command.constructor.name === "ScanCommand") {
+      return {
+        Items: [
+          {
+            pk: "CALENDAR_EVENT_SYNC#user@example.com#primary",
+            sk: "SYNC_STATE",
+          },
+          {
+            pk: "CALENDAR_EVENT_SYNC#user@example.com#primary",
+            sk: "MONTH#2026-05#000",
+          },
+        ],
+      };
+    }
+
+    if (command.constructor.name === "DeleteCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/cache/reset",
+      method: "POST",
+      groups: ["admin"],
+      sub: "",
+    }),
+  );
+  const body = parseBody(response.body);
+  const savedSettings = JSON.parse(
+    String(store.get(keyFor("CALENDAR_SYNC_SETTINGS", "GOOGLE#user@example.com"))?.data ?? "{}"),
+  ) as Record<string, unknown>;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.message, "Google Calendar cache cleared.");
+  assert.equal(body.cacheLastSyncAt, null);
+  assert.equal(savedSettings.syncBehavior, "interval");
+  assert.equal(savedSettings.syncIntervalMinutes, 15);
+  assert.equal(savedSettings.cacheLastSyncAt, null);
+  assert.deepEqual(
+    dynamo.commands.map((command) => command.constructor.name),
+    ["ScanCommand", "DeleteCommand", "DeleteCommand", "GetCommand", "PutCommand"],
+  );
+});
+
 test("updates Google Calendar sync settings and exposes them from the connection endpoint", async () => {
   const store = new Map<string, Record<string, unknown>>();
   const keyFor = (pk: string, sk: string) => `${pk}||${sk}`;
+  const syncFromYear = 2024;
+  const syncToYear = 2028;
   const dynamo = createMockClient((command) => {
     if (command.constructor.name === "GetCommand") {
       const key = command.input?.Key as { pk: string; sk: string };
@@ -579,6 +711,8 @@ test("updates Google Calendar sync settings and exposes them from the connection
       body: {
         syncBehavior: "interval",
         syncIntervalMinutes: 15,
+        syncFromYear,
+        syncToYear,
       },
     }),
   );
@@ -588,6 +722,17 @@ test("updates Google Calendar sync settings and exposes them from the connection
   assert.equal(saveBody.syncBehavior, "interval");
   assert.equal(saveBody.syncIntervalMinutes, 15);
   assert.equal(saveBody.cacheLastSyncAt, null);
+  assert.equal(saveBody.syncFromYear, syncFromYear);
+  assert.equal(saveBody.syncToYear, syncToYear);
+
+  const savedSettings = JSON.parse(
+    String(
+      store.get(keyFor("CALENDAR_SYNC_SETTINGS", "GOOGLE#00000000-0000-4000-8000-000000000001"))
+        ?.data ?? "{}",
+    ),
+  ) as Record<string, unknown>;
+  assert.equal(savedSettings.syncFromYear, syncFromYear);
+  assert.equal(savedSettings.syncToYear, syncToYear);
 
   const connectionResponse = await invokeHandler(
     createEvent({
@@ -602,6 +747,123 @@ test("updates Google Calendar sync settings and exposes them from the connection
   assert.equal(connectionBody.syncBehavior, "interval");
   assert.equal(connectionBody.syncIntervalMinutes, 15);
   assert.equal(connectionBody.cacheLastSyncAt, null);
+  assert.equal(connectionBody.syncFromYear, syncFromYear);
+  assert.equal(connectionBody.syncToYear, syncToYear);
+});
+
+test("uses the configured Google Calendar full sync year range", async () => {
+  const originalFetch = globalThis.fetch;
+  const syncWindow = getExpectedSyncWindow({
+    syncFromYear: 2022,
+    syncToYear: 2027,
+  });
+  const connectionData = {
+    email: "user@example.com",
+    refreshTokenEncrypted: encryptTestSecret("refresh-token"),
+    accessTokenEncrypted: encryptTestSecret("access-token"),
+    accessTokenExpiresAt: "2999-01-01T00:00:00.000Z",
+    connectedAt: "2026-04-26T12:00:00.000Z",
+    updatedAt: "2026-04-26T12:05:00.000Z",
+    refreshTokenUpdatedAt: "2026-04-26T12:00:00.000Z",
+    tokenScope: "https://www.googleapis.com/auth/calendar",
+    tokenType: "Bearer",
+    lastError: null,
+  };
+  const store = new Map<string, Record<string, unknown>>();
+  const keyFor = (pk: string, sk: string) => `${pk}||${sk}`;
+
+  store.set(keyFor("CALENDAR_SYNC_SETTINGS", "GOOGLE#00000000-0000-4000-8000-000000000001"), {
+    pk: "CALENDAR_SYNC_SETTINGS",
+    sk: "GOOGLE#00000000-0000-4000-8000-000000000001",
+    data: JSON.stringify({
+      syncBehavior: "always",
+      syncIntervalMinutes: 5,
+      syncFromYear: 2022,
+      syncToYear: 2027,
+      cacheLastSyncAt: null,
+      updatedAt: "2026-05-09T12:00:00.000Z",
+    }),
+  });
+
+  let requestedUrl = "";
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      const key = command.input?.Key as { pk: string; sk: string };
+
+      if (key.pk === "CALENDAR_INTEGRATION") {
+        return {
+          Item: {
+            pk: key.pk,
+            sk: key.sk,
+            data: JSON.stringify(connectionData),
+          },
+        };
+      }
+
+      return {
+        Item: store.get(keyFor(key.pk, key.sk)),
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      const item = command.input?.Item as Record<string, unknown>;
+      store.set(keyFor(String(item.pk), String(item.sk)), item);
+      return {};
+    }
+
+    if (command.constructor.name === "QueryCommand") {
+      const values = command.input?.ExpressionAttributeValues as Record<string, string>;
+      const pk = values?.[":pk"];
+
+      return {
+        Items: Array.from(store.values()).filter((item) => item.pk === pk),
+      };
+    }
+
+    if (command.constructor.name === "DeleteCommand") {
+      const key = command.input?.Key as { pk: string; sk: string };
+      store.delete(keyFor(key.pk, key.sk));
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+
+    return {
+      ok: true,
+      json: async () => ({
+        items: [],
+        nextSyncToken: "custom-range-token",
+      }),
+    } as Response;
+  };
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/events",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        timeMin: "2026-05-01T00:00:00.000Z",
+        timeMax: "2026-06-01T00:00:00.000Z",
+        timeZone: "America/Toronto",
+        calendarId: "primary",
+        useSyncCache: true,
+      },
+    }),
+  );
+
+  globalThis.fetch = originalFetch;
+
+  assert.equal(response.statusCode, 200);
+  const syncRequest = new URL(requestedUrl);
+  assert.equal(syncRequest.searchParams.get("timeMin"), syncWindow.timeMin);
+  assert.equal(syncRequest.searchParams.get("timeMax"), syncWindow.timeMax);
 });
 
 test("loads Google Calendar free/busy availability", async () => {
@@ -1168,10 +1430,13 @@ test("loads Google calendar events across all calendars with one API call", asyn
     keyFor("CALENDAR_SYNC_SETTINGS", "GOOGLE#00000000-0000-4000-8000-000000000001"),
   );
   assert.ok(storedSyncSettings);
+  const defaultSyncWindow = getExpectedSyncWindow();
   assert.deepEqual(JSON.parse(String(storedSyncSettings?.data)), {
     syncBehavior: "always",
     syncIntervalMinutes: 5,
     cacheLastSyncAt: body.time,
+    syncFromYear: new Date(defaultSyncWindow.timeMin).getUTCFullYear(),
+    syncToYear: new Date(defaultSyncWindow.timeMax).getUTCFullYear() - 1,
     updatedAt: body.time,
   });
 });
@@ -2393,6 +2658,114 @@ test("handles the Google Calendar OAuth callback and redirects back to the app",
   assert.match(
     String(response.headers?.Location ?? response.headers?.location),
     /^https:\/\/app\.example\.com\/calendar\/connect\?calendar-google-status=success&calendar-google-message=Google\+Calendar\+connected\.$/,
+  );
+  assert.ok(
+    dynamo.commands.some((command) => command.constructor.name === "DeleteCommand"),
+  );
+});
+
+test("deletes the Google Calendar OAuth state when callback is missing an authorization code", async () => {
+  const stateRecord = {
+    email: "user@example.com",
+    returnTo: "https://app.example.com/calendar/connect",
+    createdAt: "2026-04-26T12:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z",
+  };
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "CALENDAR_OAUTH_STATE",
+          sk: "GOOGLE#oauth-state",
+          data: JSON.stringify(stateRecord),
+        },
+      };
+    }
+
+    if (command.constructor.name === "DeleteCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/oauth/callback",
+      queryStringParameters: {
+        state: "oauth-state",
+      },
+    }),
+  );
+
+  assert.equal(response.statusCode, 302);
+  assert.match(
+    String(response.headers?.Location ?? response.headers?.location),
+    /^https:\/\/app\.example\.com\/calendar\/connect\?calendar-google-status=error&calendar-google-message=Google\+did\+not\+return\+an\+authorization\+code\.$/,
+  );
+  assert.ok(
+    dynamo.commands.some((command) => command.constructor.name === "DeleteCommand"),
+  );
+});
+
+test("deletes the Google Calendar OAuth state when token exchange fails", async () => {
+  const originalFetch = globalThis.fetch;
+  const stateRecord = {
+    email: "user@example.com",
+    returnTo: "https://app.example.com/calendar/connect",
+    createdAt: "2026-04-26T12:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z",
+  };
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "GetCommand") {
+      return {
+        Item: {
+          pk: "CALENDAR_OAUTH_STATE",
+          sk: "GOOGLE#oauth-state",
+          data: JSON.stringify(stateRecord),
+        },
+      };
+    }
+
+    if (command.constructor.name === "DeleteCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  globalThis.fetch = async () =>
+    ({
+      ok: false,
+      json: async () => ({
+        error: "invalid_grant",
+        error_description: "Bad code",
+      }),
+    }) as Response;
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/calendar/google/oauth/callback",
+      queryStringParameters: {
+        state: "oauth-state",
+        code: "bad-auth-code",
+      },
+    }),
+  );
+
+  globalThis.fetch = originalFetch;
+
+  assert.equal(response.statusCode, 302);
+  assert.match(
+    String(response.headers?.Location ?? response.headers?.location),
+    /^https:\/\/app\.example\.com\/calendar\/connect\?calendar-google-status=error&calendar-google-message=Bad\+code$/,
+  );
+  assert.ok(
+    dynamo.commands.some((command) => command.constructor.name === "DeleteCommand"),
   );
 });
 

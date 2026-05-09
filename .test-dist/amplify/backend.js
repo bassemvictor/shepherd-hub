@@ -104,6 +104,16 @@ congregationApi.addRoutes({
     integration: new HttpLambdaIntegration("GoogleCalendarConnectionSyncSettingsIntegration", backend.congregationMessage.resources.lambda),
 });
 congregationApi.addRoutes({
+    path: "/calendar/google/connection/delete",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("GoogleCalendarConnectionDeleteIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
+    path: "/calendar/google/cache/reset",
+    methods: [HttpMethod.POST],
+    integration: new HttpLambdaIntegration("GoogleCalendarCacheResetIntegration", backend.congregationMessage.resources.lambda),
+});
+congregationApi.addRoutes({
     path: "/calendar/google/freebusy",
     methods: [HttpMethod.POST],
     integration: new HttpLambdaIntegration("GoogleCalendarFreeBusyIntegration", backend.congregationMessage.resources.lambda),

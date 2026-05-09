@@ -1990,11 +1990,36 @@ button {
 }
 
 .calendar-connect-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 1rem;
+}
+
+.calendar-connect-header-copy {
+  min-width: 0;
+}
+
+.calendar-connect-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  align-self: flex-start;
+  justify-self: end;
+}
+
+.calendar-connect-delete-button {
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.22);
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.calendar-connect-reset-cache-button {
+  color: #7a5c11;
+  border-color: rgba(122, 92, 17, 0.2);
+  background: rgba(244, 191, 38, 0.1);
 }
 
 .calendar-connect-title,
@@ -2167,6 +2192,27 @@ button {
   color: var(--muted-light);
   font-size: 0.92rem;
   font-weight: 600;
+}
+
+.calendar-sync-year-range {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.calendar-sync-year-range-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.calendar-sync-year-range-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  max-width: 420px;
+}
+
+.calendar-sync-year-field {
+  min-width: 0;
 }
 
 .calendar-sync-settings-actions {
@@ -5969,7 +6015,12 @@ button {
   }
 
   .calendar-connect-header {
-    flex-direction: column;
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-connect-actions {
+    justify-self: stretch;
+    justify-content: flex-start;
   }
 
   .calendar-connect-grid {
@@ -5981,6 +6032,11 @@ button {
   }
 
   .calendar-sync-interval-field {
+    max-width: 100%;
+  }
+
+  .calendar-sync-year-range-fields {
+    grid-template-columns: 1fr;
     max-width: 100%;
   }
 

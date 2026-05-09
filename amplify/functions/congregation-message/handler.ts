@@ -13,6 +13,7 @@ import {
   DynamoDBDocumentClient,
   PutCommand,
   QueryCommand,
+  ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -106,6 +107,8 @@ type GoogleCalendarConnectStartPayload = {
 type GoogleCalendarSyncSettingsPayload = {
   syncBehavior?: "always" | "interval";
   syncIntervalMinutes?: number;
+  syncFromYear?: number;
+  syncToYear?: number;
 };
 
 type GoogleCalendarFreeBusyPayload = {
@@ -319,6 +322,8 @@ type StoredGoogleCalendarSyncSettingsData = {
   syncBehavior?: "always" | "interval";
   syncIntervalMinutes?: number;
   cacheLastSyncAt?: string | null;
+  syncFromYear?: number;
+  syncToYear?: number;
   updatedAt: string;
 };
 
@@ -1043,13 +1048,15 @@ const googleOauthStateTtlMs = 10 * 60 * 1000;
 const googleAccessTokenExpiryBufferMs = 60 * 1000;
 const googleCalendarMonthCacheTargetBytes = 350 * 1024;
 const defaultGoogleCalendarSyncIntervalMinutes = 5;
+const minGoogleCalendarSyncYear = 1900;
+const maxGoogleCalendarSyncYear = 9999;
 
-const getGoogleCalendarSyncWindow = (time: string) => {
+const getDefaultGoogleCalendarSyncYearRange = (time: string) => {
   const currentYear = new Date(time).getUTCFullYear();
 
   return {
-    timeMin: new Date(Date.UTC(currentYear - 1, 0, 1, 0, 0, 0, 0)).toISOString(),
-    timeMax: new Date(Date.UTC(currentYear + 3, 0, 1, 0, 0, 0, 0)).toISOString(),
+    syncFromYear: currentYear - 1,
+    syncToYear: currentYear + 2,
   };
 };
 
@@ -1152,22 +1159,59 @@ const normalizeGoogleCalendarSyncIntervalMinutes = (value?: number) =>
   value <= 24 * 60
     ? value
     : defaultGoogleCalendarSyncIntervalMinutes;
+const normalizeGoogleCalendarSyncYear = (value?: number) =>
+  typeof value === "number" &&
+  Number.isInteger(value) &&
+  value >= minGoogleCalendarSyncYear &&
+  value <= maxGoogleCalendarSyncYear
+    ? value
+    : null;
 const resolveGoogleCalendarSyncSettings = (
-  settings?: StoredGoogleCalendarSyncSettingsData | null,
+  settings: StoredGoogleCalendarSyncSettingsData | null | undefined,
+  time: string,
 ): {
   syncBehavior: "always" | "interval";
   syncIntervalMinutes: number;
   cacheLastSyncAt: string | null;
-} => ({
-  syncBehavior: settings?.syncBehavior === "interval" ? "interval" : "always",
-  syncIntervalMinutes: normalizeGoogleCalendarSyncIntervalMinutes(
-    settings?.syncIntervalMinutes,
-  ),
-  cacheLastSyncAt:
-    typeof settings?.cacheLastSyncAt === "string" && !Number.isNaN(Date.parse(settings.cacheLastSyncAt))
-      ? settings.cacheLastSyncAt
-      : null,
-});
+  syncFromYear: number;
+  syncToYear: number;
+} => {
+  const defaultYears = getDefaultGoogleCalendarSyncYearRange(time);
+  const syncFromYear = normalizeGoogleCalendarSyncYear(settings?.syncFromYear);
+  const syncToYear = normalizeGoogleCalendarSyncYear(settings?.syncToYear);
+  const hasValidCustomRange =
+    syncFromYear !== null && syncToYear !== null && syncFromYear <= syncToYear;
+
+  return {
+    syncBehavior: settings?.syncBehavior === "interval" ? "interval" : "always",
+    syncIntervalMinutes: normalizeGoogleCalendarSyncIntervalMinutes(
+      settings?.syncIntervalMinutes,
+    ),
+    cacheLastSyncAt:
+      typeof settings?.cacheLastSyncAt === "string" &&
+      !Number.isNaN(Date.parse(settings.cacheLastSyncAt))
+        ? settings.cacheLastSyncAt
+        : null,
+    syncFromYear: hasValidCustomRange ? syncFromYear : defaultYears.syncFromYear,
+    syncToYear: hasValidCustomRange ? syncToYear : defaultYears.syncToYear,
+  };
+};
+
+const getGoogleCalendarSyncWindow = (
+  time: string,
+  settings?: StoredGoogleCalendarSyncSettingsData | null,
+) => {
+  const resolvedSettings = resolveGoogleCalendarSyncSettings(settings, time);
+
+  return {
+    timeMin: new Date(
+      Date.UTC(resolvedSettings.syncFromYear, 0, 1, 0, 0, 0, 0),
+    ).toISOString(),
+    timeMax: new Date(
+      Date.UTC(resolvedSettings.syncToYear + 1, 0, 1, 0, 0, 0, 0),
+    ).toISOString(),
+  };
+};
 
 const getRequiredGoogleConfig = () => {
   const clientId = getGoogleClientId();
@@ -1637,6 +1681,7 @@ const loadGoogleCalendarEventsForCalendar = async ({
   viewMode?: "day" | "week" | "month";
 }): Promise<GoogleCalendarLoadedEventsResult> => {
   let existingConnection: StoredGoogleCalendarConnectionData | null | undefined;
+  let syncSettings: StoredGoogleCalendarSyncSettingsData | null | undefined;
 
   const loadExistingConnection = async () => {
     if (existingConnection !== undefined) {
@@ -1661,6 +1706,16 @@ const loadGoogleCalendarEventsForCalendar = async ({
       });
     }
     return connection;
+  };
+
+  const loadSyncSettings = async () => {
+    if (syncSettings !== undefined) {
+      return syncSettings;
+    }
+
+    syncSettings = await getStoredGoogleCalendarSyncSettings(tableName, userKey);
+
+    return syncSettings;
   };
 
   if (useSyncCache) {
@@ -1692,12 +1747,14 @@ const loadGoogleCalendarEventsForCalendar = async ({
         connection,
       });
       const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+      const currentSyncSettings = await loadSyncSettings();
       const syncResult = await syncGoogleCalendarEventCache({
         tableName,
         time,
         userKey,
         calendarId,
         accessToken,
+        syncSettings: currentSyncSettings,
       });
       const returnedItems = filterGoogleCalendarEventsForRange({
         items: syncResult.events,
@@ -1734,6 +1791,7 @@ const loadGoogleCalendarEventsForCalendar = async ({
         connection,
       });
       const accessToken = decryptSecret(currentConnection.accessTokenEncrypted);
+      const currentSyncSettings = await loadSyncSettings();
       const directFallbackItems = await listGoogleCalendarEvents({
         accessToken,
         calendarId,
@@ -1750,6 +1808,7 @@ const loadGoogleCalendarEventsForCalendar = async ({
           timeMin,
           timeMax,
           events: directFallbackItems,
+          syncSettings: currentSyncSettings,
         });
       } catch (cacheStoreError) {
         const typedCacheStoreError = cacheStoreError as Error;
@@ -2247,6 +2306,7 @@ const storeDirectGoogleCalendarEventsInCache = async ({
   timeMin,
   timeMax,
   events,
+  syncSettings,
 }: {
   tableName: string;
   time: string;
@@ -2255,8 +2315,9 @@ const storeDirectGoogleCalendarEventsInCache = async ({
   timeMin: string;
   timeMax: string;
   events: StoredGoogleCalendarSyncedEventData[];
+  syncSettings?: StoredGoogleCalendarSyncSettingsData | null;
 }) => {
-  const syncWindow = getGoogleCalendarSyncWindow(time);
+  const syncWindow = getGoogleCalendarSyncWindow(time, syncSettings);
   const cachedState = await loadAllGoogleCalendarCachedEvents(tableName, userKey, calendarId);
   const preservedCachedItems = cachedState.items.filter(
     (item) => !doesGoogleCalendarEventOverlapRange(item, { timeMin, timeMax }),
@@ -2281,14 +2342,16 @@ const syncGoogleCalendarEventCache = async ({
   userKey,
   calendarId,
   accessToken,
+  syncSettings,
 }: {
   tableName: string;
   time: string;
   userKey: string;
   calendarId: string;
   accessToken: string;
+  syncSettings?: StoredGoogleCalendarSyncSettingsData | null;
 }): Promise<GoogleCalendarSyncedCacheResult> => {
-  const syncWindow = getGoogleCalendarSyncWindow(time);
+  const syncWindow = getGoogleCalendarSyncWindow(time, syncSettings);
   let syncState = await getGoogleCalendarSyncState(tableName, userKey, calendarId);
 
   if (
@@ -3069,6 +3132,81 @@ const saveStoredGoogleCalendarSyncSettings = async (
   );
 };
 
+const deleteStoredGoogleCalendarConnection = async (tableName: string, userKey: string) => {
+  await dynamoClient.send(
+    new DeleteCommand({
+      TableName: tableName,
+      Key: {
+        pk: googleConnectionPk,
+        sk: getGoogleConnectionSortKey(userKey),
+      },
+    }),
+  );
+};
+
+const deleteStoredGoogleCalendarSyncSettings = async (tableName: string, userKey: string) => {
+  await dynamoClient.send(
+    new DeleteCommand({
+      TableName: tableName,
+      Key: {
+        pk: googleCalendarSyncSettingsPk,
+        sk: getGoogleCalendarSyncSettingsSortKey(userKey),
+      },
+    }),
+  );
+};
+
+const deleteStoredGoogleOauthState = async (tableName: string, state: string) => {
+  await dynamoClient.send(
+    new DeleteCommand({
+      TableName: tableName,
+      Key: {
+        pk: googleOauthStatePk,
+        sk: getGoogleOauthStateSortKey(state),
+      },
+    }),
+  );
+};
+
+const deleteStoredGoogleCalendarCachedRows = async (tableName: string, userKey: string) => {
+  const response = await dynamoClient.send(
+    new ScanCommand({
+      TableName: tableName,
+      ProjectionExpression: "pk, sk",
+      FilterExpression: "begins_with(pk, :pkPrefix)",
+      ExpressionAttributeValues: {
+        ":pkPrefix": `${googleEventSyncPkPrefix}#${userKey}#`,
+      },
+    }),
+  );
+
+  await Promise.all(
+    (((response.Items ?? []) as Array<Pick<TableRow, "pk" | "sk">>) ?? []).map((item) =>
+      dynamoClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            pk: item.pk,
+            sk: item.sk,
+          },
+        }),
+      ),
+    ),
+  );
+};
+
+const clearStoredGoogleCalendarCacheState = async (tableName: string, userKey: string, time: string) => {
+  await deleteStoredGoogleCalendarCachedRows(tableName, userKey);
+  await upsertStoredGoogleCalendarSyncSettings({
+    tableName,
+    userKey,
+    time,
+    patch: {
+      cacheLastSyncAt: null,
+    },
+  });
+};
+
 const upsertStoredGoogleCalendarSyncSettings = async ({
   tableName,
   userKey,
@@ -3082,10 +3220,13 @@ const upsertStoredGoogleCalendarSyncSettings = async ({
     syncBehavior: "always" | "interval";
     syncIntervalMinutes: number;
     cacheLastSyncAt: string | null;
+    syncFromYear: number;
+    syncToYear: number;
   }>;
 }) => {
   const existingSettings = resolveGoogleCalendarSyncSettings(
     await getStoredGoogleCalendarSyncSettings(tableName, userKey),
+    time,
   );
   const nextSettings: StoredGoogleCalendarSyncSettingsData = {
     syncBehavior:
@@ -3100,6 +3241,12 @@ const upsertStoredGoogleCalendarSyncSettings = async ({
       patch.cacheLastSyncAt !== undefined
         ? patch.cacheLastSyncAt
         : existingSettings.cacheLastSyncAt,
+    syncFromYear:
+      typeof patch.syncFromYear === "number"
+        ? patch.syncFromYear
+        : existingSettings.syncFromYear,
+    syncToYear:
+      typeof patch.syncToYear === "number" ? patch.syncToYear : existingSettings.syncToYear,
     updatedAt: time,
   };
 
@@ -3520,6 +3667,14 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       const syncIntervalMinutes = normalizeGoogleCalendarSyncIntervalMinutes(
         typeof payload.syncIntervalMinutes === "number" ? payload.syncIntervalMinutes : undefined,
       );
+      const syncFromYear =
+        payload.syncFromYear === undefined
+          ? null
+          : normalizeGoogleCalendarSyncYear(payload.syncFromYear);
+      const syncToYear =
+        payload.syncToYear === undefined
+          ? null
+          : normalizeGoogleCalendarSyncYear(payload.syncToYear);
 
       if (!syncBehavior) {
         return {
@@ -3532,6 +3687,46 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         };
       }
 
+      if (payload.syncFromYear !== undefined && syncFromYear === null) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: `syncFromYear must be a whole year between ${minGoogleCalendarSyncYear} and ${maxGoogleCalendarSyncYear}.`,
+            time,
+          }),
+        };
+      }
+
+      if (payload.syncToYear !== undefined && syncToYear === null) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: `syncToYear must be a whole year between ${minGoogleCalendarSyncYear} and ${maxGoogleCalendarSyncYear}.`,
+            time,
+          }),
+        };
+      }
+
+      const existingSettings = resolveGoogleCalendarSyncSettings(
+        await getStoredGoogleCalendarSyncSettings(tableName, requestUserKey),
+        time,
+      );
+      const nextSyncFromYear = syncFromYear ?? existingSettings.syncFromYear;
+      const nextSyncToYear = syncToYear ?? existingSettings.syncToYear;
+
+      if (nextSyncFromYear > nextSyncToYear) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "syncFromYear must be earlier than or equal to syncToYear.",
+            time,
+          }),
+        };
+      }
+
       const nextSettings = await upsertStoredGoogleCalendarSyncSettings({
         tableName,
         userKey: requestUserKey,
@@ -3539,9 +3734,11 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         patch: {
           syncBehavior,
           syncIntervalMinutes,
+          syncFromYear: nextSyncFromYear,
+          syncToYear: nextSyncToYear,
         },
       });
-      const resolvedSettings = resolveGoogleCalendarSyncSettings(nextSettings);
+      const resolvedSettings = resolveGoogleCalendarSyncSettings(nextSettings, time);
 
       return {
         statusCode: 200,
@@ -3552,6 +3749,59 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           syncBehavior: resolvedSettings.syncBehavior,
           syncIntervalMinutes: resolvedSettings.syncIntervalMinutes,
           cacheLastSyncAt: resolvedSettings.cacheLastSyncAt,
+          syncFromYear: resolvedSettings.syncFromYear,
+          syncToYear: resolvedSettings.syncToYear,
+        }),
+      };
+    }
+
+    if (requestPath.endsWith("/calendar/google/connection/delete")) {
+      if (!requestUserKey) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A signed-in user identifier is required to delete Google Calendar status.",
+            time,
+          }),
+        };
+      }
+
+      await deleteStoredGoogleCalendarConnection(tableName, requestUserKey);
+      await deleteStoredGoogleCalendarSyncSettings(tableName, requestUserKey);
+      await deleteStoredGoogleCalendarCachedRows(tableName, requestUserKey);
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Google Calendar connection deleted.",
+          time,
+        }),
+      };
+    }
+
+    if (requestPath.endsWith("/calendar/google/cache/reset")) {
+      if (!requestUserKey) {
+        return {
+          statusCode: 400,
+          headers: responseHeaders,
+          body: JSON.stringify({
+            message: "A signed-in user identifier is required to clear Google Calendar cache.",
+            time,
+          }),
+        };
+      }
+
+      await clearStoredGoogleCalendarCacheState(tableName, requestUserKey, time);
+
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          message: "Google Calendar cache cleared.",
+          time,
+          cacheLastSyncAt: null,
         }),
       };
     }
@@ -3852,6 +4102,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         });
         let syncSettings = resolveGoogleCalendarSyncSettings(
           await getStoredGoogleCalendarSyncSettings(tableName, requestUserKey),
+          time,
         );
 
         if (useSyncCache && !cacheOnly && items.syncMode !== "cached") {
@@ -3864,6 +4115,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
                 cacheLastSyncAt: time,
               },
             }),
+            time,
           );
         }
 
@@ -3881,6 +4133,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             syncMode: items.syncMode,
             syncModes: items.syncModes,
             cacheLastSyncAt: syncSettings.cacheLastSyncAt,
+            syncFromYear: syncSettings.syncFromYear,
+            syncToYear: syncSettings.syncToYear,
           }),
         };
       } catch (error) {
@@ -5589,15 +5843,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const expired = Date.parse(stateData.expiresAt) < Date.now();
 
     if (expired) {
-      await dynamoClient.send(
-        new DeleteCommand({
-          TableName: tableName,
-          Key: {
-            pk: googleOauthStatePk,
-            sk: getGoogleOauthStateSortKey(state),
-          },
-        }),
-      );
+      await deleteStoredGoogleOauthState(tableName, state);
 
       return redirectResponse(
         buildCalendarReturnUrl({
@@ -5609,15 +5855,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }
 
     if (errorDescription) {
-      await dynamoClient.send(
-        new DeleteCommand({
-          TableName: tableName,
-          Key: {
-            pk: googleOauthStatePk,
-            sk: getGoogleOauthStateSortKey(state),
-          },
-        }),
-      );
+      await deleteStoredGoogleOauthState(tableName, state);
 
       return redirectResponse(
         buildCalendarReturnUrl({
@@ -5629,6 +5867,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }
 
     if (!authorizationCode) {
+      await deleteStoredGoogleOauthState(tableName, state);
+
       return redirectResponse(
         buildCalendarReturnUrl({
           returnTo: stateData.returnTo,
@@ -5684,15 +5924,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         lastError: null,
       });
 
-      await dynamoClient.send(
-        new DeleteCommand({
-          TableName: tableName,
-          Key: {
-            pk: googleOauthStatePk,
-            sk: getGoogleOauthStateSortKey(state),
-          },
-        }),
-      );
+      await deleteStoredGoogleOauthState(tableName, state);
 
       return redirectResponse(
         buildCalendarReturnUrl({
@@ -5702,6 +5934,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         }),
       );
     } catch (error) {
+      await deleteStoredGoogleOauthState(tableName, state);
+
       return redirectResponse(
         buildCalendarReturnUrl({
           returnTo: stateData.returnTo,
@@ -5727,6 +5961,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
       const syncSettings = resolveGoogleCalendarSyncSettings(
         await getStoredGoogleCalendarSyncSettings(tableName, requestUserKey),
+        time,
       );
       const existingConnection = await getStoredGoogleConnection(tableName, requestUserKey);
 
@@ -5748,6 +5983,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           syncBehavior: syncSettings.syncBehavior,
           syncIntervalMinutes: syncSettings.syncIntervalMinutes,
           cacheLastSyncAt: syncSettings.cacheLastSyncAt,
+          syncFromYear: syncSettings.syncFromYear,
+          syncToYear: syncSettings.syncToYear,
         }),
       };
     }
@@ -5788,6 +6025,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         syncBehavior: syncSettings.syncBehavior,
         syncIntervalMinutes: syncSettings.syncIntervalMinutes,
         cacheLastSyncAt: syncSettings.cacheLastSyncAt,
+        syncFromYear: syncSettings.syncFromYear,
+        syncToYear: syncSettings.syncToYear,
       }),
     };
   }

@@ -431,6 +431,8 @@ type GoogleCalendarConnectionResponse = {
   syncBehavior: "always" | "interval";
   syncIntervalMinutes: number;
   cacheLastSyncAt: string | null;
+  syncFromYear: number;
+  syncToYear: number;
 };
 
 type GoogleCalendarSyncSettingsResponse = {
@@ -439,12 +441,25 @@ type GoogleCalendarSyncSettingsResponse = {
   syncBehavior: "always" | "interval";
   syncIntervalMinutes: number;
   cacheLastSyncAt: string | null;
+  syncFromYear: number;
+  syncToYear: number;
 };
 
 type GoogleCalendarConnectStartResponse = {
   message: string;
   time: string;
   authorizationUrl: string;
+};
+
+type GoogleCalendarDeleteResponse = {
+  message: string;
+  time: string;
+};
+
+type GoogleCalendarCacheResetResponse = {
+  message: string;
+  time: string;
+  cacheLastSyncAt: string | null;
 };
 
 type GoogleCalendarCallbackState = {
@@ -719,6 +734,8 @@ const parseMemberData = (value: string): StoredMemberData | null => {
 const memberDetailsViewCookieName = "shepherd_hub_member_details_view";
 const googleCalendarCacheLastSyncCookieName = "shepherd_hub_google_calendar_cache_last_sync_at";
 const defaultGoogleCalendarSyncIntervalMinutes = 5;
+const minGoogleCalendarSyncYear = 1900;
+const maxGoogleCalendarSyncYear = 9999;
 const memberContextMenuWidth = 240;
 const memberContextMenuHeight = 248;
 const memberLongPressDelayMs = 550;
@@ -893,6 +910,48 @@ const resolveGoogleCalendarSyncIntervalMinutes = (value?: number | null) =>
   value <= 24 * 60
     ? value
     : defaultGoogleCalendarSyncIntervalMinutes;
+
+const getDefaultGoogleCalendarSyncYearRange = (referenceDate = new Date()) => {
+  const currentYear = referenceDate.getUTCFullYear();
+
+  return {
+    syncFromYear: currentYear - 1,
+    syncToYear: currentYear + 2,
+  };
+};
+
+const resolveGoogleCalendarSyncYear = (value?: number | null) =>
+  typeof value === "number" &&
+  Number.isInteger(value) &&
+  value >= minGoogleCalendarSyncYear &&
+  value <= maxGoogleCalendarSyncYear
+    ? value
+    : null;
+
+const resolveGoogleCalendarSyncYearRange = ({
+  syncFromYear,
+  syncToYear,
+}: {
+  syncFromYear?: number | null;
+  syncToYear?: number | null;
+}) => {
+  const defaultYears = getDefaultGoogleCalendarSyncYearRange();
+  const normalizedFromYear = resolveGoogleCalendarSyncYear(syncFromYear);
+  const normalizedToYear = resolveGoogleCalendarSyncYear(syncToYear);
+
+  if (
+    normalizedFromYear !== null &&
+    normalizedToYear !== null &&
+    normalizedFromYear <= normalizedToYear
+  ) {
+    return {
+      syncFromYear: normalizedFromYear,
+      syncToYear: normalizedToYear,
+    };
+  }
+
+  return defaultYears;
+};
 
 const formatTimeInputValue = (value: string) => {
   const parsedDate = new Date(value);
@@ -1663,13 +1722,23 @@ export default function App() {
   >(initialGoogleCalendarCallbackState?.status ?? "neutral");
   const [isGoogleCalendarLoading, setIsGoogleCalendarLoading] = useState(false);
   const [isGoogleCalendarConnecting, setIsGoogleCalendarConnecting] = useState(false);
+  const [isGoogleCalendarDeleting, setIsGoogleCalendarDeleting] = useState(false);
+  const [isGoogleCalendarCacheResetting, setIsGoogleCalendarCacheResetting] =
+    useState(false);
   const [isGoogleCalendarSyncSettingsSaving, setIsGoogleCalendarSyncSettingsSaving] =
     useState(false);
   const [googleCalendarSyncBehavior, setGoogleCalendarSyncBehavior] = useState<
     "always" | "interval"
   >("always");
+  const defaultGoogleCalendarSyncYears = getDefaultGoogleCalendarSyncYearRange();
   const [googleCalendarSyncIntervalMinutesInput, setGoogleCalendarSyncIntervalMinutesInput] =
     useState(String(defaultGoogleCalendarSyncIntervalMinutes));
+  const [googleCalendarSyncFromYearInput, setGoogleCalendarSyncFromYearInput] = useState(
+    String(defaultGoogleCalendarSyncYears.syncFromYear),
+  );
+  const [googleCalendarSyncToYearInput, setGoogleCalendarSyncToYearInput] = useState(
+    String(defaultGoogleCalendarSyncYears.syncToYear),
+  );
   const [calendarScheduleLookupDate, setCalendarScheduleLookupDate] = useState(() =>
     formatDateInputValue(new Date()),
   );
@@ -1743,10 +1812,38 @@ export default function App() {
   const currentGoogleCalendarSyncIntervalMinutes = resolveGoogleCalendarSyncIntervalMinutes(
     Number.parseInt(googleCalendarSyncIntervalMinutesInput, 10),
   );
+  const persistedGoogleCalendarSyncYearRange = resolveGoogleCalendarSyncYearRange({
+    syncFromYear: googleCalendarConnection?.syncFromYear,
+    syncToYear: googleCalendarConnection?.syncToYear,
+  });
+  const currentGoogleCalendarSyncYearRange = resolveGoogleCalendarSyncYearRange({
+    syncFromYear: Number.parseInt(googleCalendarSyncFromYearInput, 10),
+    syncToYear: Number.parseInt(googleCalendarSyncToYearInput, 10),
+  });
+  const calendarSyncYearOptionStart =
+    Math.min(
+      defaultGoogleCalendarSyncYears.syncFromYear,
+      persistedGoogleCalendarSyncYearRange.syncFromYear,
+      currentGoogleCalendarSyncYearRange.syncFromYear,
+    ) - 5;
+  const calendarSyncYearOptionEnd =
+    Math.max(
+      defaultGoogleCalendarSyncYears.syncToYear,
+      persistedGoogleCalendarSyncYearRange.syncToYear,
+      currentGoogleCalendarSyncYearRange.syncToYear,
+    ) + 5;
+  const googleCalendarSyncYearOptions = Array.from(
+    { length: calendarSyncYearOptionEnd - calendarSyncYearOptionStart + 1 },
+    (_, index) => calendarSyncYearOptionStart + index,
+  );
   const hasGoogleCalendarSyncSettingsChanges =
     currentGoogleCalendarSyncBehavior !== persistedGoogleCalendarSyncBehavior ||
     (currentGoogleCalendarSyncBehavior === "interval" &&
-      currentGoogleCalendarSyncIntervalMinutes !== persistedGoogleCalendarSyncIntervalMinutes);
+      currentGoogleCalendarSyncIntervalMinutes !== persistedGoogleCalendarSyncIntervalMinutes) ||
+    currentGoogleCalendarSyncYearRange.syncFromYear !==
+      persistedGoogleCalendarSyncYearRange.syncFromYear ||
+    currentGoogleCalendarSyncYearRange.syncToYear !==
+      persistedGoogleCalendarSyncYearRange.syncToYear;
   const [preferredMemberDetailsPage, setPreferredMemberDetailsPage] = useState<
     "member-details" | "member-details-beta"
   >("member-details-beta");
@@ -2409,6 +2506,12 @@ export default function App() {
       setGoogleCalendarSyncIntervalMinutesInput(
         String(resolveGoogleCalendarSyncIntervalMinutes(response.syncIntervalMinutes)),
       );
+      const resolvedSyncYearRange = resolveGoogleCalendarSyncYearRange({
+        syncFromYear: response.syncFromYear,
+        syncToYear: response.syncToYear,
+      });
+      setGoogleCalendarSyncFromYearInput(String(resolvedSyncYearRange.syncFromYear));
+      setGoogleCalendarSyncToYearInput(String(resolvedSyncYearRange.syncToYear));
       if (response.cacheLastSyncAt) {
         setCookieValue(
           googleCalendarCacheLastSyncCookieName,
@@ -2447,9 +2550,15 @@ export default function App() {
       const syncIntervalMinutes = resolveGoogleCalendarSyncIntervalMinutes(
         Number.parseInt(googleCalendarSyncIntervalMinutesInput, 10),
       );
+      const syncYearRange = resolveGoogleCalendarSyncYearRange({
+        syncFromYear: Number.parseInt(googleCalendarSyncFromYearInput, 10),
+        syncToYear: Number.parseInt(googleCalendarSyncToYearInput, 10),
+      });
       const response = await authorizedPost("/calendar/google/connection/sync-settings", {
         syncBehavior: resolveGoogleCalendarSyncBehavior(googleCalendarSyncBehavior),
         syncIntervalMinutes,
+        syncFromYear: syncYearRange.syncFromYear,
+        syncToYear: syncYearRange.syncToYear,
       });
       const payload = (await response.body.json()) as GoogleCalendarSyncSettingsResponse;
 
@@ -2457,6 +2566,12 @@ export default function App() {
       setGoogleCalendarSyncIntervalMinutesInput(
         String(resolveGoogleCalendarSyncIntervalMinutes(payload.syncIntervalMinutes)),
       );
+      const resolvedSyncYearRange = resolveGoogleCalendarSyncYearRange({
+        syncFromYear: payload.syncFromYear,
+        syncToYear: payload.syncToYear,
+      });
+      setGoogleCalendarSyncFromYearInput(String(resolvedSyncYearRange.syncFromYear));
+      setGoogleCalendarSyncToYearInput(String(resolvedSyncYearRange.syncToYear));
       updateGoogleCalendarCacheLastSyncAt(payload.cacheLastSyncAt);
       setGoogleCalendarConnection((current) =>
         current
@@ -2470,6 +2585,8 @@ export default function App() {
                 payload.cacheLastSyncAt && !Number.isNaN(Date.parse(payload.cacheLastSyncAt))
                   ? payload.cacheLastSyncAt
                   : null,
+              syncFromYear: resolvedSyncYearRange.syncFromYear,
+              syncToYear: resolvedSyncYearRange.syncToYear,
             }
           : current,
       );
@@ -2513,6 +2630,65 @@ export default function App() {
       );
       setGoogleCalendarStatusTone("error");
       setIsGoogleCalendarConnecting(false);
+    }
+  };
+
+  const handleGoogleCalendarDelete = async () => {
+    if (!congregationApiName) {
+      setGoogleCalendarStatus("Backend API is not configured yet.");
+      setGoogleCalendarStatusTone("error");
+      return;
+    }
+
+    setIsGoogleCalendarDeleting(true);
+    setGoogleCalendarStatus(null);
+
+    try {
+      const response = await authorizedPost("/calendar/google/connection/delete", {});
+      const payload = (await response.body.json()) as GoogleCalendarDeleteResponse;
+
+      setCookieValue(googleCalendarCacheLastSyncCookieName, "", 0);
+      setGoogleCalendars([]);
+      setCalendarDashboardSummary(null);
+      await loadGoogleCalendarConnection();
+      setGoogleCalendarStatus(payload.message);
+      setGoogleCalendarStatusTone("success");
+    } catch (error) {
+      setGoogleCalendarStatus(
+        await getErrorMessage(error, "Unable to delete Google Calendar connection."),
+      );
+      setGoogleCalendarStatusTone("error");
+    } finally {
+      setIsGoogleCalendarDeleting(false);
+    }
+  };
+
+  const handleGoogleCalendarCacheReset = async () => {
+    if (!congregationApiName) {
+      setGoogleCalendarStatus("Backend API is not configured yet.");
+      setGoogleCalendarStatusTone("error");
+      return;
+    }
+
+    setIsGoogleCalendarCacheResetting(true);
+    setGoogleCalendarStatus(null);
+
+    try {
+      const response = await authorizedPost("/calendar/google/cache/reset", {});
+      const payload = (await response.body.json()) as GoogleCalendarCacheResetResponse;
+
+      setCookieValue(googleCalendarCacheLastSyncCookieName, "", 0);
+      updateGoogleCalendarCacheLastSyncAt(payload.cacheLastSyncAt);
+      setCalendarDashboardSummary(null);
+      setGoogleCalendarStatus(payload.message);
+      setGoogleCalendarStatusTone("success");
+    } catch (error) {
+      setGoogleCalendarStatus(
+        await getErrorMessage(error, "Unable to clear Google Calendar cache."),
+      );
+      setGoogleCalendarStatusTone("error");
+    } finally {
+      setIsGoogleCalendarCacheResetting(false);
     }
   };
 
@@ -7543,7 +7719,7 @@ export default function App() {
             <div className="calendar-connect-layout">
               <section className="placeholder-page-card calendar-connect-card">
                 <div className="calendar-connect-header">
-                  <div>
+                  <div className="calendar-connect-header-copy">
                     <p className="placeholder-page-kicker">{currentPage.eyebrow}</p>
                     <h3 className="calendar-connect-title">Connection</h3>
                     <p className="placeholder-page-copy calendar-connect-copy">
@@ -7552,18 +7728,58 @@ export default function App() {
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    className="member-submit-button"
-                    onClick={handleGoogleCalendarConnect}
-                    disabled={isGoogleCalendarConnecting}
-                  >
-                    {isGoogleCalendarConnecting
-                      ? "Redirecting..."
-                      : googleCalendarConnection?.connected
-                        ? "Reconnect Google Calendar"
-                        : "Connect Google Calendar"}
-                  </button>
+                  <div className="calendar-connect-actions">
+                    {googleCalendarConnection?.connected ? (
+                      <button
+                        type="button"
+                        className="member-cancel-button calendar-connect-reset-cache-button"
+                        onClick={() => {
+                          void handleGoogleCalendarCacheReset();
+                        }}
+                        disabled={
+                          isGoogleCalendarCacheResetting ||
+                          isGoogleCalendarDeleting ||
+                          isGoogleCalendarConnecting
+                        }
+                      >
+                        {isGoogleCalendarCacheResetting
+                          ? "Clearing Cache..."
+                          : "Clear Cached Events"}
+                      </button>
+                    ) : null}
+                    {googleCalendarConnection?.connected ? (
+                      <button
+                        type="button"
+                        className="member-cancel-button calendar-connect-delete-button"
+                        onClick={() => {
+                          void handleGoogleCalendarDelete();
+                        }}
+                        disabled={
+                          isGoogleCalendarDeleting ||
+                          isGoogleCalendarConnecting ||
+                          isGoogleCalendarCacheResetting
+                        }
+                      >
+                        {isGoogleCalendarDeleting ? "Deleting..." : "Delete Connection"}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="member-submit-button"
+                      onClick={handleGoogleCalendarConnect}
+                      disabled={
+                        isGoogleCalendarConnecting ||
+                        isGoogleCalendarDeleting ||
+                        isGoogleCalendarCacheResetting
+                      }
+                    >
+                      {isGoogleCalendarConnecting
+                        ? "Redirecting..."
+                        : googleCalendarConnection?.connected
+                          ? "Reconnect Google Calendar"
+                          : "Connect Google Calendar"}
+                    </button>
+                  </div>
                 </div>
 
                 {googleCalendarStatus ? (
@@ -7690,6 +7906,78 @@ export default function App() {
                       </div>
                     </label>
                   ) : null}
+
+                  <div className="calendar-sync-year-range">
+                    <div className="calendar-sync-year-range-copy">
+                      <span className="calendar-sync-toggle-title">Initial full sync range</span>
+                      <span className="calendar-sync-toggle-subtitle">
+                        Choose the inclusive year range used when Google Calendar builds or
+                        rebuilds the cached sync window.
+                      </span>
+                    </div>
+
+                    <div className="calendar-sync-year-range-fields">
+                      <label className="member-field calendar-sync-year-field">
+                        <span>From year</span>
+                        <select
+                          value={googleCalendarSyncFromYearInput}
+                          onChange={(event) => {
+                            const nextFromYear = Number.parseInt(event.target.value, 10);
+                            const currentToYear = Number.parseInt(
+                              googleCalendarSyncToYearInput,
+                              10,
+                            );
+
+                            setGoogleCalendarSyncFromYearInput(event.target.value);
+
+                            if (
+                              Number.isFinite(nextFromYear) &&
+                              Number.isFinite(currentToYear) &&
+                              nextFromYear > currentToYear
+                            ) {
+                              setGoogleCalendarSyncToYearInput(event.target.value);
+                            }
+                          }}
+                        >
+                          {googleCalendarSyncYearOptions.map((year) => (
+                            <option key={`sync-from-${year}`} value={year}>
+                              {year}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="member-field calendar-sync-year-field">
+                        <span>To year</span>
+                        <select
+                          value={googleCalendarSyncToYearInput}
+                          onChange={(event) => {
+                            const nextToYear = Number.parseInt(event.target.value, 10);
+                            const currentFromYear = Number.parseInt(
+                              googleCalendarSyncFromYearInput,
+                              10,
+                            );
+
+                            setGoogleCalendarSyncToYearInput(event.target.value);
+
+                            if (
+                              Number.isFinite(nextToYear) &&
+                              Number.isFinite(currentFromYear) &&
+                              nextToYear < currentFromYear
+                            ) {
+                              setGoogleCalendarSyncFromYearInput(event.target.value);
+                            }
+                          }}
+                        >
+                          {googleCalendarSyncYearOptions.map((year) => (
+                            <option key={`sync-to-${year}`} value={year}>
+                              {year}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
 
                   <div className="calendar-sync-settings-actions">
                     <button
