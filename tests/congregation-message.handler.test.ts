@@ -123,6 +123,192 @@ const createMockClient = (
   };
 };
 
+const crc32Table = (() => {
+  const table = new Uint32Array(256);
+
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) === 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+
+    table[index] = value >>> 0;
+  }
+
+  return table;
+})();
+
+const getCrc32 = (buffer: Buffer) => {
+  let crc = 0xffffffff;
+
+  for (const byte of buffer) {
+    crc = crc32Table[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
+};
+
+const createStoredZip = (entries: Array<{ name: string; content: string }>) => {
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let localOffset = 0;
+
+  for (const entry of entries) {
+    const fileNameBuffer = Buffer.from(entry.name, "utf8");
+    const contentBuffer = Buffer.from(entry.content, "utf8");
+    const crc32 = getCrc32(contentBuffer);
+    const localHeader = Buffer.alloc(30);
+
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(0, 10);
+    localHeader.writeUInt16LE(0, 12);
+    localHeader.writeUInt32LE(crc32, 14);
+    localHeader.writeUInt32LE(contentBuffer.length, 18);
+    localHeader.writeUInt32LE(contentBuffer.length, 22);
+    localHeader.writeUInt16LE(fileNameBuffer.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+
+    localParts.push(localHeader, fileNameBuffer, contentBuffer);
+
+    const centralHeader = Buffer.alloc(46);
+
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(0, 12);
+    centralHeader.writeUInt16LE(0, 14);
+    centralHeader.writeUInt32LE(crc32, 16);
+    centralHeader.writeUInt32LE(contentBuffer.length, 20);
+    centralHeader.writeUInt32LE(contentBuffer.length, 24);
+    centralHeader.writeUInt16LE(fileNameBuffer.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(localOffset, 42);
+
+    centralParts.push(centralHeader, fileNameBuffer);
+    localOffset += localHeader.length + fileNameBuffer.length + contentBuffer.length;
+  }
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const endOfCentralDirectory = Buffer.alloc(22);
+
+  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0);
+  endOfCentralDirectory.writeUInt16LE(0, 4);
+  endOfCentralDirectory.writeUInt16LE(0, 6);
+  endOfCentralDirectory.writeUInt16LE(entries.length, 8);
+  endOfCentralDirectory.writeUInt16LE(entries.length, 10);
+  endOfCentralDirectory.writeUInt32LE(centralDirectory.length, 12);
+  endOfCentralDirectory.writeUInt32LE(localOffset, 16);
+  endOfCentralDirectory.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localParts, centralDirectory, endOfCentralDirectory]);
+};
+
+const createInlineStringCell = (cell: string, value: string) =>
+  `<c r="${cell}" t="inlineStr"><is><t>${value}</t></is></c>`;
+
+const createNumberCell = (cell: string, value: string) => `<c r="${cell}"><v>${value}</v></c>`;
+
+const createUnityImportWorkbookBase64 = () => {
+  const worksheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="2">
+      ${createInlineStringCell("A2", "Family ID")}
+      ${createInlineStringCell("B2", "Household Name")}
+      ${createInlineStringCell("C2", "Member ID")}
+      ${createInlineStringCell("D2", "Member Name")}
+      ${createInlineStringCell("E2", "Phone Number")}
+      ${createInlineStringCell("F2", "Email")}
+      ${createInlineStringCell("G2", "Family Heads Info")}
+      ${createInlineStringCell("H2", "Date of Birth")}
+      ${createInlineStringCell("I2", "Age")}
+      ${createInlineStringCell("J2", "Gender")}
+      ${createInlineStringCell("K2", "Family Status")}
+      ${createInlineStringCell("L2", "Church")}
+      ${createInlineStringCell("M2", "Account Status")}
+      ${createInlineStringCell("N2", "Address")}
+      ${createInlineStringCell("O2", "Postal Code")}
+      ${createInlineStringCell("P2", "Groups")}
+      ${createInlineStringCell("Q2", "License Plate")}
+    </row>
+    <row r="3">
+      ${createNumberCell("A3", "100")}
+      ${createInlineStringCell("B3", "Samuel Household")}
+      ${createNumberCell("C3", "9886.0")}
+      ${createInlineStringCell("D3", "Sally Samuel")}
+      ${createInlineStringCell("E3", "(613) 600-2624")}
+      ${createInlineStringCell("F3", "sally@example.com")}
+      ${createInlineStringCell("G3", "&lt;div&gt;Head of household&lt;/div&gt;")}
+      ${createInlineStringCell("H3", "1990-01-01")}
+      ${createNumberCell("I3", "36")}
+      ${createInlineStringCell("J3", "Female")}
+      ${createInlineStringCell("K3", "Married")}
+      ${createInlineStringCell("L3", "St. Mary")}
+      ${createInlineStringCell("M3", "Active")}
+      ${createInlineStringCell("N3", "15 Main Street")}
+      ${createInlineStringCell("O3", "A1A 1A1")}
+      ${createInlineStringCell("P3", "Choir")}
+      ${createInlineStringCell("Q3", "ABC123")}
+    </row>
+    <row r="4">
+      ${createNumberCell("A4", "100")}
+      ${createInlineStringCell("B4", "Samuel Household")}
+      ${createNumberCell("C4", "9888.0")}
+      ${createInlineStringCell("D4", "Daniel Samuel")}
+      ${createInlineStringCell("E4", "(613) 600-2624")}
+      ${createInlineStringCell("F4", "daniel@example.com")}
+      ${createInlineStringCell("G4", "&lt;div&gt;Same household phone&lt;/div&gt;")}
+      ${createInlineStringCell("H4", "2010-07-09")}
+      ${createNumberCell("I4", "15")}
+      ${createInlineStringCell("J4", "Male")}
+      ${createInlineStringCell("K4", "Child")}
+      ${createInlineStringCell("L4", "St. Mary")}
+      ${createInlineStringCell("M4", "Active")}
+      ${createInlineStringCell("N4", "15 Main Street")}
+      ${createInlineStringCell("O4", "A1A 1A1")}
+      ${createInlineStringCell("P4", "Youth")}
+      ${createInlineStringCell("Q4", "")}
+    </row>
+    <row r="5">
+      ${createNumberCell("A5", "101")}
+      ${createInlineStringCell("B5", "Existing Household")}
+      ${createNumberCell("C5", "9899.0")}
+      ${createInlineStringCell("D5", "Existing Member")}
+      ${createInlineStringCell("E5", "(613) 555-1000")}
+      ${createInlineStringCell("F5", "taken@example.com")}
+      ${createInlineStringCell("G5", "&lt;div&gt;Already in the app&lt;/div&gt;")}
+      ${createInlineStringCell("H5", "1988-06-06")}
+      ${createNumberCell("I5", "38")}
+      ${createInlineStringCell("J5", "Male")}
+      ${createInlineStringCell("K5", "Married")}
+      ${createInlineStringCell("L5", "St. Mark")}
+      ${createInlineStringCell("M5", "Active")}
+      ${createInlineStringCell("N5", "20 Existing Road")}
+      ${createInlineStringCell("O5", "B2B 2B2")}
+      ${createInlineStringCell("P5", "Volunteers")}
+      ${createInlineStringCell("Q5", "XYZ789")}
+    </row>
+  </sheetData>
+</worksheet>`;
+
+  return createStoredZip([
+    {
+      name: "xl/worksheets/sheet1.xml",
+      content: worksheetXml,
+    },
+  ]).toString("base64");
+};
+
 beforeEach(() => {
   process.env.TEST_TABLE_NAME = "test_table";
   process.env.USER_POOL_ID = "user-pool-id";
@@ -3095,6 +3281,96 @@ END:VCARD`,
     "123 Example Street, Sample City, ON, A1A 1A1, Canada",
   );
   assert.equal(importedData.notes, "Imported from phone");
+});
+
+test("imports Unity Excel members using unity sk values and allows shared phones", async () => {
+  const dynamo = createMockClient((command) => {
+    if (command.constructor.name === "QueryCommand") {
+      return {
+        Items: [
+          {
+            pk: "CONGREGATION",
+            sk: "MEMBER#existing",
+            data: JSON.stringify({
+              firstName: "Existing",
+              lastName: "Member",
+              email: "taken@example.com",
+              phone: "6135551000",
+            }),
+          },
+        ],
+      };
+    }
+
+    if (command.constructor.name === "PutCommand") {
+      return {};
+    }
+
+    throw new Error(`Unexpected command ${command.constructor.name}`);
+  });
+
+  setHandlerClientsForTesting({ dynamoClient: dynamo.client });
+
+  const response = await invokeHandler(
+    createEvent({
+      path: "/contacts/import",
+      method: "POST",
+      groups: ["admin"],
+      body: {
+        fileName: "Unity export test.xlsx",
+        sourceType: "unity-excel",
+        contentBase64: createUnityImportWorkbookBase64(),
+      },
+    }),
+  );
+  const body = parseBody(response.body);
+  const putCommands = dynamo.commands.filter(
+    (command) => command.constructor.name === "PutCommand",
+  ) as Array<{ input?: { Item?: Record<string, unknown> } }>;
+  const firstImportedData = JSON.parse(
+    String(putCommands[0]?.input?.Item?.data ?? "{}"),
+  ) as Record<string, unknown>;
+  const secondImportedData = JSON.parse(
+    String(putCommands[1]?.input?.Item?.data ?? "{}"),
+  ) as Record<string, unknown>;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.processedCount, 3);
+  assert.equal(body.importedCount, 2);
+  assert.equal(body.skippedCount, 1);
+  assert.deepEqual(body.importedMembers, ["Sally Samuel", "Daniel Samuel"]);
+  assert.deepEqual(body.skippedMembers, ["Existing Member"]);
+  assert.deepEqual(
+    dynamo.commands.map((command) => command.constructor.name),
+    ["QueryCommand", "PutCommand", "PutCommand"],
+  );
+  assert.equal(putCommands[0]?.input?.Item?.pk, "CONGREGATION");
+  assert.equal(putCommands[0]?.input?.Item?.sk, "unity#9886");
+  assert.equal(firstImportedData.firstName, "Sally");
+  assert.equal(firstImportedData.lastName, "Samuel");
+  assert.equal(firstImportedData.phone, "(613) 600-2624");
+  assert.equal(firstImportedData.address, "15 Main Street, A1A 1A1");
+  assert.equal(
+    firstImportedData.notes,
+    [
+      "Household Name: Samuel Household",
+      "Family ID: 100",
+      "Family Heads Info: Head of household",
+      "Date of Birth: 1990-01-01",
+      "Age: 36",
+      "Gender: Female",
+      "Family Status: Married",
+      "Church: St. Mary",
+      "Account Status: Active",
+      "Groups: Choir",
+      "License Plate: ABC123",
+    ].join("\n"),
+  );
+  assert.equal(putCommands[1]?.input?.Item?.sk, "unity#9888");
+  assert.equal(secondImportedData.firstName, "Daniel");
+  assert.equal(secondImportedData.lastName, "Samuel");
+  assert.equal(secondImportedData.phone, "(613) 600-2624");
+  assert.match(String(secondImportedData.notes ?? ""), /Same household phone/);
 });
 
 test("updates a congregation member", async () => {

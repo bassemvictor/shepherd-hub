@@ -108,7 +108,7 @@ const pageContent: Record<
   "new-member": {
     eyebrow: "New Member",
     description:
-      "Capture the basic details for a congregation member.",
+      "Capture the details for a congregation member.",
   },
   "member-details": {
     eyebrow: "Member Details",
@@ -861,6 +861,18 @@ const formatCalendarCacheBadgeLabel = (value?: string | null) => {
   }
 
   return "Loaded from cache";
+};
+
+const arrayBufferToBase64 = (value: ArrayBuffer) => {
+  let binary = "";
+  const bytes = new Uint8Array(value);
+
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    const chunk = bytes.subarray(index, index + 0x8000);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
 };
 
 const resolveGoogleCalendarSyncBehavior = (
@@ -1855,6 +1867,8 @@ export default function App() {
     "contacts-import",
     "parking-registration",
     "parking-management",
+    "member-details",
+    "member-details-beta",
   ].includes(activePage);
   const usesFlatHeroCard = [
     "calendar-dashboard",
@@ -1873,6 +1887,8 @@ export default function App() {
     "contacts-import",
     "parking-registration",
     "parking-management",
+    "member-details",
+    "member-details-beta",
   ].includes(activePage);
   const calendarPickerOptions: GoogleCalendarListResponse["items"] =
     googleCalendars.length > 0
@@ -3396,12 +3412,17 @@ export default function App() {
     }
 
     if (!contactsImportFile) {
-      setContactsImportStatus("Choose a .vcf file to import.");
+      setContactsImportStatus("Choose a .vcf or Unity .xlsx file to import.");
       return;
     }
 
-    if (!contactsImportFile.name.toLowerCase().endsWith(".vcf")) {
-      setContactsImportStatus("Only .vcf contact files are supported.");
+    const normalizedFileName = contactsImportFile.name.toLowerCase();
+
+    if (
+      !normalizedFileName.endsWith(".vcf") &&
+      !normalizedFileName.endsWith(".xlsx")
+    ) {
+      setContactsImportStatus("Only .vcf and Unity .xlsx files are supported.");
       return;
     }
 
@@ -3410,15 +3431,48 @@ export default function App() {
     setContactsImportSummary(null);
 
     try {
-      const content = await contactsImportFile.text();
-      const response = await authorizedPost("/contacts/import", {
-        fileName: contactsImportFile.name,
-        content,
-      });
-      const payload = (await response.body.json()) as ContactsImportResponse;
+      const response = normalizedFileName.endsWith(".xlsx")
+        ? await authorizedPost("/contacts/import", {
+            fileName: contactsImportFile.name,
+            sourceType: "unity-excel",
+            contentBase64: arrayBufferToBase64(
+              await contactsImportFile.arrayBuffer(),
+            ),
+          })
+        : await authorizedPost("/contacts/import", {
+            fileName: contactsImportFile.name,
+            sourceType: "vcf",
+            content: await contactsImportFile.text(),
+          });
+      const payload = (await response.body.json()) as Partial<ContactsImportResponse> & {
+        message?: string;
+      };
 
-      setContactsImportSummary(payload);
-      setContactsImportStatus(payload.message);
+      if (
+        typeof payload.message !== "string" ||
+        typeof payload.time !== "string" ||
+        typeof payload.processedCount !== "number" ||
+        typeof payload.importedCount !== "number" ||
+        typeof payload.skippedCount !== "number" ||
+        !Array.isArray(payload.importedMembers) ||
+        !Array.isArray(payload.skippedMembers)
+      ) {
+        setContactsImportStatus(payload.message ?? "Unable to import contacts.");
+        return;
+      }
+
+      const importSummary: ContactsImportResponse = {
+        message: payload.message,
+        time: payload.time,
+        processedCount: payload.processedCount,
+        importedCount: payload.importedCount,
+        skippedCount: payload.skippedCount,
+        importedMembers: payload.importedMembers,
+        skippedMembers: payload.skippedMembers,
+      };
+
+      setContactsImportSummary(importSummary);
+      setContactsImportStatus(importSummary.message);
       setContactsImportFile(null);
       if (contactsImportInputRef.current) {
         contactsImportInputRef.current.value = "";
@@ -7045,12 +7099,12 @@ export default function App() {
 
                 <div className="member-form-grid">
                   <label className="member-field member-field-full">
-                    <span>VCF file</span>
+                    <span>VCF or Unity Excel file</span>
                     <input
                       ref={contactsImportInputRef}
                       className="contacts-import-file-input"
                       type="file"
-                      accept=".vcf,text/vcard"
+                      accept=".vcf,text/vcard,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       onChange={(event) => {
                         const nextFile = event.target.files?.[0] ?? null;
                         setContactsImportFile(nextFile);
@@ -7075,8 +7129,8 @@ export default function App() {
                       </span>
                     </div>
                     <p className="contacts-import-hint">
-                      Upload a <code>.vcf</code> file. Members with the same email,
-                      phone, or exact name are skipped.
+                      Upload a <code>.vcf</code> file or a Unity export{" "}
+                      <code>.xlsx</code> file.
                     </p>
                   </label>
                 </div>

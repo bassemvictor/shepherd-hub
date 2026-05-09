@@ -16,6 +16,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { inflateRawSync } from "node:zlib";
 
 type TableRow = {
   pk: string;
@@ -76,7 +77,9 @@ type UpdateUserGroupsPayload = {
 
 type ImportContactsPayload = {
   fileName?: string;
-  content: string;
+  content?: string;
+  contentBase64?: string;
+  sourceType?: "vcf" | "unity-excel";
 };
 
 type ParkingRegistrationPayload = {
@@ -379,6 +382,12 @@ type ParsedVcfContact = {
   notes: string;
 };
 
+type ParsedImportMember = ParsedVcfContact & {
+  dedupeByPhone: boolean;
+  importMessage: string;
+  sk?: string;
+};
+
 type GoogleTokenResponse = {
   access_token?: string;
   expires_in?: number;
@@ -653,6 +662,359 @@ const parseVcfContacts = (content: string) => {
   }
 
   return contacts;
+};
+
+const decodeXmlEntities = (value: string) =>
+  value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (match, entity) => {
+    const normalizedEntity = String(entity).toLowerCase();
+
+    if (normalizedEntity === "amp") {
+      return "&";
+    }
+
+    if (normalizedEntity === "lt") {
+      return "<";
+    }
+
+    if (normalizedEntity === "gt") {
+      return ">";
+    }
+
+    if (normalizedEntity === "quot") {
+      return '"';
+    }
+
+    if (normalizedEntity === "apos") {
+      return "'";
+    }
+
+    if (normalizedEntity === "nbsp") {
+      return " ";
+    }
+
+    if (normalizedEntity.startsWith("#x")) {
+      const parsed = Number.parseInt(normalizedEntity.slice(2), 16);
+      return Number.isNaN(parsed) ? match : String.fromCodePoint(parsed);
+    }
+
+    if (normalizedEntity.startsWith("#")) {
+      const parsed = Number.parseInt(normalizedEntity.slice(1), 10);
+      return Number.isNaN(parsed) ? match : String.fromCodePoint(parsed);
+    }
+
+    return match;
+  });
+
+const sanitizeImportedText = (value?: string) =>
+  normalizeWhitespace(
+    decodeXmlEntities(value ?? "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(div|p|li)>/gi, "\n")
+      .replace(/<[^>]*>/g, " "),
+  );
+
+const buildImportedNotes = (items: Array<[string, string]>) =>
+  items
+    .filter(([, value]) => Boolean(value))
+    .map(([label, value]) => `${label}: ${value}`)
+    .join("\n");
+
+const normalizeUnityMemberId = (value?: string) => {
+  const cleaned = normalizeWhitespace(value);
+
+  if (!cleaned) {
+    return "";
+  }
+
+  return /^\d+(?:\.0+)?$/.test(cleaned) ? cleaned.replace(/\.0+$/, "") : cleaned;
+};
+
+const mergeAddressWithPostalCode = (address: string, postalCode: string) => {
+  if (!postalCode) {
+    return address;
+  }
+
+  return address.toLowerCase().includes(postalCode.toLowerCase())
+    ? address
+    : [address, postalCode].filter(Boolean).join(", ");
+};
+
+const getWorksheetColumnIndex = (cellReference: string) => {
+  const letters = cellReference.match(/[A-Z]+/i)?.[0]?.toUpperCase() ?? "";
+  let index = 0;
+
+  for (const letter of letters) {
+    index = index * 26 + (letter.charCodeAt(0) - 64);
+  }
+
+  return Math.max(index - 1, 0);
+};
+
+const extractWorksheetCellValue = (cellContent: string, cellType?: string, sharedStrings: string[] = []) => {
+  if (cellType === "inlineStr") {
+    return decodeXmlEntities(
+      Array.from(cellContent.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi))
+        .map((match) => match[1] ?? "")
+        .join(""),
+    );
+  }
+
+  const rawValue = cellContent.match(/<v\b[^>]*>([\s\S]*?)<\/v>/i)?.[1] ?? "";
+
+  if (cellType === "s") {
+    const sharedStringIndex = Number.parseInt(rawValue, 10);
+    return Number.isNaN(sharedStringIndex) ? "" : sharedStrings[sharedStringIndex] ?? "";
+  }
+
+  if (cellType === "b") {
+    return rawValue === "1" ? "true" : "false";
+  }
+
+  if (cellType === "str") {
+    return decodeXmlEntities(rawValue);
+  }
+
+  return decodeXmlEntities(rawValue);
+};
+
+const parseWorksheetRows = (worksheetXml: string, sharedStrings: string[]) => {
+  const rows: string[][] = [];
+
+  for (const rowMatch of worksheetXml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/gi)) {
+    const rowContent = rowMatch[1] ?? "";
+    const rowValues: string[] = [];
+
+    for (const cellMatch of rowContent.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/gi)) {
+      const attributes = cellMatch[1] ?? "";
+      const cellContent = cellMatch[2] ?? "";
+      const cellReference = attributes.match(/\br="([^"]+)"/i)?.[1] ?? "";
+
+      if (!cellReference) {
+        continue;
+      }
+
+      const columnIndex = getWorksheetColumnIndex(cellReference);
+      const cellType = attributes.match(/\bt="([^"]+)"/i)?.[1];
+      rowValues[columnIndex] = extractWorksheetCellValue(
+        cellContent,
+        cellType,
+        sharedStrings,
+      );
+    }
+
+    rows.push(rowValues);
+  }
+
+  return rows;
+};
+
+const parseSharedStrings = (sharedStringsXml?: string) => {
+  if (!sharedStringsXml) {
+    return [];
+  }
+
+  const sharedStrings: string[] = [];
+
+  for (const match of sharedStringsXml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/gi)) {
+    sharedStrings.push(
+      decodeXmlEntities(
+        Array.from((match[1] ?? "").matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi))
+          .map((fragment) => fragment[1] ?? "")
+          .join(""),
+      ),
+    );
+  }
+
+  return sharedStrings;
+};
+
+const unzipWorkbookEntries = (archiveBuffer: Buffer) => {
+  const endOfCentralDirectorySignature = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
+  const endOfCentralDirectoryOffset = archiveBuffer.lastIndexOf(
+    endOfCentralDirectorySignature,
+  );
+
+  if (endOfCentralDirectoryOffset === -1) {
+    throw new Error("The Excel file could not be opened.");
+  }
+
+  const totalEntries = archiveBuffer.readUInt16LE(endOfCentralDirectoryOffset + 10);
+  const centralDirectoryOffset = archiveBuffer.readUInt32LE(
+    endOfCentralDirectoryOffset + 16,
+  );
+  const entries = new Map<string, Buffer>();
+  let currentOffset = centralDirectoryOffset;
+
+  // Minimal ZIP reader for Unity .xlsx uploads. Stored and deflated entries cover Excel exports.
+  for (let index = 0; index < totalEntries; index += 1) {
+    if (archiveBuffer.readUInt32LE(currentOffset) !== 0x02014b50) {
+      throw new Error("The Excel file format is not supported.");
+    }
+
+    const compressionMethod = archiveBuffer.readUInt16LE(currentOffset + 10);
+    const compressedSize = archiveBuffer.readUInt32LE(currentOffset + 20);
+    const fileNameLength = archiveBuffer.readUInt16LE(currentOffset + 28);
+    const extraFieldLength = archiveBuffer.readUInt16LE(currentOffset + 30);
+    const commentLength = archiveBuffer.readUInt16LE(currentOffset + 32);
+    const localHeaderOffset = archiveBuffer.readUInt32LE(currentOffset + 42);
+    const fileNameStart = currentOffset + 46;
+    const fileName = archiveBuffer.toString(
+      "utf8",
+      fileNameStart,
+      fileNameStart + fileNameLength,
+    );
+
+    if (archiveBuffer.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
+      throw new Error("The Excel file format is not supported.");
+    }
+
+    const localFileNameLength = archiveBuffer.readUInt16LE(localHeaderOffset + 26);
+    const localExtraFieldLength = archiveBuffer.readUInt16LE(localHeaderOffset + 28);
+    const dataStart =
+      localHeaderOffset + 30 + localFileNameLength + localExtraFieldLength;
+    const compressedData = archiveBuffer.subarray(dataStart, dataStart + compressedSize);
+
+    if (compressionMethod === 0) {
+      entries.set(fileName, compressedData);
+    } else if (compressionMethod === 8) {
+      entries.set(fileName, inflateRawSync(compressedData));
+    } else {
+      throw new Error("The Excel file uses an unsupported compression method.");
+    }
+
+    currentOffset += 46 + fileNameLength + extraFieldLength + commentLength;
+  }
+
+  return entries;
+};
+
+const parseUnityExcelContacts = (contentBase64: string): ParsedImportMember[] => {
+  const workbookBuffer = Buffer.from(contentBase64, "base64");
+
+  if (!workbookBuffer.length) {
+    throw new Error("The Unity Excel file is empty.");
+  }
+
+  const workbookEntries = unzipWorkbookEntries(workbookBuffer);
+  const worksheetPath = Array.from(workbookEntries.keys()).find((entryName) =>
+    /^xl\/worksheets\/[^/]+\.xml$/i.test(entryName),
+  );
+
+  if (!worksheetPath) {
+    throw new Error("The Unity Excel file does not include a worksheet.");
+  }
+
+  const sharedStrings = parseSharedStrings(
+    workbookEntries.get("xl/sharedStrings.xml")?.toString("utf8"),
+  );
+  const worksheetRows = parseWorksheetRows(
+    workbookEntries.get(worksheetPath)?.toString("utf8") ?? "",
+    sharedStrings,
+  );
+  const headerRowIndex = worksheetRows.findIndex((row) => {
+    const normalizedHeaders = row.map((cell) => normalizeWhitespace(cell).toLowerCase());
+    return normalizedHeaders.includes("member id") && normalizedHeaders.includes("member name");
+  });
+
+  if (headerRowIndex === -1) {
+    throw new Error("The Unity Excel file is missing the Member ID or Member Name column.");
+  }
+
+  const headers = worksheetRows[headerRowIndex] ?? [];
+  const headerIndexes = new Map<string, number>();
+
+  headers.forEach((header, index) => {
+    const normalizedHeader = normalizeWhitespace(header).toLowerCase();
+
+    if (normalizedHeader) {
+      headerIndexes.set(normalizedHeader, index);
+    }
+  });
+
+  const getRowValue = (row: string[], header: string) => {
+    const index = headerIndexes.get(header.toLowerCase());
+    return index === undefined ? "" : row[index] ?? "";
+  };
+
+  const importedMembers: ParsedImportMember[] = [];
+
+  for (const row of worksheetRows.slice(headerRowIndex + 1)) {
+    const memberId = normalizeUnityMemberId(getRowValue(row, "Member ID"));
+    const memberName = sanitizeImportedText(getRowValue(row, "Member Name"));
+    const email = sanitizeImportedText(getRowValue(row, "Email"));
+    const phone = sanitizeImportedText(getRowValue(row, "Phone Number"));
+
+    if (!memberId && !memberName && !email && !phone) {
+      continue;
+    }
+
+    if (!memberId) {
+      continue;
+    }
+
+    const postalCode = sanitizeImportedText(getRowValue(row, "Postal Code"));
+    const address = mergeAddressWithPostalCode(
+      sanitizeImportedText(getRowValue(row, "Address")),
+      postalCode,
+    );
+    const displayName =
+      memberName || email || phone || `Unity member ${memberId}`;
+    const splitName = splitDisplayName(displayName);
+    const firstName = splitName.firstName || displayName || "Imported";
+    const lastName = splitName.lastName;
+    const notes = buildImportedNotes([
+      ["Household Name", sanitizeImportedText(getRowValue(row, "Household Name"))],
+      ["Family ID", sanitizeImportedText(getRowValue(row, "Family ID"))],
+      ["Family Heads Info", sanitizeImportedText(getRowValue(row, "Family Heads Info"))],
+      ["Date of Birth", sanitizeImportedText(getRowValue(row, "Date of Birth"))],
+      ["Age", sanitizeImportedText(getRowValue(row, "Age"))],
+      ["Gender", sanitizeImportedText(getRowValue(row, "Gender"))],
+      ["Profession", sanitizeImportedText(getRowValue(row, "Profession"))],
+      ["Family Status", sanitizeImportedText(getRowValue(row, "Family Status"))],
+      ["Church", sanitizeImportedText(getRowValue(row, "Church"))],
+      ["Father of Confession", sanitizeImportedText(getRowValue(row, "Father of Confession"))],
+      ["Deaconship Rank", sanitizeImportedText(getRowValue(row, "Deaconship Rank"))],
+      ["Ordination Date", sanitizeImportedText(getRowValue(row, "Ordination Date"))],
+      ["Church Province", sanitizeImportedText(getRowValue(row, "Church Province"))],
+      ["Church City", sanitizeImportedText(getRowValue(row, "Church City"))],
+      ["Church Region", sanitizeImportedText(getRowValue(row, "Church Region"))],
+      ["Diocese", sanitizeImportedText(getRowValue(row, "Diocese"))],
+      ["Account Status", sanitizeImportedText(getRowValue(row, "Account Status"))],
+      ["Visibility", sanitizeImportedText(getRowValue(row, "Visibility"))],
+      ["Username", sanitizeImportedText(getRowValue(row, "Username"))],
+      ["Registration Date", sanitizeImportedText(getRowValue(row, "Registration Date"))],
+      ["Groups", sanitizeImportedText(getRowValue(row, "Groups"))],
+      ["Custom Flag", sanitizeImportedText(getRowValue(row, "Custom Flag"))],
+      ["License Plate", sanitizeImportedText(getRowValue(row, "License Plate"))],
+      ["Activated", sanitizeImportedText(getRowValue(row, "Activated"))],
+      ["Approved", sanitizeImportedText(getRowValue(row, "Approved"))],
+      ["Locked", sanitizeImportedText(getRowValue(row, "Locked"))],
+    ]);
+
+    importedMembers.push({
+      displayName,
+      firstName,
+      lastName,
+      email,
+      phone,
+      address,
+      notes,
+      dedupeByPhone: false,
+      importMessage: "Member imported from Unity Excel file.",
+      sk: `unity#${memberId}`,
+    });
+  }
+
+  return importedMembers;
+};
+
+const getContactsImportSourceType = (payload: Partial<ImportContactsPayload>) => {
+  if (payload.sourceType === "unity-excel" || payload.sourceType === "vcf") {
+    return payload.sourceType;
+  }
+
+  const fileName = normalizeWhitespace(payload.fileName).toLowerCase();
+  return fileName.endsWith(".xlsx") ? "unity-excel" : "vcf";
 };
 
 const defaultDynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({})) as AwsCommandClient;
@@ -4346,19 +4708,55 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     if (requestPath.endsWith("/contacts/import")) {
       const payload = JSON.parse(event.body ?? "{}") as Partial<ImportContactsPayload>;
+      const sourceType = getContactsImportSourceType(payload);
+      let parsedContacts: ParsedImportMember[] = [];
 
-      if (!payload.content || typeof payload.content !== "string") {
-        return {
-          statusCode: 400,
-          headers: responseHeaders,
-          body: JSON.stringify({
-            message: "A VCF file content payload is required.",
-            time,
-          }),
-        };
+      if (sourceType === "unity-excel") {
+        if (!payload.contentBase64 || typeof payload.contentBase64 !== "string") {
+          return {
+            statusCode: 400,
+            headers: responseHeaders,
+            body: JSON.stringify({
+              message: "A Unity Excel file payload is required.",
+              time,
+            }),
+          };
+        }
+
+        try {
+          parsedContacts = parseUnityExcelContacts(payload.contentBase64);
+        } catch (error) {
+          return {
+            statusCode: 400,
+            headers: responseHeaders,
+            body: JSON.stringify({
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Unable to read the Unity Excel file.",
+              time,
+            }),
+          };
+        }
+      } else {
+        if (!payload.content || typeof payload.content !== "string") {
+          return {
+            statusCode: 400,
+            headers: responseHeaders,
+            body: JSON.stringify({
+              message: "A VCF file content payload is required.",
+              time,
+            }),
+          };
+        }
+
+        parsedContacts = parseVcfContacts(payload.content).map((contact) => ({
+          ...contact,
+          dedupeByPhone: true,
+          importMessage: "Member imported from contacts file.",
+        }));
       }
 
-      const parsedContacts = parseVcfContacts(payload.content);
       const existingMembersResponse = await dynamoClient.send(
         new QueryCommand({
           TableName: tableName,
@@ -4372,6 +4770,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       const emailKeys = new Set<string>();
       const phoneKeys = new Set<string>();
       const nameKeys = new Set<string>();
+      const memberSkKeys = new Set<string>();
 
       for (const item of existingMembers) {
         let memberData: StoredMemberData = {};
@@ -4388,6 +4787,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           memberData.firstName,
           memberData.lastName,
         );
+        const memberSkKey = normalizeWhitespace(item.sk).toLowerCase();
 
         if (emailKey) {
           emailKeys.add(emailKey);
@@ -4399,6 +4799,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
         if (nameKey) {
           nameKeys.add(nameKey);
+        }
+
+        if (memberSkKey) {
+          memberSkKeys.add(memberSkKey);
         }
       }
 
@@ -4413,6 +4817,8 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           contact.lastName,
           contact.displayName,
         );
+        const memberSk = normalizeWhitespace(contact.sk);
+        const memberSkKey = memberSk.toLowerCase();
         const contactLabel =
           contact.displayName ||
           normalizeWhitespace([contact.firstName, contact.lastName].join(" ")) ||
@@ -4420,8 +4826,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
           contact.phone ||
           "Imported contact";
         const alreadyExists =
+          (memberSkKey && memberSkKeys.has(memberSkKey)) ||
           (emailKey && emailKeys.has(emailKey)) ||
-          (phoneKey && phoneKeys.has(phoneKey)) ||
+          (contact.dedupeByPhone && phoneKey && phoneKeys.has(phoneKey)) ||
           (nameKey && nameKeys.has(nameKey));
 
         if (alreadyExists) {
@@ -4434,12 +4841,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             TableName: tableName,
             Item: {
               pk: "CONGREGATION",
-              sk: `MEMBER#${crypto.randomUUID()}`,
+              sk: memberSk || `MEMBER#${crypto.randomUUID()}`,
               data: JSON.stringify({
                 history: prependHistoryEntry(undefined, {
                   timestamp: time,
                   action: "member_created",
-                  message: "Member imported from contacts file.",
+                  message: contact.importMessage,
                 }),
                 firstName: contact.firstName,
                 lastName: contact.lastName,
@@ -4468,6 +4875,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         if (nameKey) {
           nameKeys.add(nameKey);
         }
+
+        if (memberSkKey) {
+          memberSkKeys.add(memberSkKey);
+        }
       }
 
       return {
@@ -4476,10 +4887,14 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         body: JSON.stringify({
           message:
             importedMembers.length > 0
-              ? `Imported ${importedMembers.length} contact${
+              ? `Imported ${importedMembers.length} ${
+                  sourceType === "unity-excel" ? "member" : "contact"
+                }${
                   importedMembers.length === 1 ? "" : "s"
                 }.`
-              : "No new contacts were imported.",
+              : sourceType === "unity-excel"
+                ? "No new members were imported."
+                : "No new contacts were imported.",
           time,
           processedCount: parsedContacts.length,
           importedCount: importedMembers.length,
